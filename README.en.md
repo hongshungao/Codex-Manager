@@ -71,3 +71,6 @@ Artifacts:
 - Installer bundles: `apps/src-tauri/target/release/bundle/`
 - Portable build: `portable/`
 
+## Contact
+![Personal](assets/images/personal.jpg)
+![Group](assets/images/group.jpg)
