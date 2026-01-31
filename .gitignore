@@ -16,7 +16,9 @@
 /apps/dist/
 /apps/.vite/
 /apps/.turbo/
-
+#docs
+spec/*
+docs/*
 # Build outputs
 /portable/
 
