@@ -87,3 +87,5 @@ cargo build -p gpttools-service --release
 ## 联系我们
 ![个人](assets/images/personal.jpg)
 ![交流群](assets/images/group.jpg)
+
+有兴趣的可以关注我微信公众号 七线牛马
