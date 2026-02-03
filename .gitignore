@@ -22,6 +22,9 @@ docs/*
 # Build outputs
 /portable/
 
+# Worktrees
+/.worktrees/
+
 # Docs/specs (keep repo clean)
 /docs/
 /specs/
