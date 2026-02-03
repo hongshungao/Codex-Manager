@@ -1,36 +1,64 @@
-@media (max-width: 960px) {
-  .service-setup {
+@media (max-width: 1024px) {
+  .top-nav {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .top-actions {
     width: 100%;
-    justify-content: flex-start;
+    justify-content: center;
   }
 
-  .service-meta {
+  .content {
+    padding: 24px 20px 32px;
+  }
+}
+
+@media (max-width: 860px) {
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .accounts-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .toolbar-left {
     width: 100%;
   }
 
-  .usage-row {
-    grid-template-columns: 1fr;
-  }
-
-  .usage-header {
-    display: none;
-  }
-
-  .usage-cell {
-    grid-template-columns: 1fr;
-  }
-
-  .usage-meta {
-    text-align: left;
+  .search-field input {
+    width: 100%;
   }
 }
 
 @media (max-width: 720px) {
+  .pill-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .service-setup {
-    flex-wrap: wrap;
+    width: 100%;
   }
 
   .service-setup input {
     width: 100%;
+  }
+
+  .stats-grid,
+  .dashboard-duo {
+    grid-template-columns: 1fr;
+  }
+
+  .table.account-table,
+  .table.api-table {
+    grid-template-columns: 1fr;
+  }
+
+  .table-header {
+    display: none;
   }
 }

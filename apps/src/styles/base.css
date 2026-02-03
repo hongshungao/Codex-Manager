@@ -1,19 +1,20 @@
 :root {
-  --ink: #1f1f1f;
-  --muted: #8c8c8c;
-  --paper: #f5f7fb;
-  --paper-2: #f5f7fb;
-  --accent: #1677ff;
-  --accent-2: #0958d9;
-  --accent-3: #1f1f1f;
-  --danger: #ff4d4f;
-  --ok: #52c41a;
+  --ink: #1b2430;
+  --ink-strong: #0f172a;
+  --muted: #7b8794;
+  --surface: #f4f7fb;
+  --surface-2: #eef3f9;
   --card: #ffffff;
-  --border: #f0f0f0;
-  --shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-  --sidebar: #001529;
-  --sidebar-muted: rgba(255, 255, 255, 0.65);
-  --sidebar-active: #1677ff;
+  --border: rgba(15, 23, 42, 0.08);
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --accent: #3b82f6;
+  --accent-2: #22c55e;
+  --accent-3: #38bdf8;
+  --danger: #ef4444;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --paper: var(--surface);
+  --paper-2: var(--surface-2);
 }
 
 * {
@@ -22,8 +23,8 @@
 
 body {
   margin: 0;
-  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: "HarmonyOS Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   color: var(--ink);
-  background: var(--paper);
+  background: radial-gradient(circle at 15% 10%, #f7f9ff, #f1f5fb 45%, #eef2f9 100%);
   min-height: 100vh;
 }

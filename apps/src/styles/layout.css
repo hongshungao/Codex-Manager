@@ -1,15 +1,89 @@
-.actions {
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+}
+
+.brand-meta h1 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--ink-strong);
+}
+
+.brand-meta span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.content {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  padding: 26px 28px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   flex-wrap: wrap;
+}
+
+.page-title h2 {
+  margin: 0;
+  font-size: 28px;
+  color: var(--ink-strong);
+}
+
+.page-title .hint {
+  margin: 6px 0 0;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .service-setup {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  background: #fff;
 }
 
 .service-setup input {
@@ -30,8 +104,4 @@
   flex-direction: column;
   gap: 4px;
   min-width: 120px;
-}
-
-.service-meta .hint {
-  min-height: 14px;
 }
