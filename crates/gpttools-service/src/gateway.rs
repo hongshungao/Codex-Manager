@@ -13,6 +13,10 @@ use crate::storage_helpers::{hash_platform_key, open_storage};
 use crate::usage_refresh;
 use gpttools_core::auth::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
 
+fn is_openai_api_base(_base: &str) -> bool {
+    false
+}
+
 pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String> {
     // 处理代理请求（鉴权后转发到上游）
     let debug = std::env::var("GPTTOOLS_GATEWAY_DEBUG").is_ok();
@@ -36,14 +40,33 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
 
     let Some(platform_key) = extract_platform_key(&request) else {
         if debug {
+            let remote = request
+                .remote_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+            let auth_scheme = request
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Authorization"))
+                .and_then(|h| h.value.as_str().split_whitespace().next())
+                .unwrap_or("<none>");
+            let header_names = request
+                .headers()
+                .iter()
+                .map(|h| h.field.as_str().as_str())
+                .collect::<Vec<_>>()
+                .join(",");
             eprintln!(
-                "gateway auth missing: url={}, has_auth={}, has_x_api_key={}",
+                "gateway auth missing: url={}, remote={}, has_auth={}, auth_scheme={}, has_x_api_key={}, headers=[{}]",
                 request.url(),
+                remote,
                 request
                     .headers()
                     .iter()
                     .any(|h| h.field.equiv("Authorization")),
+                auth_scheme,
                 request.headers().iter().any(|h| h.field.equiv("x-api-key")),
+                header_names,
             );
         }
         let response = Response::from_string("missing api key").with_status_code(401);
@@ -89,16 +112,7 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string());
-    let upstream_fallback_base = std::env::var("GPTTOOLS_UPSTREAM_FALLBACK_BASE_URL")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| {
-            if upstream_base.contains("chatgpt.com/backend-api/codex") {
-                Some("https://api.openai.com/v1".to_string())
-            } else {
-                None
-            }
-        });
+    let upstream_fallback_base: Option<String> = None;
     let base = upstream_base.trim_end_matches('/');
     let path = request.url();
     let url = if base.contains("/backend-api/codex") && path.starts_with("/v1/") {
@@ -110,11 +124,7 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
     } else {
         format!("{}{}", base, path)
     };
-    let url_alt = if base.contains("/backend-api/codex") && path.starts_with("/v1/") {
-        Some(format!("{}{}", base, path))
-    } else {
-        None
-    };
+    let url_alt: Option<String> = None;
 
     let method = Method::from_bytes(request.method().as_str().as_bytes())
         .map_err(|_| "unsupported method".to_string())?;
@@ -124,6 +134,37 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
 
     let candidate_count = candidates.len();
     for (idx, (account, mut token)) in candidates.into_iter().enumerate() {
+        if is_openai_api_base(base) {
+            match try_openai_fallback(
+                &client,
+                &storage,
+                &method,
+                &request,
+                &body,
+                base,
+                &account,
+                &mut token,
+                upstream_cookie.as_deref(),
+                debug,
+            ) {
+                Ok(Some(resp)) => {
+                    return respond_with_upstream(request, resp);
+                }
+                Ok(None) => {
+                    let response = Response::from_string("openai upstream unavailable")
+                        .with_status_code(502);
+                    let _ = request.respond(response);
+                    return Ok(());
+                }
+                Err(err) => {
+                    let response = Response::from_string(format!("openai upstream error: {err}"))
+                        .with_status_code(502);
+                    let _ = request.respond(response);
+                    return Ok(());
+                }
+            }
+        }
+
         let mut builder = client.request(method.clone(), &url);
         let mut has_user_agent = false;
 
@@ -647,4 +688,6 @@ mod availability_tests {
         assert_eq!(url, "https://api.openai.com/v1/models");
         assert!(alt.is_none());
     }
+
+
 }
