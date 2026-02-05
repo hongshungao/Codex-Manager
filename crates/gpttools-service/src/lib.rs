@@ -29,7 +29,7 @@ mod usage_list;
 mod usage_refresh;
 mod gateway;
 
-pub const DEFAULT_ADDR: &str = "localhost:5050";
+pub const DEFAULT_ADDR: &str = "localhost:48760";
 
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -75,7 +75,12 @@ pub fn clear_shutdown_flag() {
 
 pub fn request_shutdown(addr: &str) {
     SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+    // Best-effort wakeups for both IPv4 and IPv6 loopback so whichever listener is active exits.
     let _ = send_shutdown_request(addr);
+    if let Some(port) = addr.trim().strip_prefix("localhost:") {
+        let _ = send_shutdown_request(&format!("127.0.0.1:{port}"));
+        let _ = send_shutdown_request(&format!("[::1]:{port}"));
+    }
 }
 
 fn send_shutdown_request(addr: &str) -> std::io::Result<()> {

@@ -4,6 +4,8 @@ export const state = {
   serviceConnected: false,
   serviceBusy: false,
   serviceProbeId: 0,
+  serviceLastError: "",
+  serviceLastErrorAt: 0,
   currentPage: "dashboard",
   accountList: [],
   usageList: [],

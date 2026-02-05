@@ -188,13 +188,13 @@ mod tests {
 
         std::env::remove_var("GPTTOOLS_REDIRECT_URI");
         std::env::set_var("GPTTOOLS_LOGIN_ADDR", "localhost:0");
-        std::env::set_var("GPTTOOLS_SERVICE_ADDR", "localhost:5050");
+        std::env::set_var("GPTTOOLS_SERVICE_ADDR", "localhost:48760");
 
         let uri = resolve_redirect_uri().expect("redirect uri");
         let url = Url::parse(&uri).expect("parse redirect uri");
         assert_eq!(url.host_str(), Some("localhost"));
         let port = url.port_or_known_default().expect("port");
-        assert_ne!(port, 5050);
+        assert_ne!(port, 48760);
         assert_eq!(url.path(), "/auth/callback");
 
         match prev_redirect {

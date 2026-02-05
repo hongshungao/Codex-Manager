@@ -10,7 +10,22 @@ use std::thread;
 
 #[tauri::command]
 fn service_initialize(addr: Option<String>) -> Result<serde_json::Value, String> {
-  rpc_call("initialize", addr, None)
+  let v = rpc_call("initialize", addr, None)?;
+  // 连接探测必须确认对端确实是 gpttools-service，避免端口被其他服务占用时误判“已连接”。
+  let server_name = v
+    .get("result")
+    .and_then(|r| r.get("server_name"))
+    .and_then(|s| s.as_str())
+    .unwrap_or("");
+  if server_name != "gpttools-service" {
+    let hint = if server_name.is_empty() {
+      "missing server_name"
+    } else {
+      server_name
+    };
+    return Err(format!("Port is in use or unexpected service responded ({hint})"));
+  }
+  Ok(v)
 }
 
 #[tauri::command]
@@ -296,7 +311,7 @@ fn resolve_service_addr(addr: Option<String>) -> Result<String, String> {
       return Ok(addr);
     }
   }
-  Ok("localhost:5050".to_string())
+  Ok(gpttools_service::DEFAULT_ADDR.to_string())
 }
 
 fn rpc_call(

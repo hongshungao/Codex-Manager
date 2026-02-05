@@ -27,6 +27,25 @@ export function normalizeAddr(raw) {
   return value;
 }
 
+function formatConnectError(err) {
+  const raw = err && typeof err === "object" && "message" in err ? err.message : String(err);
+  const text = String(raw || "").trim();
+  if (!text) return "unknown";
+  const firstLine = text.split("\n")[0].trim();
+  const lower = firstLine.toLowerCase();
+  if (lower.includes("timed out")) return "连接超时";
+  if (lower.includes("connection refused") || lower.includes("actively refused")) return "连接被拒绝";
+  if (lower.includes("empty response")) return "空响应";
+  if (lower.includes("invalid service address")) return "地址不合法";
+  return firstLine.length > 120 ? `${firstLine.slice(0, 120)}...` : firstLine;
+}
+
+function isExpectedInitializeResult(res) {
+  if (!res || typeof res !== "object") return false;
+  if (!("server_name" in res)) return false;
+  return res.server_name === "gpttools-service";
+}
+
 // 初始化连接（不负责启动 service）
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -52,14 +71,28 @@ export function createConnectionService(deps) {
     let lastError = null;
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
-        await apiClient.serviceInitialize();
+        const res = await apiClient.serviceInitialize();
+        if (!isExpectedInitializeResult(res)) {
+          const serverName =
+            res && typeof res === "object" && "server_name" in res ? String(res.server_name) : "";
+          const hint = serverName ? `server_name=${serverName}` : "响应不匹配";
+          throw new Error(`端口可能被其他服务占用（${hint}）`);
+        }
         stateRef.serviceConnected = true;
+        stateRef.serviceLastError = "";
+        stateRef.serviceLastErrorAt = 0;
         setStatusFn("", true);
         setServiceHintFn("", false);
         return true;
       } catch (err) {
         lastError = err;
         stateRef.serviceConnected = false;
+        stateRef.serviceLastError = formatConnectError(err);
+        stateRef.serviceLastErrorAt = Date.now();
+        if (silent && attempt < retries) {
+          setStatusFn(`连接中...（重试 ${attempt + 1}/${retries + 1}）`, false);
+          setServiceHintFn(`正在重试：${stateRef.serviceLastError}`, false);
+        }
         if (attempt < retries) {
           await waitFn(delayMs);
         }
@@ -68,7 +101,8 @@ export function createConnectionService(deps) {
 
     setStatusFn("", false);
     if (!silent) {
-      setServiceHintFn("连接失败，请检查端口或 service 状态", true);
+      const reason = stateRef.serviceLastError ? `：${stateRef.serviceLastError}` : "";
+      setServiceHintFn(`连接失败${reason}，请检查端口或 service 状态`, true);
     }
     if (lastError) {
       return false;

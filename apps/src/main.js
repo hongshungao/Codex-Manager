@@ -296,7 +296,8 @@ async function handleStartService() {
       setServiceBusy(false);
       updateServiceToggle();
       if (!ok) {
-        setServiceHint("连接失败，请检查端口或 service 状态", true);
+        const reason = state.serviceLastError ? `：${state.serviceLastError}` : "";
+        setServiceHint(`连接失败${reason}，请检查端口或 service 状态`, true);
         return;
       }
       void refreshAll();
@@ -336,7 +337,7 @@ function restoreServiceAddr() {
     syncServiceAddrFromInput();
     return;
   }
-  dom.serviceAddrInput.value = "5050";
+  dom.serviceAddrInput.value = "48760";
   syncServiceAddrFromInput();
 }
 

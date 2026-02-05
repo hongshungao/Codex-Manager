@@ -25,6 +25,12 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
         return Ok(());
     }
 
+    // IMPORTANT: always consume request body before early-returning with auth errors.
+    // Some clients (e.g. codex-cli) will report "stream disconnected before completion"
+    // if the server responds and closes while the request body is still being sent.
+    let mut body = Vec::new();
+    let _ = request.as_reader().read_to_end(&mut body);
+
     let Some(platform_key) = extract_platform_key(&request) else {
         if debug {
             eprintln!(
@@ -83,17 +89,22 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
     let base = upstream_base.trim_end_matches('/');
     let path = request.url();
     let url = if base.contains("/backend-api/codex") && path.starts_with("/v1/") {
+        // Historically Codex upstream accepted paths without the "/v1" prefix.
+        // Keep this as primary, but we'll retry with "/v1" kept if the upstream rejects it.
         format!("{}{}", base, path.trim_start_matches("/v1"))
     } else if base.ends_with("/v1") && path.starts_with("/v1") {
         format!("{}{}", base.trim_end_matches("/v1"), path)
     } else {
         format!("{}{}", base, path)
     };
+    let url_alt = if base.contains("/backend-api/codex") && path.starts_with("/v1/") {
+        Some(format!("{}{}", base, path))
+    } else {
+        None
+    };
 
     let method = Method::from_bytes(request.method().as_str().as_bytes())
         .map_err(|_| "unsupported method".to_string())?;
-    let mut body = Vec::new();
-    let _ = request.as_reader().read_to_end(&mut body);
 
     let client = Client::new();
     let upstream_cookie = std::env::var("GPTTOOLS_UPSTREAM_COOKIE").ok();
@@ -150,7 +161,7 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
             builder = builder.body(body.clone());
         }
 
-        let upstream = match builder.send() {
+        let mut upstream = match builder.send() {
             Ok(resp) => resp,
             Err(err) => {
                 let response = Response::from_string(format!("upstream error: {err}"))
@@ -160,13 +171,68 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
             }
         };
 
-        let status = upstream.status();
+        let mut status = upstream.status();
         if !status.is_success() {
             log::warn!(
                 "gateway upstream non-success: status={}, account_id={}",
                 status,
                 account.id
             );
+        }
+        if (status.as_u16() == 400 || status.as_u16() == 404) && url_alt.is_some() {
+            let alt_url = url_alt.as_ref().unwrap();
+            if debug {
+                eprintln!("gateway upstream retry: url={alt_url}");
+            }
+            let mut retry = client.request(method.clone(), alt_url);
+            let mut has_user_agent = false;
+            for header in request.headers() {
+                if header.field.equiv("Authorization")
+                    || header.field.equiv("x-api-key")
+                    || header.field.equiv("Host")
+                    || header.field.equiv("Content-Length")
+                {
+                    continue;
+                }
+                if header.field.equiv("User-Agent") {
+                    has_user_agent = true;
+                }
+                if let (Ok(name), Ok(value)) = (
+                    HeaderName::from_bytes(header.field.as_str().as_bytes()),
+                    HeaderValue::from_str(header.value.as_str()),
+                ) {
+                    retry = retry.header(name, value);
+                }
+            }
+            if !has_user_agent {
+                retry = retry.header("User-Agent", "codex-cli");
+            }
+            if let Some(cookie) = upstream_cookie.as_ref() {
+                if !cookie.trim().is_empty() {
+                    retry = retry.header("Cookie", cookie);
+                }
+            }
+            retry = retry.header("Authorization", format!("Bearer {}", auth_token));
+            if let Some(acc) = account
+                .chatgpt_account_id
+                .as_deref()
+                .or_else(|| account.workspace_id.as_deref())
+            {
+                retry = retry.header("ChatGPT-Account-Id", acc);
+            }
+            if !body.is_empty() {
+                retry = retry.body(body.clone());
+            }
+            match retry.send() {
+                Ok(resp) => upstream = resp,
+                Err(err) => {
+                    let response = Response::from_string(format!("upstream error: {err}"))
+                        .with_status_code(502);
+                    let _ = request.respond(response);
+                    return Ok(());
+                }
+            }
+            status = upstream.status();
         }
         if status.is_success() {
             return respond_with_upstream(request, upstream);

@@ -16,7 +16,7 @@ test("startService retries initialize before surfacing error", async () => {
     serviceInitialize: async () => {
       initCalls += 1;
       if (initCalls < 3) throw new Error("not ready");
-      return {};
+      return { server_name: "gpttools-service", version: "test" };
     },
     serviceStop: async () => {},
   };
@@ -76,7 +76,7 @@ test("waitForConnection can be silent and succeed after retries", async () => {
     serviceInitialize: async () => {
       initCalls += 1;
       if (initCalls < 2) throw new Error("down");
-      return {};
+      return { server_name: "gpttools-service", version: "test" };
     },
     serviceStart: async () => {},
     serviceStop: async () => {},
@@ -96,5 +96,35 @@ test("waitForConnection can be silent and succeed after retries", async () => {
 
   assert.equal(ok, true);
   assert.equal(initCalls, 2);
+  assert.equal(hintCalls.some((item) => item[1] === true), false);
+});
+
+test("waitForConnection shows retry reason even when silent", async () => {
+  let initCalls = 0;
+  const api = {
+    serviceInitialize: async () => {
+      initCalls += 1;
+      if (initCalls < 3) throw new Error("connection timed out");
+      return { server_name: "gpttools-service", version: "test" };
+    },
+    serviceStart: async () => {},
+    serviceStop: async () => {},
+  };
+  const state = { serviceConnected: false, serviceAddr: "" };
+  const hintCalls = [];
+
+  const service = createConnectionService({
+    api,
+    state,
+    setStatus: () => {},
+    setServiceHint: (text, isError) => hintCalls.push([text, isError]),
+    wait: async () => {},
+  });
+
+  const ok = await service.waitForConnection({ retries: 2, silent: true });
+
+  assert.equal(ok, true);
+  assert.equal(initCalls, 3);
+  assert.ok(hintCalls.some((item) => item[0] && item[0].includes("正在重试：")));
   assert.equal(hintCalls.some((item) => item[1] === true), false);
 });
