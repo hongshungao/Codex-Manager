@@ -21,6 +21,8 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 ![Dashboard](assets/images/dashboard.png)
 ![Accounts](assets/images/accounts.png)
 ![Platform Key](assets/images/platform-key.png)
+![Logs](assets/images/log.png)
+![Themes](assets/images/themes.png)
 
 ## Tech Stack
 - Frontend: Vite + vanilla JS

@@ -22,6 +22,8 @@
 ![仪表盘](assets/images/dashboard.png)
 ![账号管理](assets/images/accounts.png)
 ![平台 Key](assets/images/platform-key.png)
+![日志视图](assets/images/log.png)
+![主题切换](assets/images/themes.png)
 
 ## 技术栈
 - 前端：Vite + 原生 JS + 自定义 UI
@@ -84,7 +86,7 @@ cargo build -p gpttools-service --release
 - 端口被占用：修改顶部端口输入框后重新启动服务
 - 用量查询失败：稍后重试，或检查服务状态与网络
 
-## 联系我们
+## 联系我们 支持的话可以通过交流群团购team
 ![个人](assets/images/personal.jpg)
 ![交流群](assets/images/group.jpg)
 
