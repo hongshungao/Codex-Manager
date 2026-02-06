@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.1.0)"
+        description: "Release tag (e.g. v0.0.6)"
         required: true
         type: string
       ref:
         description: "Git ref/branch/sha to build"
         required: false
-        default: "master"
+        default: "main"
         type: string
 
 permissions:
