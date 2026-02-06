@@ -28,6 +28,16 @@ fn is_loopback_origin(origin: &str) -> bool {
     matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
 }
 
+fn allow_unauthenticated_rpc() -> bool {
+    matches!(
+        std::env::var("GPTTOOLS_RPC_ALLOW_UNAUTH")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
+}
+
 pub fn handle_rpc(mut request: Request) {
     if request.method().as_str() != "POST" {
         let _ = request.respond(Response::from_string("{}").with_status_code(405));
@@ -38,13 +48,19 @@ pub fn handle_rpc(mut request: Request) {
         return;
     }
 
-    let Some(token) = get_header_value(&request, "X-Gpttools-Rpc-Token") else {
-        let _ = request.respond(Response::from_string("{}").with_status_code(401));
-        return;
-    };
-    if !crate::rpc_auth_token_matches(token) {
-        let _ = request.respond(Response::from_string("{}").with_status_code(401));
-        return;
+    match get_header_value(&request, "X-Gpttools-Rpc-Token") {
+        Some(token) => {
+            if !crate::rpc_auth_token_matches(token) {
+                let _ = request.respond(Response::from_string("{}").with_status_code(401));
+                return;
+            }
+        }
+        None => {
+            if !allow_unauthenticated_rpc() {
+                let _ = request.respond(Response::from_string("{}").with_status_code(401));
+                return;
+            }
+        }
     }
 
     if let Some(fetch_site) = get_header_value(&request, "Sec-Fetch-Site") {

@@ -82,8 +82,10 @@ fn ensure_login_server_with_addr(addr: &str) -> Result<LoginServerInfo, String> 
     if let Some(info) = guard.as_ref() {
         return Ok(info.clone());
     }
-    let (server, info) = bind_login_server(addr)?;
-    let _ = std::thread::spawn(move || run_login_server(server));
+    let (servers, info) = bind_login_server(addr)?;
+    for server in servers {
+        let _ = std::thread::spawn(move || run_login_server(server));
+    }
     *guard = Some(info.clone());
     Ok(info)
 }
@@ -102,53 +104,106 @@ fn allow_non_loopback_login_addr() -> bool {
     )
 }
 
-fn bind_login_server(addr: &str) -> Result<(Server, LoginServerInfo), String> {
+fn server_port(server: &Server) -> Result<u16, String> {
+    server
+        .server_addr()
+        .to_ip()
+        .map(|a| a.port())
+        .ok_or_else(|| "login server missing port".to_string())
+}
+
+fn try_bind_login_server(
+    addr: &str,
+    servers: &mut Vec<Server>,
+    addr_in_use: &mut bool,
+    last_err: &mut Option<String>,
+) -> Result<Option<u16>, String> {
+    match Server::http(addr) {
+        Ok(server) => {
+            let port = server_port(&server)?;
+            servers.push(server);
+            Ok(Some(port))
+        }
+        Err(err) => {
+            *addr_in_use |= is_addr_in_use(err.as_ref());
+            if last_err.is_none() {
+                *last_err = Some(err.to_string());
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn bind_localhost_login_servers(port: u16) -> Result<(Vec<Server>, LoginServerInfo), String> {
+    let mut addr_in_use = false;
+    let mut last_err: Option<String> = None;
+    let mut servers: Vec<Server> = Vec::new();
+    let mut selected_port = port;
+
+    if port == 0 {
+        if let Some(v4_port) = try_bind_login_server(
+            "127.0.0.1:0",
+            &mut servers,
+            &mut addr_in_use,
+            &mut last_err,
+        )? {
+            selected_port = v4_port;
+            let _ = try_bind_login_server(
+                &format!("[::1]:{selected_port}"),
+                &mut servers,
+                &mut addr_in_use,
+                &mut last_err,
+            )?;
+        } else if let Some(v6_port) =
+            try_bind_login_server("[::1]:0", &mut servers, &mut addr_in_use, &mut last_err)?
+        {
+            selected_port = v6_port;
+            let _ = try_bind_login_server(
+                &format!("127.0.0.1:{selected_port}"),
+                &mut servers,
+                &mut addr_in_use,
+                &mut last_err,
+            )?;
+        }
+    } else {
+        let _ = try_bind_login_server(
+            &format!("127.0.0.1:{port}"),
+            &mut servers,
+            &mut addr_in_use,
+            &mut last_err,
+        )?;
+        let _ = try_bind_login_server(
+            &format!("[::1]:{port}"),
+            &mut servers,
+            &mut addr_in_use,
+            &mut last_err,
+        )?;
+    }
+
+    if !servers.is_empty() {
+        if selected_port == 0 {
+            selected_port = server_port(&servers[0])?;
+        }
+        return Ok((servers, LoginServerInfo { port: selected_port }));
+    }
+    if addr_in_use {
+        return Err(format!(
+            "登录回调端口 {port} 已被占用，请关闭占用程序或修改 GPTTOOLS_LOGIN_ADDR"
+        ));
+    }
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+    Err("failed to bind login server".to_string())
+}
+
+fn bind_login_server(addr: &str) -> Result<(Vec<Server>, LoginServerInfo), String> {
     if let Ok(url) = Url::parse(&format!("http://{addr}")) {
         let host = url.host_str().unwrap_or("localhost");
         let port = url.port_or_known_default().unwrap_or(1455);
         if host == "localhost" {
-            let mut addr_in_use = false;
-            let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
-            match Server::http(format!("[::1]:{port}")) {
-                Ok(server) => {
-                    let port = server
-                        .server_addr()
-                        .to_ip()
-                        .map(|a| a.port())
-                        .ok_or_else(|| "login server missing port".to_string())?;
-                    return Ok((server, LoginServerInfo { port }));
-                }
-                Err(err) => {
-                    addr_in_use |= is_addr_in_use(err.as_ref());
-                    if last_err.is_none() {
-                        last_err = Some(err);
-                    }
-                }
-            }
-            match Server::http(format!("127.0.0.1:{port}")) {
-                Ok(server) => {
-                    let port = server
-                        .server_addr()
-                        .to_ip()
-                        .map(|a| a.port())
-                        .ok_or_else(|| "login server missing port".to_string())?;
-                    return Ok((server, LoginServerInfo { port }));
-                }
-                Err(err) => {
-                    addr_in_use |= is_addr_in_use(err.as_ref());
-                    if last_err.is_none() {
-                        last_err = Some(err);
-                    }
-                }
-            }
-            if addr_in_use {
-                return Err(format!(
-                    "登录回调端口 {port} 已被占用，请关闭占用程序或修改 GPTTOOLS_LOGIN_ADDR"
-                ));
-            }
-            if let Some(err) = last_err {
-                return Err(err.to_string());
-            }
+            // 中文注释：localhost 绑定双栈，避免浏览器在 IPv4/IPv6 间切换时回调命中失败。
+            return bind_localhost_login_servers(port);
         } else if !is_loopback_host(host) && !allow_non_loopback_login_addr() {
             return Err(format!(
                 "登录回调地址仅允许 loopback（localhost/127.0.0.1/::1），当前为 {host}"
@@ -157,12 +212,8 @@ fn bind_login_server(addr: &str) -> Result<(Server, LoginServerInfo), String> {
     }
 
     let server = Server::http(addr).map_err(|e| e.to_string())?;
-    let port = server
-        .server_addr()
-        .to_ip()
-        .map(|a| a.port())
-        .ok_or_else(|| "login server missing port".to_string())?;
-    Ok((server, LoginServerInfo { port }))
+    let port = server_port(&server)?;
+    Ok((vec![server], LoginServerInfo { port }))
 }
 
 fn is_addr_in_use(err: &(dyn std::error::Error + 'static)) -> bool {
