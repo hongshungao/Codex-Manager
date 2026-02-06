@@ -144,11 +144,21 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
         return Ok(());
     };
 
-    let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let Some(storage) = open_storage() else {
+        let response = Response::from_string("storage unavailable").with_status_code(500);
+        let _ = request.respond(response);
+        return Ok(());
+    };
     let key_hash = hash_platform_key(&platform_key);
-    let api_key = storage
-        .find_api_key_by_hash(&key_hash)
-        .map_err(|e| e.to_string())?;
+    let api_key = match storage.find_api_key_by_hash(&key_hash) {
+        Ok(v) => v,
+        Err(err) => {
+            let response = Response::from_string(format!("storage read failed: {err}"))
+                .with_status_code(500);
+            let _ = request.respond(response);
+            return Ok(());
+        }
+    };
     let Some(api_key) = api_key else {
         if debug {
             eprintln!(
@@ -169,7 +179,7 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
         let _ = request.respond(response);
         return Ok(());
     }
-    let _ = storage.update_api_key_last_used(&key_hash);
+    // 按当前策略取消每次请求都更新 api_keys.last_used_at，减少并发写入冲突。
 
     let path = normalize_models_path(request.url());
     body = apply_request_overrides(
@@ -184,7 +194,15 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
     let reasoning_for_log =
         extract_request_reasoning_effort(&body).or(api_key.reasoning_effort.clone());
 
-    let candidates = collect_gateway_candidates(&storage)?;
+    let candidates = match collect_gateway_candidates(&storage) {
+        Ok(v) => v,
+        Err(err) => {
+            let response = Response::from_string(format!("candidate resolve failed: {err}"))
+                .with_status_code(500);
+            let _ = request.respond(response);
+            return Ok(());
+        }
+    };
     if candidates.is_empty() {
         write_request_log(
             &storage,
@@ -220,8 +238,14 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
         });
     let (url, url_alt) = compute_upstream_url(&upstream_base, &path);
 
-    let method = Method::from_bytes(request.method().as_str().as_bytes())
-        .map_err(|_| "unsupported method".to_string())?;
+    let method = match Method::from_bytes(request.method().as_str().as_bytes()) {
+        Ok(v) => v,
+        Err(_) => {
+            let response = Response::from_string("unsupported method").with_status_code(405);
+            let _ = request.respond(response);
+            return Ok(());
+        }
+    };
 
     let client = Client::new();
     let upstream_cookie = std::env::var("GPTTOOLS_UPSTREAM_COOKIE").ok();

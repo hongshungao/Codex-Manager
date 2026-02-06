@@ -1,6 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct Account {
@@ -97,11 +98,14 @@ pub struct Storage {
 impl Storage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path)?;
+        // 中文注释：并发写入时给 SQLite 一点等待时间，避免瞬时 lock 导致请求直接失败。
+        conn.busy_timeout(Duration::from_millis(3000))?;
         Ok(Self { conn })
     }
 
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
+        conn.busy_timeout(Duration::from_millis(3000))?;
         Ok(Self { conn })
     }
 
