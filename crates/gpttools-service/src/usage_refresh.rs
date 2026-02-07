@@ -15,6 +15,8 @@ use crate::auth_tokens::obtain_api_key;
 use crate::storage_helpers::open_storage;
 
 static USAGE_POLLING_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+static GATEWAY_KEEPALIVE_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+const DEFAULT_GATEWAY_KEEPALIVE_INTERVAL_SECS: u64 = 180;
 
 pub(crate) fn ensure_usage_polling() {
     // 启动后台用量刷新线程（只启动一次）
@@ -23,6 +25,12 @@ pub(crate) fn ensure_usage_polling() {
     }
     USAGE_POLLING_STARTED.get_or_init(|| {
         let _ = thread::spawn(|| usage_polling_loop());
+    });
+}
+
+pub(crate) fn ensure_gateway_keepalive() {
+    GATEWAY_KEEPALIVE_STARTED.get_or_init(|| {
+        let _ = thread::spawn(|| gateway_keepalive_loop());
     });
 }
 
@@ -38,6 +46,28 @@ fn usage_polling_loop() {
         }
         thread::sleep(Duration::from_secs(interval_secs));
     }
+}
+
+fn gateway_keepalive_loop() {
+    loop {
+        if let Err(err) = run_gateway_keepalive_once() {
+            if !is_keepalive_error_ignorable(err.as_str()) {
+                log::warn!("gateway keepalive error: {err}");
+            }
+        }
+        thread::sleep(Duration::from_secs(DEFAULT_GATEWAY_KEEPALIVE_INTERVAL_SECS));
+    }
+}
+
+fn run_gateway_keepalive_once() -> Result<(), String> {
+    // 中文注释：定期探活 models 路径可预热上游连接与 token exchange，减少服务空闲后首个请求的冷启动失败概率。
+    let _ = crate::gateway::fetch_models_for_picker()?;
+    Ok(())
+}
+
+fn is_keepalive_error_ignorable(err: &str) -> bool {
+    let normalized = err.trim().to_ascii_lowercase();
+    normalized.contains("no available account") || normalized.contains("storage unavailable")
 }
 
 pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
@@ -363,7 +393,7 @@ fn refresh_access_token(
 
 #[cfg(test)]
 mod status_tests {
-    use super::apply_status_from_snapshot;
+    use super::{apply_status_from_snapshot, is_keepalive_error_ignorable};
     use crate::account_availability::Availability;
     use gpttools_core::storage::{now_ts, Account, Storage, UsageSnapshotRecord};
 
@@ -409,5 +439,12 @@ mod status_tests {
             .find(|acc| acc.id == "acc-1")
             .expect("exists");
         assert_eq!(loaded.status, "inactive");
+    }
+
+    #[test]
+    fn keepalive_ignores_expected_idle_errors() {
+        assert!(is_keepalive_error_ignorable("no available account"));
+        assert!(is_keepalive_error_ignorable("storage unavailable"));
+        assert!(!is_keepalive_error_ignorable("upstream timeout"));
     }
 }

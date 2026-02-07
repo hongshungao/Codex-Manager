@@ -35,6 +35,7 @@ mod usage_refresh;
 mod gateway;
 mod requestlog_list;
 mod requestlog_clear;
+mod reasoning_effort;
 
 pub const DEFAULT_ADDR: &str = "localhost:48760";
 
@@ -70,6 +71,7 @@ pub fn start_one_shot_server() -> std::io::Result<ServerHandle> {
 
 pub fn start_server(addr: &str) -> std::io::Result<()> {
     usage_refresh::ensure_usage_polling();
+    usage_refresh::ensure_gateway_keepalive();
     http::server::start_http(addr)
 }
 

@@ -6,7 +6,7 @@ const REASONING_OPTIONS = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
-  { value: "extra_high", label: "Extra high" },
+  { value: "xhigh", label: "XHigh" },
 ];
 
 // 渲染 API Key 列表
@@ -55,7 +55,9 @@ export function renderApiKeys({ onToggleStatus, onDelete, onUpdateModel }) {
       effortSelect.appendChild(option);
     });
     modelSelect.value = item.modelSlug || "";
-    effortSelect.value = item.reasoningEffort || "";
+    effortSelect.value = item.reasoningEffort === "extra_high"
+      ? "xhigh"
+      : (item.reasoningEffort || "");
     const syncEffortState = () => {
       const hasModelOverride = Boolean((modelSelect.value || "").trim());
       effortSelect.disabled = !hasModelOverride;

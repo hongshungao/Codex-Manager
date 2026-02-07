@@ -553,12 +553,8 @@ fn apply_request_overrides(
 ) -> Vec<u8> {
     let normalized_model = model_slug.map(str::trim).filter(|v| !v.is_empty());
     let normalized_reasoning = reasoning_effort
-        .map(str::trim)
-        .map(|v| v.to_ascii_lowercase())
-        .and_then(|v| match v.as_str() {
-            "low" | "medium" | "high" | "extra_high" => Some(v),
-            _ => None,
-        });
+        .and_then(crate::reasoning_effort::normalize_reasoning_effort)
+        .map(str::to_string);
     if normalized_model.is_none() && normalized_reasoning.is_none() {
         return body;
     }
@@ -995,10 +991,10 @@ fn respond_with_upstream(
 mod availability_tests {
     use super::should_failover_after_refresh;
     use super::{
-        account_token_exchange_lock, compute_upstream_url, cooldown_reason_for_status,
-        gateway_metrics_prometheus, is_upstream_challenge_response, CooldownReason, is_html_content_type,
-        normalize_models_path, normalize_upstream_base_url, resolve_openai_bearer_token,
-        should_try_openai_fallback,
+        account_token_exchange_lock, apply_request_overrides, compute_upstream_url,
+        cooldown_reason_for_status, gateway_metrics_prometheus, is_html_content_type,
+        is_upstream_challenge_response, normalize_models_path, normalize_upstream_base_url,
+        resolve_openai_bearer_token, should_try_openai_fallback, CooldownReason,
     };
     use gpttools_core::storage::{now_ts, Account, Storage, Token, UsageSnapshotRecord};
     use reqwest::header::HeaderValue;
@@ -1083,6 +1079,22 @@ mod availability_tests {
             normalize_upstream_base_url("https://api.openai.com/v1/"),
             "https://api.openai.com/v1"
         );
+    }
+
+    #[test]
+    fn apply_request_overrides_accepts_xhigh() {
+        let body = br#"{"model":"gpt-5.3-codex","reasoning":{"effort":"medium"}}"#.to_vec();
+        let updated = apply_request_overrides("/v1/responses", body, None, Some("xhigh"));
+        let value: serde_json::Value = serde_json::from_slice(&updated).expect("json");
+        assert_eq!(value["reasoning"]["effort"], "xhigh");
+    }
+
+    #[test]
+    fn apply_request_overrides_maps_extra_high_to_xhigh() {
+        let body = br#"{"model":"gpt-5.3-codex"}"#.to_vec();
+        let updated = apply_request_overrides("/v1/responses", body, None, Some("extra_high"));
+        let value: serde_json::Value = serde_json::from_slice(&updated).expect("json");
+        assert_eq!(value["reasoning"]["effort"], "xhigh");
     }
 
     #[test]

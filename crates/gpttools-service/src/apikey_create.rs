@@ -1,6 +1,7 @@
 use gpttools_core::rpc::types::ApiKeyCreateResult;
 use gpttools_core::storage::{now_ts, ApiKey};
 
+use crate::reasoning_effort::normalize_reasoning_effort_owned;
 use crate::storage_helpers::{generate_key_id, generate_platform_key, hash_platform_key, open_storage};
 
 pub(crate) fn create_api_key(
@@ -17,7 +18,7 @@ pub(crate) fn create_api_key(
         id: key_id.clone(),
         name,
         model_slug,
-        reasoning_effort,
+        reasoning_effort: normalize_reasoning_effort_owned(reasoning_effort),
         key_hash,
         status: "active".to_string(),
         created_at: now_ts(),
