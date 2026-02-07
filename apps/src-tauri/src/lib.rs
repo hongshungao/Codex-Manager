@@ -439,6 +439,93 @@ fn resolve_service_addr(addr: Option<String>) -> Result<String, String> {
   Ok(gpttools_service::DEFAULT_ADDR.to_string())
 }
 
+fn find_header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
+  let target = name.to_ascii_lowercase();
+  headers.lines().skip(1).find_map(|line| {
+    let (key, value) = line.split_once(':')?;
+    if key.trim().eq_ignore_ascii_case(&target) {
+      Some(value.trim())
+    } else {
+      None
+    }
+  })
+}
+
+fn find_crlf(bytes: &[u8], start: usize) -> Option<usize> {
+  if start >= bytes.len() {
+    return None;
+  }
+  let mut i = start;
+  while i + 1 < bytes.len() {
+    if bytes[i] == b'\r' && bytes[i + 1] == b'\n' {
+      return Some(i);
+    }
+    i += 1;
+  }
+  None
+}
+
+fn decode_chunked_body(raw_body: &str) -> Result<String, String> {
+  let bytes = raw_body.as_bytes();
+  let mut idx = 0usize;
+  let mut out = Vec::new();
+
+  loop {
+    let line_end =
+      find_crlf(bytes, idx).ok_or_else(|| "invalid chunked response: missing size line".to_string())?;
+    let size_line = std::str::from_utf8(&bytes[idx..line_end])
+      .map_err(|_| "invalid chunked response: size line is not utf-8".to_string())?;
+    let size_hex = size_line
+      .split(';')
+      .next()
+      .map(str::trim)
+      .unwrap_or_default();
+    let size = usize::from_str_radix(size_hex, 16)
+      .map_err(|_| format!("invalid chunked response: bad chunk size '{size_hex}'"))?;
+    idx = line_end + 2;
+
+    if size == 0 {
+      break;
+    }
+    if idx + size > bytes.len() {
+      return Err("invalid chunked response: chunk exceeds body length".to_string());
+    }
+    out.extend_from_slice(&bytes[idx..idx + size]);
+    idx += size;
+
+    if idx + 1 >= bytes.len() || bytes[idx] != b'\r' || bytes[idx + 1] != b'\n' {
+      return Err("invalid chunked response: missing chunk terminator".to_string());
+    }
+    idx += 2;
+  }
+
+  String::from_utf8(out).map_err(|_| "invalid chunked response: body is not utf-8".to_string())
+}
+
+fn extract_http_json_body(raw: &str) -> Result<String, String> {
+  let (headers, body_with_meta) = raw
+    .split_once("\r\n\r\n")
+    .ok_or_else(|| "invalid http response: missing header separator".to_string())?;
+
+  let is_chunked = find_header_value(headers, "Transfer-Encoding")
+    .map(|v| v.to_ascii_lowercase().contains("chunked"))
+    .unwrap_or(false);
+  if is_chunked {
+    return decode_chunked_body(body_with_meta);
+  }
+
+  if let Some(content_length) = find_header_value(headers, "Content-Length") {
+    if let Ok(len) = content_length.parse::<usize>() {
+      if body_with_meta.len() < len {
+        return Err("invalid http response: body shorter than content-length".to_string());
+      }
+      return Ok(body_with_meta[..len].to_string());
+    }
+  }
+
+  Ok(body_with_meta.to_string())
+}
+
 fn rpc_call(
   method: &str,
   addr: Option<String>,
@@ -479,12 +566,15 @@ fn rpc_call(
     log::warn!("rpc read failed ({} -> {}): {}", method, addr, msg);
     msg
   })?;
-  let body = buf.split("\r\n\r\n").nth(1).unwrap_or("");
+  let body = extract_http_json_body(&buf).map_err(|e| {
+    log::warn!("rpc response parse failed ({} -> {}): {}", method, addr, e);
+    e
+  })?;
   if body.trim().is_empty() {
     log::warn!("rpc empty response ({} -> {})", method, addr);
     return Err("Empty response from service".to_string());
   }
-  let v: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+  let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
     let msg = e.to_string();
     log::warn!("rpc json parse failed ({} -> {}): {}", method, addr, msg);
     msg
@@ -618,5 +708,41 @@ mod tests {
 
     let res = rpc_call("initialize", Some(addr.to_string()), None);
     assert!(res.is_ok());
+  }
+
+  #[test]
+  fn rpc_call_decodes_chunked_response() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    std::thread::spawn(move || {
+      if let Ok((mut stream, _)) = listener.accept() {
+        let mut buf = [0u8; 1024];
+        let _ = stream.read(&mut buf);
+        let body = r#"{"result":{"items":[{"id":1}]}}"#;
+        let split = 11usize;
+        let chunk_a = &body[..split];
+        let chunk_b = &body[split..];
+        let chunked = format!(
+          "{:X}\r\n{}\r\n{:X}\r\n{}\r\n0\r\n\r\n",
+          chunk_a.len(),
+          chunk_a,
+          chunk_b.len(),
+          chunk_b
+        );
+        let response = format!(
+          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n{}",
+          chunked
+        );
+        let _ = stream.write_all(response.as_bytes());
+      }
+    });
+
+    let res = rpc_call("requestlog/list", Some(addr.to_string()), None).expect("rpc ok");
+    let items = res
+      .get("result")
+      .and_then(|v| v.get("items"))
+      .and_then(|v| v.as_array())
+      .expect("items");
+    assert_eq!(items.len(), 1);
   }
 }
