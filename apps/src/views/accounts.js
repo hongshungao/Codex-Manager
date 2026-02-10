@@ -68,7 +68,12 @@ export function renderAccounts({ onUpdateSort, onOpenUsage, onDelete }) {
     const secondaryRemain = remainingPercent(
       usage ? usage.secondaryUsedPercent : null,
     );
-    accountWrap.innerHTML = `<strong>${account.label}</strong><small>${account.id}${workspaceLabel}</small>`;
+    const accountTitle = document.createElement("strong");
+    accountTitle.textContent = account.label || "-";
+    const accountMeta = document.createElement("small");
+    accountMeta.textContent = `${account.id || "-"}${workspaceLabel}`;
+    accountWrap.appendChild(accountTitle);
+    accountWrap.appendChild(accountMeta);
     const mini = document.createElement("div");
     mini.className = "mini-usage";
     mini.appendChild(
@@ -108,7 +113,9 @@ export function renderAccounts({ onUpdateSort, onOpenUsage, onDelete }) {
     cellStatus.appendChild(statusTag);
 
     const cellUpdated = document.createElement("td");
-    cellUpdated.innerHTML = `<strong>${usage && usage.capturedAt ? formatTs(usage.capturedAt) : "未知"}</strong>`;
+    const updatedText = document.createElement("strong");
+    updatedText.textContent = usage && usage.capturedAt ? formatTs(usage.capturedAt) : "未知";
+    cellUpdated.appendChild(updatedText);
 
     const cellActions = document.createElement("td");
     const actionsWrap = document.createElement("div");

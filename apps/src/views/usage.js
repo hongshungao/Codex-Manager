@@ -81,7 +81,12 @@ function renderProgressRow(label, percent, resetsAt, level) {
   row.className = "progress-row";
   const rowLabel = document.createElement("div");
   rowLabel.className = "progress-label";
-  rowLabel.innerHTML = `<span>${label}</span><span>${percent == null ? "n/a" : `${percent}% left`}</span>`;
+  const left = document.createElement("span");
+  left.textContent = label;
+  const right = document.createElement("span");
+  right.textContent = percent == null ? "n/a" : `${percent}% left`;
+  rowLabel.appendChild(left);
+  rowLabel.appendChild(right);
   const track = document.createElement("div");
   track.className = "progress-track";
   const fill = document.createElement("div");

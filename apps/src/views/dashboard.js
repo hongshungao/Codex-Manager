@@ -40,7 +40,10 @@ function renderCurrentAccount(accounts, usageMap) {
   if (!dom.currentAccountCard) return;
   dom.currentAccountCard.innerHTML = "";
   if (!accounts.length) {
-    dom.currentAccountCard.innerHTML = "<div class=\"hint\">暂无账号</div>";
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = "暂无账号";
+    dom.currentAccountCard.appendChild(empty);
     return;
   }
   const account = accounts[0];
@@ -49,7 +52,9 @@ function renderCurrentAccount(accounts, usageMap) {
 
   const header = document.createElement("div");
   header.className = "panel-header";
-  header.innerHTML = "<h3>当前账号</h3>";
+  const title = document.createElement("h3");
+  title.textContent = "当前账号";
+  header.appendChild(title);
   const statusTag = document.createElement("span");
   statusTag.className = "status-tag";
   statusTag.textContent = status.text;
@@ -63,7 +68,12 @@ function renderCurrentAccount(accounts, usageMap) {
   const summary = document.createElement("div");
   summary.className = "cell";
   const workspaceLabel = account.workspaceName ? ` · ${account.workspaceName}` : "";
-  summary.innerHTML = `<strong>${account.label}</strong><small>${account.id}${workspaceLabel}</small>`;
+  const summaryTitle = document.createElement("strong");
+  summaryTitle.textContent = account.label || "-";
+  const summaryMeta = document.createElement("small");
+  summaryMeta.textContent = `${account.id || "-"}${workspaceLabel}`;
+  summary.appendChild(summaryTitle);
+  summary.appendChild(summaryMeta);
   dom.currentAccountCard.appendChild(summary);
 
   const usageWrap = document.createElement("div");
@@ -94,7 +104,13 @@ function renderRecommendations(accounts, usageMap) {
   dom.recommendations.innerHTML = "";
   const header = document.createElement("div");
   header.className = "panel-header";
-  header.innerHTML = "<h3>最佳账号推荐</h3><span class=\"hint\">按剩余额度</span>";
+  const title = document.createElement("h3");
+  title.textContent = "最佳账号推荐";
+  const hint = document.createElement("span");
+  hint.className = "hint";
+  hint.textContent = "按剩余额度";
+  header.appendChild(title);
+  header.appendChild(hint);
   dom.recommendations.appendChild(header);
 
   if (!accounts.length) {
@@ -164,11 +180,21 @@ function buildProgressLine(label, usedPercent, resetsAt, secondary) {
 function renderRecommendationItem(label, account, remain) {
   const item = document.createElement("div");
   item.className = "cell";
+  const itemLabel = document.createElement("small");
+  itemLabel.textContent = label;
+  item.appendChild(itemLabel);
   if (!account) {
-    item.innerHTML = `<small>${label}</small><strong>暂无账号</strong>`;
+    const empty = document.createElement("strong");
+    empty.textContent = "暂无账号";
+    item.appendChild(empty);
     return item;
   }
-  item.innerHTML = `<small>${label}</small><strong>${account.label}</strong><small>${account.id}</small>`;
+  const accountLabel = document.createElement("strong");
+  accountLabel.textContent = account.label || "-";
+  const accountId = document.createElement("small");
+  accountId.textContent = account.id || "-";
+  item.appendChild(accountLabel);
+  item.appendChild(accountId);
   const badge = document.createElement("span");
   badge.className = "status-tag status-ok";
   badge.textContent = remain == null ? "--" : `${remain}%`;
