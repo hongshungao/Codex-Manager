@@ -74,12 +74,85 @@ cargo build -p gpttools-service --release
 
 ### Tauri 打包
 ```
-.\rebuild.ps1 -Bundle nsis -CleanDist -Portable
+.\scripts\rebuild.ps1 -Bundle nsis -CleanDist -Portable
 ```
 
 ### 产物说明
 - 安装包（nsis/msi）：`apps/src-tauri/target/release/bundle/`
 - 便携版：`portable/`
+
+## 三平台打包脚本
+说明：Windows/Linux/macOS 需要在各自系统上执行对应脚本。
+
+### 前置环境
+- Node.js 20+
+- pnpm 9+（建议 `corepack enable` 后使用）
+- Rust stable（`rustup default stable`）
+- Tauri CLI（`cargo install tauri-cli --locked`）
+
+### 平台额外依赖
+- Windows：Visual Studio C++ Build Tools（含 Windows SDK）
+- Linux（Ubuntu 22.04+）：
+```bash
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev
+```
+- macOS：
+```bash
+xcode-select --install
+```
+
+### Windows
+```powershell
+pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 -Bundle nsis -CleanDist -Portable
+```
+
+### Linux
+```bash
+chmod +x scripts/rebuild-linux.sh
+./scripts/rebuild-linux.sh --bundles "appimage,deb" --clean-dist
+```
+
+### macOS
+```bash
+chmod +x scripts/rebuild-macos.sh
+./scripts/rebuild-macos.sh --bundles "dmg" --clean-dist
+```
+
+预期产物：
+- Windows: `apps/src-tauri/target/release/bundle/nsis` 或 `bundle/msi`
+- Linux: `apps/src-tauri/target/release/bundle/appimage`、`bundle/deb`
+- macOS: `apps/src-tauri/target/release/bundle/dmg`
+
+### 参数说明
+- Windows 脚本 `scripts/rebuild.ps1`
+- `-Bundle nsis|msi`：指定安装包类型
+- `-NoBundle`：仅编译，不生成安装包
+- `-CleanDist`：清理前端 `apps/dist` 后再构建
+- `-Portable`：额外生成便携版到 `portable/`
+- Linux/macOS 脚本
+- `--bundles "<types>"`：指定打包类型（例如 `appimage,deb` 或 `dmg`）
+- `--no-bundle`：仅编译
+- `--clean-dist`：清理前端产物后再构建
+- `--dry-run`：仅打印执行计划，不真正执行
+
+### 推荐打包流程
+1. 拉取最新代码并进入仓库根目录。
+2. 安装依赖：`pnpm install`（在 `apps/` 下执行）。
+3. 执行对应平台脚本。
+4. 校验产物是否存在于 `apps/src-tauri/target/release/bundle/`。
+5. 手动上传产物到 GitHub Release（避免 CI 分钟费用）。
+
+### 常见报错排查
+- `pnpm: command not found`
+- 原因：未安装 pnpm 或未启用 corepack。
+- 处理：`corepack enable && corepack prepare pnpm@9 --activate`
+- `cargo tauri build` 缺少系统库（Linux）
+- 原因：缺少 webkit/gtk 等依赖。
+- 处理：按上面的 Linux 依赖命令安装后重试。
+- Windows 报“检测到病毒”
+- 原因：未签名可执行文件容易被 SmartScreen/杀软误报。
+- 处理：优先发布安装包、做代码签名、提交误报申诉。
 
 ## 常见问题
 - 授权回调失败：可手动粘贴回调链接解析

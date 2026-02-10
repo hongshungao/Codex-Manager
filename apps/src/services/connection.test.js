@@ -99,6 +99,31 @@ test("waitForConnection can be silent and succeed after retries", async () => {
   assert.equal(hintCalls.some((item) => item[1] === true), false);
 });
 
+test("waitForConnection accepts JSON-RPC wrapped initialize result", async () => {
+  const api = {
+    serviceInitialize: async () => ({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { server_name: "gpttools-service", version: "test" },
+    }),
+    serviceStart: async () => {},
+    serviceStop: async () => {},
+  };
+  const state = { serviceConnected: false, serviceAddr: "" };
+  const service = createConnectionService({
+    api,
+    state,
+    setStatus: () => {},
+    setServiceHint: () => {},
+    wait: async () => {},
+  });
+
+  const ok = await service.waitForConnection({ retries: 0, silent: true });
+
+  assert.equal(ok, true);
+  assert.equal(state.serviceConnected, true);
+});
+
 test("waitForConnection shows retry reason even when silent", async () => {
   let initCalls = 0;
   const api = {

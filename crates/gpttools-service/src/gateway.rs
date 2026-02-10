@@ -400,6 +400,25 @@ fn extract_request_reasoning_effort(body: &[u8]) -> Option<String> {
         })
 }
 
+fn should_drop_incoming_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("Authorization")
+        || name.eq_ignore_ascii_case("x-api-key")
+        || name.eq_ignore_ascii_case("Host")
+        || name.eq_ignore_ascii_case("Content-Length")
+        // 中文注释：resume 会携带旧会话的账号头；若不剔除会把请求强行绑定到过期/耗尽账号，导致无法切换候选账号。
+        || name.eq_ignore_ascii_case("ChatGPT-Account-Id")
+}
+
+fn should_drop_session_affinity_header(name: &str) -> bool {
+    // 中文注释：session_id / turn-state 属于会话粘性信号，正常直连时应保留；
+    // 仅在 failover 到其他账号时剔除，避免继续命中旧账号会话路由导致“切换无效”。
+    name.eq_ignore_ascii_case("session_id") || name.eq_ignore_ascii_case("x-codex-turn-state")
+}
+
+fn should_drop_incoming_header_for_failover(name: &str) -> bool {
+    should_drop_incoming_header(name) || should_drop_session_affinity_header(name)
+}
+
 fn write_request_log(
     storage: &Storage,
     key_id: Option<&str>,
@@ -441,9 +460,24 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
     }
 
     let _request_guard = begin_gateway_request();
+    let request_path_for_log = normalize_models_path(request.url());
+    let request_method_for_log = request.method().as_str().to_string();
     let validated = match local_validation::prepare_local_request(&mut request, debug) {
         Ok(v) => v,
         Err(err) => {
+            if let Some(storage) = open_storage() {
+                write_request_log(
+                    &storage,
+                    None,
+                    &request_path_for_log,
+                    &request_method_for_log,
+                    None,
+                    None,
+                    None,
+                    Some(err.status_code),
+                    Some(err.message.as_str()),
+                );
+            }
             let response = Response::from_string(err.message).with_status_code(err.status_code);
             let _ = request.respond(response);
             return Ok(());
@@ -768,6 +802,7 @@ fn try_openai_fallback(
     account: &Account,
     token: &mut Token,
     upstream_cookie: Option<&str>,
+    strip_session_affinity: bool,
     debug: bool,
 ) -> Result<Option<reqwest::blocking::Response>, String> {
     let path = normalize_models_path(request.url());
@@ -777,11 +812,12 @@ fn try_openai_fallback(
     let mut builder = client.request(method.clone(), &url);
     let mut has_user_agent = false;
     for header in request.headers() {
-        if header.field.equiv("Authorization")
-            || header.field.equiv("x-api-key")
-            || header.field.equiv("Host")
-            || header.field.equiv("Content-Length")
-        {
+        let name = header.field.as_str().as_str();
+        if if strip_session_affinity {
+            should_drop_incoming_header_for_failover(name)
+        } else {
+            should_drop_incoming_header(name)
+        } {
             continue;
         }
         if header.field.equiv("User-Agent") {
@@ -994,7 +1030,8 @@ mod availability_tests {
         account_token_exchange_lock, apply_request_overrides, compute_upstream_url,
         cooldown_reason_for_status, gateway_metrics_prometheus, is_html_content_type,
         is_upstream_challenge_response, normalize_models_path, normalize_upstream_base_url,
-        resolve_openai_bearer_token, should_try_openai_fallback, CooldownReason,
+        resolve_openai_bearer_token, should_drop_incoming_header,
+        should_drop_incoming_header_for_failover, should_try_openai_fallback, CooldownReason,
     };
     use gpttools_core::storage::{now_ts, Account, Storage, Token, UsageSnapshotRecord};
     use reqwest::header::HeaderValue;
@@ -1216,6 +1253,24 @@ mod availability_tests {
         assert!(is_upstream_challenge_response(403, html.as_ref()));
         assert!(!is_upstream_challenge_response(403, json.as_ref()));
         assert!(is_upstream_challenge_response(429, json.as_ref()));
+    }
+
+    #[test]
+    fn drop_incoming_header_keeps_session_affinity_for_primary_attempt() {
+        assert!(should_drop_incoming_header("ChatGPT-Account-Id"));
+        assert!(should_drop_incoming_header("authorization"));
+        assert!(should_drop_incoming_header("x-api-key"));
+        assert!(!should_drop_incoming_header("session_id"));
+        assert!(!should_drop_incoming_header("x-codex-turn-state"));
+        assert!(!should_drop_incoming_header("Content-Type"));
+    }
+
+    #[test]
+    fn drop_incoming_header_for_failover_strips_session_affinity() {
+        assert!(should_drop_incoming_header_for_failover("ChatGPT-Account-Id"));
+        assert!(should_drop_incoming_header_for_failover("session_id"));
+        assert!(should_drop_incoming_header_for_failover("x-codex-turn-state"));
+        assert!(!should_drop_incoming_header_for_failover("Content-Type"));
     }
 
 

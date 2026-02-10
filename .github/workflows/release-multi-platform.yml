@@ -42,6 +42,12 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,13 +55,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/pnpm-lock.yaml
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/src-tauri
 
       - name: Install Linux dependencies
         if: matrix.artifact_name == 'linux'
@@ -74,11 +82,59 @@ jobs:
         working-directory: apps/src-tauri
         run: cargo tauri build --bundles ${{ matrix.bundles }}
 
+      - name: Stage portable package
+        shell: pwsh
+        run: |
+          $releaseDir = "apps/src-tauri/target/release"
+          $portableDir = Join-Path $releaseDir "portable"
+          New-Item -ItemType Directory -Force $portableDir | Out-Null
+
+          $artifact = "${{ matrix.artifact_name }}"
+          $source = $null
+          if ($artifact -eq "windows") {
+            $preferred = Join-Path $releaseDir "CodexManager.exe"
+            if (Test-Path $preferred) { $source = $preferred }
+            if (-not $source) {
+              $source = Get-ChildItem $releaseDir -Filter "*.exe" -File |
+                Where-Object { $_.Name -notmatch "uninstall|setup|crash" } |
+                Select-Object -First 1 -ExpandProperty FullName
+            }
+          } else {
+            $preferred = Join-Path $releaseDir "CodexManager"
+            if (Test-Path $preferred) { $source = $preferred }
+            if (-not $source) {
+              $source = Get-ChildItem $releaseDir -File |
+                Where-Object { $_.Extension -eq "" -and $_.Name -notmatch "build-script|deps" } |
+                Select-Object -First 1 -ExpandProperty FullName
+            }
+          }
+
+          if (-not $source) {
+            throw "portable source binary not found in $releaseDir"
+          }
+
+          $portableName = if ($artifact -eq "windows") { "CodexManager.exe" } else { "CodexManager" }
+          $portableBinary = Join-Path $portableDir $portableName
+          Copy-Item -Force $source $portableBinary
+
+          $zipName = "CodexManager-$artifact-portable.zip"
+          $zipPath = Join-Path $portableDir $zipName
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path $portableBinary -DestinationPath $zipPath
+          Write-Host "portable package: $zipPath"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: codexmanager-${{ matrix.artifact_name }}
-          path: apps/src-tauri/target/release/bundle/**
+          path: |
+            apps/src-tauri/target/release/bundle/**/*.exe
+            apps/src-tauri/target/release/bundle/**/*.msi
+            apps/src-tauri/target/release/bundle/**/*.dmg
+            apps/src-tauri/target/release/bundle/**/*.AppImage
+            apps/src-tauri/target/release/bundle/**/*.deb
+            apps/src-tauri/target/release/bundle/**/*.rpm
+            apps/src-tauri/target/release/portable/*.zip
           if-no-files-found: error
 
   release:
@@ -86,6 +142,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -96,20 +157,53 @@ jobs:
       - name: List release assets
         run: find release-assets -type f | sort
 
+      - name: Resolve release meta
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            REF="${{ inputs.ref }}"
+          else
+            TAG="${{ github.ref_name }}"
+            REF="${{ github.sha }}"
+          fi
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
+          fi
+          if [[ "$TAG" == *-* ]]; then
+            PRERELEASE="true"
+          else
+            PRERELEASE="false"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          target_commitish: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
-          name: CodexManager ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          draft: false
-          prerelease: ${{ contains((github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name), '-') }}
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-          files: |
-            release-assets/**/*.exe
-            release-assets/**/*.msi
-            release-assets/**/*.dmg
-            release-assets/**/*.AppImage
-            release-assets/**/*.deb
-            release-assets/**/*.rpm
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          REF="${{ steps.meta.outputs.ref }}"
+          TITLE="CodexManager $TAG"
+
+          mapfile -t FILES < <(find release-assets -type f \( \
+            -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.zip' \
+          \) | sort)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
+          else
+            if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$REF" --generate-notes --prerelease
+            else
+              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$REF" --generate-notes
+            fi
+          fi

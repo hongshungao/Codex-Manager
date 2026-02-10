@@ -40,10 +40,19 @@ function formatConnectError(err) {
   return firstLine.length > 120 ? `${firstLine.slice(0, 120)}...` : firstLine;
 }
 
+function readServerNameFromInitialize(res) {
+  if (!res || typeof res !== "object") return "";
+  if (typeof res.server_name === "string") return res.server_name;
+  // 中文注释：Tauri 命令返回的是 JSON-RPC 包装结构，server_name 在 result 内层。
+  const nested = res.result;
+  if (nested && typeof nested === "object" && typeof nested.server_name === "string") {
+    return nested.server_name;
+  }
+  return "";
+}
+
 function isExpectedInitializeResult(res) {
-  if (!res || typeof res !== "object") return false;
-  if (!("server_name" in res)) return false;
-  return res.server_name === "gpttools-service";
+  return readServerNameFromInitialize(res) === "gpttools-service";
 }
 
 // 初始化连接（不负责启动 service）
@@ -73,8 +82,7 @@ export function createConnectionService(deps) {
       try {
         const res = await apiClient.serviceInitialize();
         if (!isExpectedInitializeResult(res)) {
-          const serverName =
-            res && typeof res === "object" && "server_name" in res ? String(res.server_name) : "";
+          const serverName = readServerNameFromInitialize(res);
           const hint = serverName ? `server_name=${serverName}` : "响应不匹配";
           throw new Error(`端口可能被其他服务占用（${hint}）`);
         }

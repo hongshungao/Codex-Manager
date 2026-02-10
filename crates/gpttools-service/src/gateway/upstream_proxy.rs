@@ -1,8 +1,67 @@
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::header::CONTENT_TYPE;
 use tiny_http::{Request, Response};
+use gpttools_core::storage::Account;
 
 use super::local_validation::LocalValidationResult;
+
+fn should_drop_header_for_attempt(name: &str, strip_session_affinity: bool) -> bool {
+    if strip_session_affinity {
+        super::should_drop_incoming_header_for_failover(name)
+    } else {
+        super::should_drop_incoming_header(name)
+    }
+}
+
+fn send_upstream_request(
+    client: &reqwest::blocking::Client,
+    method: &reqwest::Method,
+    target_url: &str,
+    request: &Request,
+    body: &[u8],
+    upstream_cookie: Option<&str>,
+    auth_token: &str,
+    account: &Account,
+    strip_session_affinity: bool,
+) -> Result<reqwest::blocking::Response, reqwest::Error> {
+    let mut builder = client.request(method.clone(), target_url);
+    let mut has_user_agent = false;
+    for header in request.headers() {
+        let name = header.field.as_str().as_str();
+        if should_drop_header_for_attempt(name, strip_session_affinity) {
+            continue;
+        }
+        if header.field.equiv("User-Agent") {
+            has_user_agent = true;
+        }
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(header.field.as_str().as_bytes()),
+            HeaderValue::from_str(header.value.as_str()),
+        ) {
+            builder = builder.header(name, value);
+        }
+    }
+    if !has_user_agent {
+        builder = builder.header("User-Agent", "codex-cli");
+    }
+    if let Some(cookie) = upstream_cookie {
+        if !cookie.trim().is_empty() {
+            builder = builder.header("Cookie", cookie);
+        }
+    }
+    builder = builder.header("Authorization", format!("Bearer {}", auth_token));
+    if let Some(acc) = account
+        .chatgpt_account_id
+        .as_deref()
+        .or_else(|| account.workspace_id.as_deref())
+    {
+        builder = builder.header("ChatGPT-Account-Id", acc);
+    }
+    if !body.is_empty() {
+        builder = builder.body(body.to_vec());
+    }
+    builder.send()
+}
 
 pub(super) fn proxy_validated_request(
     request: Request,
@@ -23,8 +82,19 @@ pub(super) fn proxy_validated_request(
     let mut candidates = match super::collect_gateway_candidates(&storage) {
         Ok(v) => v,
         Err(err) => {
-            let response =
-                Response::from_string(format!("candidate resolve failed: {err}")).with_status_code(500);
+            let err_text = format!("candidate resolve failed: {err}");
+            super::write_request_log(
+                &storage,
+                Some(&key_id),
+                &path,
+                &request_method,
+                model_for_log.as_deref(),
+                reasoning_for_log.as_deref(),
+                None,
+                Some(500),
+                Some(err_text.as_str()),
+            );
+            let response = Response::from_string(err_text).with_status_code(500);
             let _ = request.respond(response);
             return Ok(());
         }
@@ -79,6 +149,7 @@ pub(super) fn proxy_validated_request(
         );
     };
     for (idx, (account, mut token)) in candidates.into_iter().enumerate() {
+        let strip_session_affinity = idx > 0;
         if super::is_account_in_cooldown(&account.id) && has_more_candidates(idx) {
             super::record_gateway_failover_attempt();
             continue;
@@ -104,6 +175,7 @@ pub(super) fn proxy_validated_request(
                 &account,
                 &mut token,
                 upstream_cookie.as_deref(),
+                strip_session_affinity,
                 debug,
             ) {
                 Ok(Some(resp)) => {
@@ -154,36 +226,6 @@ pub(super) fn proxy_validated_request(
             }
         }
 
-        let mut builder = client.request(method.clone(), &url);
-        let mut has_user_agent = false;
-
-        for header in request.headers() {
-            if header.field.equiv("Authorization")
-                || header.field.equiv("x-api-key")
-                || header.field.equiv("Host")
-                || header.field.equiv("Content-Length")
-            {
-                continue;
-            }
-            if header.field.equiv("User-Agent") {
-                has_user_agent = true;
-            }
-            if let (Ok(name), Ok(value)) = (
-                HeaderName::from_bytes(header.field.as_str().as_bytes()),
-                HeaderValue::from_str(header.value.as_str()),
-            ) {
-                builder = builder.header(name, value);
-            }
-        }
-        if !has_user_agent {
-            builder = builder.header("User-Agent", "codex-cli");
-        }
-        if let Some(cookie) = upstream_cookie.as_ref() {
-            if !cookie.trim().is_empty() {
-                builder = builder.header("Cookie", cookie);
-            }
-        }
-
         let auth_token = token.access_token.clone();
         if debug {
             eprintln!(
@@ -191,20 +233,17 @@ pub(super) fn proxy_validated_request(
                 upstream_base
             );
         }
-        builder = builder.header("Authorization", format!("Bearer {}", auth_token));
-        if let Some(acc) = account
-            .chatgpt_account_id
-            .as_deref()
-            .or_else(|| account.workspace_id.as_deref())
-        {
-            builder = builder.header("ChatGPT-Account-Id", acc);
-        }
-
-        if !body.is_empty() {
-            builder = builder.body(body.clone());
-        }
-
-        let mut upstream = match builder.send() {
+        let mut upstream = match send_upstream_request(
+            &client,
+            &method,
+            &url,
+            &request,
+            &body,
+            upstream_cookie.as_deref(),
+            auth_token.as_str(),
+            &account,
+            strip_session_affinity,
+        ) {
             Ok(resp) => resp,
             Err(err) => {
                 let err_msg = err.to_string();
@@ -243,6 +282,7 @@ pub(super) fn proxy_validated_request(
                     &account,
                     &mut token,
                     upstream_cookie.as_deref(),
+                    strip_session_affinity,
                     debug,
                 ) {
                     Ok(Some(resp)) => {
@@ -331,46 +371,17 @@ pub(super) fn proxy_validated_request(
             if debug {
                 eprintln!("gateway upstream retry: url={alt_url}");
             }
-            let mut retry = client.request(method.clone(), alt_url);
-            let mut has_user_agent = false;
-            for header in request.headers() {
-                if header.field.equiv("Authorization")
-                    || header.field.equiv("x-api-key")
-                    || header.field.equiv("Host")
-                    || header.field.equiv("Content-Length")
-                {
-                    continue;
-                }
-                if header.field.equiv("User-Agent") {
-                    has_user_agent = true;
-                }
-                if let (Ok(name), Ok(value)) = (
-                    HeaderName::from_bytes(header.field.as_str().as_bytes()),
-                    HeaderValue::from_str(header.value.as_str()),
-                ) {
-                    retry = retry.header(name, value);
-                }
-            }
-            if !has_user_agent {
-                retry = retry.header("User-Agent", "codex-cli");
-            }
-            if let Some(cookie) = upstream_cookie.as_ref() {
-                if !cookie.trim().is_empty() {
-                    retry = retry.header("Cookie", cookie);
-                }
-            }
-            retry = retry.header("Authorization", format!("Bearer {}", auth_token));
-            if let Some(acc) = account
-                .chatgpt_account_id
-                .as_deref()
-                .or_else(|| account.workspace_id.as_deref())
-            {
-                retry = retry.header("ChatGPT-Account-Id", acc);
-            }
-            if !body.is_empty() {
-                retry = retry.body(body.clone());
-            }
-            match retry.send() {
+            match send_upstream_request(
+                &client,
+                &method,
+                alt_url,
+                &request,
+                &body,
+                upstream_cookie.as_deref(),
+                auth_token.as_str(),
+                &account,
+                strip_session_affinity,
+            ) {
                 Ok(resp) => upstream = resp,
                 Err(err) => {
                     let err_msg = err.to_string();
@@ -388,6 +399,65 @@ pub(super) fn proxy_validated_request(
             }
             status = upstream.status();
         }
+
+        if !strip_session_affinity && matches!(status.as_u16(), 401 | 403 | 404) {
+            if debug {
+                eprintln!(
+                    "gateway upstream stateless retry: account_id={}, status={}",
+                    account.id, status
+                );
+            }
+            match send_upstream_request(
+                &client,
+                &method,
+                &url,
+                &request,
+                &body,
+                upstream_cookie.as_deref(),
+                auth_token.as_str(),
+                &account,
+                true,
+            ) {
+                Ok(resp) => {
+                    upstream = resp;
+                    status = upstream.status();
+                    if (status.as_u16() == 400 || status.as_u16() == 404) && url_alt.is_some() {
+                        let alt_url = url_alt.as_ref().unwrap();
+                        match send_upstream_request(
+                            &client,
+                            &method,
+                            alt_url,
+                            &request,
+                            &body,
+                            upstream_cookie.as_deref(),
+                            auth_token.as_str(),
+                            &account,
+                            true,
+                        ) {
+                            Ok(resp) => {
+                                upstream = resp;
+                                status = upstream.status();
+                            }
+                            Err(err) => {
+                                log::warn!(
+                                    "gateway stateless alt retry error: account_id={}, err={}",
+                                    account.id,
+                                    err
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "gateway stateless retry error: account_id={}, err={}",
+                        account.id,
+                        err
+                    );
+                }
+            }
+        }
+
         if matches!(status.as_u16(), 429 | 500..=599) {
             // 中文注释：即使本次把上游错误透传给客户端，也要对账号做退避，避免下一批并发继续打在故障账号上。
             super::mark_account_cooldown_for_status(&account.id, status.as_u16());
@@ -434,5 +504,8 @@ pub(super) fn proxy_validated_request(
         return super::respond_with_upstream(request, upstream, inflight_guard);
     }
 
-    Err("no available account".to_string())
+    log_gateway_result(Some(base), 503, Some("no available account"));
+    let response = Response::from_string("no available account").with_status_code(503);
+    let _ = request.respond(response);
+    Ok(())
 }
