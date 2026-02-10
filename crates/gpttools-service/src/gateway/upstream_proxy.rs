@@ -127,7 +127,7 @@ pub(super) fn proxy_validated_request(
     let upstream_base = super::resolve_upstream_base_url();
     let base = upstream_base.as_str();
     let upstream_fallback_base = super::resolve_upstream_fallback_base_url(base);
-    let (url, url_alt) = super::compute_upstream_url(base, &path);
+    let (url, url_alt) = super::request_rewrite::compute_upstream_url(base, &path);
 
     let client = super::upstream_client();
     let upstream_cookie = std::env::var("GPTTOOLS_UPSTREAM_COOKIE").ok();

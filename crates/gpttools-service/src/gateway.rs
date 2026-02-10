@@ -17,6 +17,7 @@ use serde_json::Value;
 mod local_validation;
 mod upstream_proxy;
 mod request_helpers;
+mod request_rewrite;
 mod metrics;
 mod selection;
 mod failover;
@@ -26,6 +27,7 @@ pub(super) use request_helpers::{
     is_upstream_challenge_response, normalize_models_path, should_drop_incoming_header,
     should_drop_incoming_header_for_failover,
 };
+use request_rewrite::{apply_request_overrides, compute_upstream_url};
 pub(crate) use metrics::{
     AccountInFlightGuard, acquire_account_inflight,
     begin_gateway_request, gateway_metrics_prometheus,
@@ -363,72 +365,6 @@ fn should_try_openai_fallback_by_status(base: &str, request_path: &str, status_c
 }
 
 
-fn compute_upstream_url(base: &str, path: &str) -> (String, Option<String>) {
-    let base = base.trim_end_matches('/');
-    let url = if base.contains("/backend-api/codex") && path.starts_with("/v1/") {
-        // 与官方后端一致：当上游是 backend-api/codex 时，/v1/* 映射到 /*。
-        format!("{}{}", base, path.trim_start_matches("/v1"))
-    } else if base.ends_with("/v1") && path.starts_with("/v1") {
-        format!("{}{}", base.trim_end_matches("/v1"), path)
-    } else {
-        format!("{}{}", base, path)
-    };
-    let url_alt = if base.contains("/backend-api/codex") && path.starts_with("/v1/") {
-        Some(format!("{}{}", base, path))
-    } else {
-        None
-    };
-    (url, url_alt)
-}
-
-fn path_supports_reasoning_override(path: &str) -> bool {
-    path.starts_with("/v1/responses") || path.starts_with("/v1/chat/completions")
-}
-
-fn apply_request_overrides(
-    path: &str,
-    body: Vec<u8>,
-    model_slug: Option<&str>,
-    reasoning_effort: Option<&str>,
-) -> Vec<u8> {
-    let normalized_model = model_slug.map(str::trim).filter(|v| !v.is_empty());
-    let normalized_reasoning = reasoning_effort
-        .and_then(crate::reasoning_effort::normalize_reasoning_effort)
-        .map(str::to_string);
-    if normalized_model.is_none() && normalized_reasoning.is_none() {
-        return body;
-    }
-    if path == "/v1/models" || path.starts_with("/v1/models?") {
-        return body;
-    }
-    if body.is_empty() {
-        return body;
-    }
-    let Ok(mut payload) = serde_json::from_slice::<Value>(&body) else {
-        return body;
-    };
-    let Some(obj) = payload.as_object_mut() else {
-        return body;
-    };
-    if let Some(model) = normalized_model {
-        obj.insert("model".to_string(), Value::String(model.to_string()));
-    }
-    if let Some(level) = normalized_reasoning {
-        if path_supports_reasoning_override(path) {
-            let reasoning = obj
-                .entry("reasoning".to_string())
-                .or_insert_with(|| Value::Object(serde_json::Map::new()));
-            if !reasoning.is_object() {
-                *reasoning = Value::Object(serde_json::Map::new());
-            }
-            if let Some(reasoning_obj) = reasoning.as_object_mut() {
-                reasoning_obj.insert("effort".to_string(), Value::String(level));
-            }
-        }
-    }
-    serde_json::to_vec(&payload).unwrap_or(body)
-}
-
 pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let mut candidates = collect_gateway_candidates(&storage)?;
@@ -699,8 +635,9 @@ fn respond_with_upstream(
 #[cfg(test)]
 mod availability_tests {
     use super::should_failover_after_refresh;
+    use super::request_rewrite::{apply_request_overrides, compute_upstream_url};
     use super::{
-        account_token_exchange_lock, apply_request_overrides, compute_upstream_url,
+        account_token_exchange_lock,
         cooldown_reason_for_status, gateway_metrics_prometheus, is_html_content_type,
         is_upstream_challenge_response, normalize_models_path, normalize_upstream_base_url,
         resolve_openai_bearer_token, should_drop_incoming_header,
