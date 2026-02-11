@@ -172,8 +172,9 @@ fn refresh_usage_for_token(
 }
 
 #[cfg(test)]
-#[path = "usage_refresh_status_tests.rs"]
+#[path = "../../tests/usage/usage_refresh_status_tests.rs"]
 mod status_tests;
+
 
 
 

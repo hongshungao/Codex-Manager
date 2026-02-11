@@ -57,4 +57,7 @@ use runtime_config::{
 use upstream::proxy::proxy_validated_request;
 
 #[cfg(test)]
+#[path = "../../tests/gateway/availability/mod.rs"]
 mod availability_tests;
+
+

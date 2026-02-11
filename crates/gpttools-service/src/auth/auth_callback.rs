@@ -236,8 +236,9 @@ fn run_login_server(server: Server) {
 }
 
 #[cfg(test)]
-#[path = "auth_callback_tests.rs"]
+#[path = "../../tests/auth/auth_callback_tests.rs"]
 mod tests;
+
 
 
 
