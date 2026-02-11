@@ -8,33 +8,60 @@ use std::thread;
 use std::time::Duration;
 
 mod http;
+#[path = "storage/storage_helpers.rs"]
 mod storage_helpers;
+#[path = "account/account_availability.rs"]
 mod account_availability;
+#[path = "account/account_status.rs"]
 mod account_status;
+#[path = "account/account_list.rs"]
 mod account_list;
+#[path = "account/account_delete.rs"]
 mod account_delete;
+#[path = "account/account_update.rs"]
 mod account_update;
+#[path = "apikey/apikey_list.rs"]
 mod apikey_list;
+#[path = "apikey/apikey_create.rs"]
 mod apikey_create;
+#[path = "apikey/apikey_delete.rs"]
 mod apikey_delete;
+#[path = "apikey/apikey_disable.rs"]
 mod apikey_disable;
+#[path = "apikey/apikey_enable.rs"]
 mod apikey_enable;
+#[path = "apikey/apikey_models.rs"]
 mod apikey_models;
+#[path = "apikey/apikey_update_model.rs"]
 mod apikey_update_model;
+#[path = "auth/auth_login.rs"]
 mod auth_login;
+#[path = "auth/auth_callback.rs"]
 mod auth_callback;
+#[path = "auth/auth_tokens.rs"]
 mod auth_tokens;
+#[path = "usage/usage_read.rs"]
 mod usage_read;
+#[path = "usage/usage_list.rs"]
 mod usage_list;
+#[path = "usage/usage_scheduler.rs"]
 mod usage_scheduler;
+#[path = "usage/usage_http.rs"]
 mod usage_http;
+#[path = "usage/usage_account_meta.rs"]
 mod usage_account_meta;
+#[path = "usage/usage_keepalive.rs"]
 mod usage_keepalive;
+#[path = "usage/usage_snapshot_store.rs"]
 mod usage_snapshot_store;
+#[path = "usage/usage_token_refresh.rs"]
 mod usage_token_refresh;
+#[path = "usage/usage_refresh.rs"]
 mod usage_refresh;
 mod gateway;
+#[path = "requestlog/requestlog_list.rs"]
 mod requestlog_list;
+#[path = "requestlog/requestlog_clear.rs"]
 mod requestlog_clear;
 mod reasoning_effort;
 mod rpc_dispatch;
@@ -209,6 +236,7 @@ mod tests {
         assert!(err.contains("missing"));
     }
 }
+
 
 
 
