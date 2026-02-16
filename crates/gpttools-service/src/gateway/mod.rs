@@ -29,7 +29,10 @@ pub(super) use request_helpers::{
 #[cfg(test)]
 use request_helpers::{should_drop_incoming_header, should_drop_incoming_header_for_failover};
 use request_rewrite::{apply_request_overrides, compute_upstream_url};
-use protocol_adapter::{adapt_request_for_protocol, ResponseAdapter};
+use protocol_adapter::{
+    adapt_request_for_protocol, adapt_upstream_response, build_anthropic_error_body,
+    ResponseAdapter,
+};
 use upstream::config::{
     is_openai_api_base, resolve_upstream_base_url, resolve_upstream_fallback_base_url,
     should_try_openai_fallback, should_try_openai_fallback_by_status,

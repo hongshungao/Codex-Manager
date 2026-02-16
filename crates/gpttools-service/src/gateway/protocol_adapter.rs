@@ -1,28 +1,17 @@
 use serde_json::{json, Value};
-use rand::RngCore;
-use std::collections::HashMap;
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 use crate::gateway::request_helpers::is_html_content_type;
 
 use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
+
+mod prompt_cache;
 
 const DEFAULT_ANTHROPIC_MODEL: &str = "gpt-5.3-codex";
 const DEFAULT_ANTHROPIC_REASONING: &str = "high";
 const DEFAULT_ANTHROPIC_INSTRUCTIONS: &str =
     "You are Codex, a coding assistant that responds clearly and safely.";
 const MAX_ANTHROPIC_TOOLS: usize = 16;
-
-const PROMPT_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
-static PROMPT_CACHE: OnceLock<Mutex<HashMap<String, PromptCacheEntry>>> = OnceLock::new();
-
-#[derive(Clone)]
-struct PromptCacheEntry {
-    id: String,
-    expires_at: Instant,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ResponseAdapter {
@@ -118,16 +107,7 @@ fn convert_anthropic_messages_request(body: &[u8]) -> Result<(Vec<u8>, bool), St
 
     let (instructions, input_items) = convert_chat_messages_to_responses_input(&messages)?;
     let mut out = serde_json::Map::new();
-    let upstream_model = obj
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let resolved_model = upstream_model
-        .as_deref()
-        .unwrap_or(DEFAULT_ANTHROPIC_MODEL)
-        .to_string();
+    let resolved_model = resolve_anthropic_upstream_model(obj);
     out.insert("model".to_string(), Value::String(resolved_model));
     let resolved_instructions = instructions
         .as_deref()
@@ -164,7 +144,7 @@ fn convert_anthropic_messages_request(body: &[u8]) -> Result<(Vec<u8>, bool), St
 
     // 中文注释：参考 CLIProxyAPI 的行为：Claude 入口需要一个稳定的 prompt_cache_key，
     // 并在上游请求头把 Session_id/Conversation_id 与之对齐，才能显著降低 challenge 命中率。
-    if let Some(prompt_cache_key) = resolve_prompt_cache_key(obj, out.get("model")) {
+    if let Some(prompt_cache_key) = prompt_cache::resolve_prompt_cache_key(obj, out.get("model")) {
         out.insert(
             "prompt_cache_key".to_string(),
             Value::String(prompt_cache_key),
@@ -208,65 +188,16 @@ fn convert_anthropic_messages_request(body: &[u8]) -> Result<(Vec<u8>, bool), St
         .map_err(|err| format!("convert claude request failed: {err}"))
 }
 
-fn resolve_prompt_cache_key(source: &serde_json::Map<String, Value>, model: Option<&Value>) -> Option<String> {
-    let model = model.and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())?;
-    let user_id = source
-        .get("metadata")
-        .and_then(Value::as_object)
-        .and_then(|meta| meta.get("user_id"))
+fn resolve_anthropic_upstream_model(source: &serde_json::Map<String, Value>) -> String {
+    let requested_model = source
+        .get("model")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("unknown");
-
-    let cache_key = format!("{model}:{user_id}");
-    Some(get_or_create_prompt_cache_id(&cache_key))
-}
-
-fn get_or_create_prompt_cache_id(key: &str) -> String {
-    let cache = PROMPT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let now = Instant::now();
-    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.retain(|_, entry| entry.expires_at > now);
-    if let Some(entry) = guard.get(key) {
-        return entry.id.clone();
+        .filter(|value| !value.is_empty());
+    match requested_model {
+        Some(model) if model.to_ascii_lowercase().contains("codex") => model.to_string(),
+        _ => DEFAULT_ANTHROPIC_MODEL.to_string(),
     }
-
-    let id = random_uuid_v4();
-    guard.insert(
-        key.to_string(),
-        PromptCacheEntry {
-            id: id.clone(),
-            expires_at: now + PROMPT_CACHE_TTL,
-        },
-    );
-    id
-}
-
-fn random_uuid_v4() -> String {
-    let mut bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15]
-    )
 }
 
 fn append_assistant_messages(messages: &mut Vec<Value>, content: &Value) -> Result<(), String> {

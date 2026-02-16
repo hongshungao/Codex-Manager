@@ -10,10 +10,11 @@ pub(crate) fn prepare_gateway_candidates(
     storage: &Storage,
 ) -> Result<Vec<(Account, Token)>, String> {
     let mut candidates = super::super::collect_gateway_candidates(storage)?;
-    // 中文注释：先避开冷却中的账号，再按并发负载排序，减少并发时反复命中不稳定账号。
+    // 中文注释：先避开冷却中的账号，再按历史路由质量与并发负载排序，减少反复命中不稳定账号。
     candidates.sort_by_key(|(account, _)| {
         (
             super::super::is_account_in_cooldown(&account.id),
+            super::super::route_quality_penalty(&account.id),
             super::super::account_inflight_count(&account.id),
         )
     });

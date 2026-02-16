@@ -32,10 +32,10 @@ $multiOutput = & $scriptPath -DryRun -AllPlatforms -GitRef "master" -GithubToken
 if (-not $?) {
   throw "rebuild.ps1 -AllPlatforms dry-run failed to run"
 }
-if ($multiOutput -notlike "*dispatch workflow build-multi-platform.yml*") {
+if ($multiOutput -notlike "*dispatch workflow release-multi-platform.yml*") {
   throw "expected all-platform dispatch output"
 }
-if ($multiOutput -notlike "*repos/*/actions/workflows/build-multi-platform.yml/dispatches*") {
+if ($multiOutput -notlike "*repos/*/actions/workflows/release-multi-platform.yml/dispatches*") {
   throw "expected github dispatch url in dry-run output"
 }
 

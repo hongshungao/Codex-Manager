@@ -97,14 +97,14 @@ pub(super) fn respond_with_upstream(
                 .map(|v| v.to_vec())
                 .map_err(|err| format!("read upstream body failed: {err}"))?;
 
-            let (body, content_type) = match super::protocol_adapter::adapt_upstream_response(
+            let (body, content_type) = match super::adapt_upstream_response(
                 response_adapter,
                 upstream_content_type.as_deref(),
                 &upstream_body,
             ) {
                 Ok(result) => result,
                 Err(err) => (
-                    super::protocol_adapter::build_anthropic_error_body(&format!(
+                    super::build_anthropic_error_body(&format!(
                         "response conversion failed: {err}"
                     )),
                     "application/json",

@@ -24,10 +24,7 @@ pub(crate) fn read_usage_snapshot(account_id: Option<&str>) -> Option<UsageSnaps
     // 读取最新用量快照
     let storage = open_storage()?;
     let snap = match account_id {
-        Some(account_id) => storage
-            .latest_usage_snapshots_by_account()
-            .ok()
-            .and_then(|snaps| snaps.into_iter().find(|snap| snap.account_id == account_id)),
+        Some(account_id) => storage.latest_usage_snapshot_for_account(account_id).ok().flatten(),
         None => storage.latest_usage_snapshot().ok().flatten(),
     }?;
     Some(usage_snapshot_result_from_record(snap))

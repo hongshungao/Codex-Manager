@@ -25,10 +25,8 @@ pub(crate) fn update_api_key_model(
 
     if let Some(protocol) = protocol_type {
         let current = storage
-            .list_api_keys()
+            .find_api_key_by_id(key_id)
             .map_err(|e| e.to_string())?
-            .into_iter()
-            .find(|item| item.id == key_id)
             .ok_or_else(|| "api key not found".to_string())?;
         let normalized_protocol = normalize_protocol_type(Some(protocol))?;
         let (next_client, next_protocol, next_auth) = profile_from_protocol(&normalized_protocol)?;

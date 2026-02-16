@@ -8,7 +8,7 @@ param(
   [string]$PortableDir,
   [switch]$AllPlatforms,
   [string]$GithubToken,
-  [string]$WorkflowFile = "build-multi-platform.yml",
+  [string]$WorkflowFile = "release-multi-platform.yml",
   [string]$GitRef,
   [bool]$DownloadArtifacts = $true,
   [string]$ArtifactsDir,

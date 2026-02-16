@@ -24,7 +24,7 @@ fn anthropic_messages_request_maps_to_responses() {
     assert_eq!(adapted.response_adapter, ResponseAdapter::AnthropicJson);
 
     let value: serde_json::Value = serde_json::from_slice(&adapted.body).expect("adapted json");
-    assert_eq!(value["model"], "claude-sonnet-4");
+    assert_eq!(value["model"], "gpt-5.3-codex");
     assert_eq!(value["instructions"], "你是一个助手");
     assert_eq!(value["text"]["format"]["type"], "text");
     assert_eq!(value["input"][0]["role"], "user");
