@@ -133,16 +133,15 @@ jobs:
             exit 1
           fi
 
-          portable_bin="$portable_dir/CodexManager"
+          portable_bin="$portable_dir/CodexManager-portable"
           cp -f "$source_bin" "$portable_bin"
           chmod +x "$portable_bin"
-          : > "$portable_dir/.codexmanager-portable"
 
           zip_path="$portable_dir/CodexManager-linux-portable.zip"
           rm -f "$zip_path"
           (
             cd "$portable_dir"
-            zip -q "CodexManager-linux-portable.zip" "CodexManager" ".codexmanager-portable"
+            zip -q "CodexManager-linux-portable.zip" "CodexManager-portable"
           )
           echo "portable package: $zip_path"
 

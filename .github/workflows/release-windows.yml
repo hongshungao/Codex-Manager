@@ -127,15 +127,12 @@ jobs:
             throw "portable source binary not found: $source"
           }
 
-          $portableBinary = Join-Path $portableDir "CodexManager.exe"
+          $portableBinary = Join-Path $portableDir "CodexManager-portable.exe"
           Copy-Item -Force $source $portableBinary
-
-          $portableMarker = Join-Path $portableDir ".codexmanager-portable"
-          Set-Content -Path $portableMarker -Value "" -NoNewline
 
           $zipPath = Join-Path $portableDir "CodexManager-windows-portable.zip"
           if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-          Compress-Archive -Path $portableBinary, $portableMarker -DestinationPath $zipPath
+          Compress-Archive -Path $portableBinary -DestinationPath $zipPath
           Write-Host "portable package: $zipPath"
 
       - name: Upload artifacts

@@ -1,10 +1,9 @@
 use reqwest::blocking::Client;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
@@ -19,7 +18,6 @@ use std::os::windows::process::CommandExt;
 
 const DEFAULT_UPDATE_REPO: &str = "qxcnm/Codex-Manager";
 const PORTABLE_MARKER_FILE: &str = ".codexmanager-portable";
-const CHECKSUMS_FILE: &str = "checksums.txt";
 const PENDING_UPDATE_FILE: &str = "pending-update.json";
 const USER_AGENT: &str = "CodexManager-Updater";
 
@@ -116,7 +114,6 @@ struct UpdaterState {
 struct ResolvedUpdateContext {
   check: UpdateCheckResponse,
   payload_asset: Option<GitHubAsset>,
-  checksums_asset: Option<GitHubAsset>,
 }
 
 static UPDATER_STATE: OnceLock<Mutex<UpdaterState>> = OnceLock::new();
@@ -156,7 +153,13 @@ fn current_mode_and_marker() -> Result<(String, bool, PathBuf, PathBuf), String>
     .ok_or_else(|| "resolve exe parent dir failed".to_string())?
     .to_path_buf();
   let marker = exe_dir.join(PORTABLE_MARKER_FILE);
-  let is_portable = marker.is_file();
+  let by_marker = marker.is_file();
+  let by_exe_name = exe
+    .file_name()
+    .and_then(|v| v.to_str())
+    .map(|v| v.to_ascii_lowercase().contains("-portable"))
+    .unwrap_or(false);
+  let is_portable = by_marker || by_exe_name;
   let mode = if is_portable { "portable" } else { "installer" }.to_string();
   Ok((mode, is_portable, exe, marker))
 }
@@ -334,30 +337,38 @@ fn fetch_latest_release(client: &Client, repo: &str) -> Result<GitHubRelease, St
   Ok(release)
 }
 
-fn select_checksum_asset(assets: &[GitHubAsset]) -> Option<GitHubAsset> {
-  assets
-    .iter()
-    .find(|asset| asset.name.eq_ignore_ascii_case(CHECKSUMS_FILE))
-    .cloned()
-}
-
-fn portable_asset_name_for_platform() -> &'static str {
+fn portable_asset_names_for_platform(latest_version: &str) -> Vec<String> {
+  let v = latest_version.trim().trim_start_matches(['v', 'V']);
   if cfg!(target_os = "windows") {
-    "CodexManager-windows-portable.zip"
+    vec![
+      format!("CodexManager-{v}-windows-portable.zip"),
+      "CodexManager-windows-portable.zip".to_string(),
+    ]
   } else if cfg!(target_os = "macos") {
-    "CodexManager-macos-portable.zip"
+    vec![
+      format!("CodexManager-{v}-macos-portable.zip"),
+      "CodexManager-macos-portable.zip".to_string(),
+    ]
   } else {
-    "CodexManager-linux-portable.zip"
+    vec![
+      format!("CodexManager-{v}-linux-portable.zip"),
+      "CodexManager-linux-portable.zip".to_string(),
+    ]
   }
 }
 
-fn select_payload_asset(mode: &str, assets: &[GitHubAsset]) -> Option<GitHubAsset> {
+fn select_payload_asset(mode: &str, latest_version: &str, assets: &[GitHubAsset]) -> Option<GitHubAsset> {
   if mode == "portable" {
-    let portable_name = portable_asset_name_for_platform();
-    return assets
-      .iter()
-      .find(|asset| asset.name.eq_ignore_ascii_case(portable_name))
-      .cloned();
+    let portable_names = portable_asset_names_for_platform(latest_version);
+    for expected in portable_names {
+      if let Some(asset) = assets
+        .iter()
+        .find(|asset| asset.name.eq_ignore_ascii_case(&expected))
+      {
+        return Some(asset.clone());
+      }
+    }
+    return None;
   }
 
   if cfg!(target_os = "windows") {
@@ -412,9 +423,8 @@ fn resolve_update_context() -> Result<ResolvedUpdateContext, String> {
   let latest_semver = normalize_version(&release.tag_name)?;
   let has_update = latest_semver > current_semver;
 
-  let payload_asset = select_payload_asset(&mode, &release.assets);
-  let checksums_asset = select_checksum_asset(&release.assets);
-  let can_prepare = has_update && payload_asset.is_some() && checksums_asset.is_some();
+  let payload_asset = select_payload_asset(&mode, &latest_semver.to_string(), &release.assets);
+  let can_prepare = has_update && payload_asset.is_some();
   let fetched_by_fallback = release.assets.is_empty();
 
   let reason = if !has_update {
@@ -425,8 +435,6 @@ fn resolve_update_context() -> Result<ResolvedUpdateContext, String> {
     )
   } else if payload_asset.is_none() {
     Some("release asset for current platform/mode not found".to_string())
-  } else if checksums_asset.is_none() {
-    Some("checksums.txt is missing in release assets".to_string())
   } else {
     None
   };
@@ -449,7 +457,6 @@ fn resolve_update_context() -> Result<ResolvedUpdateContext, String> {
   Ok(ResolvedUpdateContext {
     check,
     payload_asset,
-    checksums_asset,
   })
 }
 
@@ -544,73 +551,31 @@ fn download_to_file(client: &Client, url: &str, target: &Path) -> Result<(), Str
   file.flush().map_err(|err| format!("flush file failed: {err}"))
 }
 
-fn parse_checksums(contents: &str) -> HashMap<String, String> {
-  let mut out = HashMap::new();
-  for raw_line in contents.lines() {
-    let line = raw_line.trim();
-    if line.is_empty() || line.starts_with('#') {
-      continue;
-    }
-    let mut parts = line.split_whitespace();
-    let Some(hash) = parts.next() else {
-      continue;
-    };
-    let Some(name) = parts.next() else {
-      continue;
-    };
-    out.insert(name.trim_start_matches('*').to_string(), hash.to_ascii_lowercase());
-  }
-  out
-}
-
-fn sha256_for_file(path: &Path) -> Result<String, String> {
-  let mut file = File::open(path).map_err(|err| format!("open file for hash failed: {err}"))?;
-  let mut hasher = Sha256::new();
-  let mut buf = [0u8; 8192];
-  loop {
-    let read = file
-      .read(&mut buf)
-      .map_err(|err| format!("read file for hash failed: {err}"))?;
-    if read == 0 {
-      break;
-    }
-    hasher.update(&buf[..read]);
-  }
-  Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn find_expected_checksum<'a>(checksums: &'a HashMap<String, String>, asset_name: &str) -> Option<&'a String> {
-  if let Some(v) = checksums.get(asset_name) {
-    return Some(v);
-  }
-  checksums.iter().find_map(|(name, hash)| {
-    let file_name = Path::new(name).file_name().and_then(|v| v.to_str())?;
-    if file_name.eq_ignore_ascii_case(asset_name) {
-      Some(hash)
-    } else {
-      None
-    }
-  })
-}
-
-fn verify_asset_checksum(
-  asset_name: &str,
-  asset_path: &Path,
-  checksums_path: &Path,
-) -> Result<(), String> {
-  let checksums_raw = fs::read_to_string(checksums_path)
-    .map_err(|err| format!("read checksums file failed: {err}"))?;
-  let checksums = parse_checksums(&checksums_raw);
-  let expected = find_expected_checksum(&checksums, asset_name)
-    .ok_or_else(|| format!("checksum entry for asset '{asset_name}' not found"))?;
-  let actual = sha256_for_file(asset_path)?;
-  if actual.eq_ignore_ascii_case(expected) {
-    Ok(())
+fn portable_executable_candidates() -> &'static [&'static str] {
+  if cfg!(target_os = "windows") {
+    &["CodexManager-portable.exe", "CodexManager.exe"]
+  } else if cfg!(target_os = "macos") {
+    &["CodexManager-portable.app", "CodexManager.app", "CodexManager"]
   } else {
-    Err(format!(
-      "checksum mismatch for {asset_name}: expected {expected}, got {actual}"
-    ))
+    &["CodexManager-portable", "CodexManager"]
   }
+}
+
+fn resolve_portable_restart_exe(staging_dir: &Path, current_exe_name: &str) -> Result<String, String> {
+  if staging_dir.join(current_exe_name).is_file() {
+    return Ok(current_exe_name.to_string());
+  }
+
+  for candidate in portable_executable_candidates() {
+    if staging_dir.join(candidate).is_file() {
+      return Ok((*candidate).to_string());
+    }
+  }
+
+  Err(format!(
+    "portable package is invalid: no executable found in staging dir, expected one of [{}]",
+    portable_executable_candidates().join(", ")
+  ))
 }
 
 fn extract_zip_archive(zip_path: &Path, target_dir: &Path) -> Result<(), String> {
@@ -664,20 +629,12 @@ fn prepare_update_impl(app: &tauri::AppHandle) -> Result<UpdatePrepareResponse, 
     .payload_asset
     .clone()
     .ok_or_else(|| "missing payload asset".to_string())?;
-  let checksums_asset = context
-    .checksums_asset
-    .clone()
-    .ok_or_else(|| "missing checksums asset".to_string())?;
-
   let client = http_client()?;
   let release_dir = updates_root_dir(app)?.join(sanitize_tag(&context.check.release_tag));
   fs::create_dir_all(&release_dir).map_err(|err| format!("create release dir failed: {err}"))?;
 
   let payload_path = release_dir.join(&payload_asset.name);
-  let checksums_path = release_dir.join(CHECKSUMS_FILE);
   download_to_file(&client, &payload_asset.browser_download_url, &payload_path)?;
-  download_to_file(&client, &checksums_asset.browser_download_url, &checksums_path)?;
-  verify_asset_checksum(&payload_asset.name, &payload_path, &checksums_path)?;
 
   let mut pending = PendingUpdate {
     mode: context.check.mode.clone(),
@@ -698,12 +655,12 @@ fn prepare_update_impl(app: &tauri::AppHandle) -> Result<UpdatePrepareResponse, 
     }
     fs::create_dir_all(&staging_dir).map_err(|err| format!("create staging dir failed: {err}"))?;
     extract_zip_archive(&payload_path, &staging_dir)?;
-    let marker = staging_dir.join(PORTABLE_MARKER_FILE);
-    if !marker.is_file() {
-      return Err(format!(
-        "portable package is invalid: missing marker file {PORTABLE_MARKER_FILE}"
-      ));
-    }
+    let current_exe_name = current_exe_path()?
+      .file_name()
+      .and_then(|name| name.to_str())
+      .ok_or_else(|| "resolve current exe file name failed".to_string())?
+      .to_string();
+    let _ = resolve_portable_restart_exe(&staging_dir, &current_exe_name)?;
     pending.staging_dir = Some(staging_dir.display().to_string());
   } else {
     pending.installer_path = Some(payload_path.display().to_string());
@@ -971,6 +928,7 @@ pub fn app_update_apply_portable(app: tauri::AppHandle) -> Result<UpdateActionRe
     .and_then(|name| name.to_str())
     .ok_or_else(|| "resolve current exe file name failed".to_string())?
     .to_string();
+  let restart_exe_name = resolve_portable_restart_exe(&staging_dir, &exe_name)?;
   let pending_path = pending_update_path(&app)?;
   let script_dir = script_dir_from_pending(&pending, &app)?;
   let pid = std::process::id();
@@ -979,7 +937,7 @@ pub fn app_update_apply_portable(app: tauri::AppHandle) -> Result<UpdateActionRe
     &script_dir,
     &target_dir,
     &staging_dir,
-    &exe_name,
+    &restart_exe_name,
     &pending_path,
     pid,
   )?;
