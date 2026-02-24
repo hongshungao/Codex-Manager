@@ -65,6 +65,16 @@ const { switchPage, updateRequestLogFilterButtons } = createNavigationHandlers({
 const { setStartupMask } = createStartupMaskController({ dom, state });
 let refreshAllInFlight = null;
 
+function nextPaintTick() {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
 async function refreshAll() {
   if (refreshAllInFlight) {
     return refreshAllInFlight;
@@ -97,6 +107,14 @@ async function refreshAll() {
   } finally {
     refreshAllInFlight = null;
   }
+}
+
+async function handleRefreshAllClick() {
+  await withButtonBusy(dom.refreshAll, "刷新中...", async () => {
+    // 中文注释：先让浏览器绘制 loading 态，避免用户感知“点击后卡住”。
+    await nextPaintTick();
+    await refreshAll();
+  });
 }
 
 async function refreshAccountsAndUsage() {
@@ -204,7 +222,7 @@ function bindEvents() {
     handleClearRequestLogs,
     refreshRequestLogs,
     renderRequestLogs,
-    refreshAll,
+    refreshAll: handleRefreshAllClick,
     ensureConnected,
     refreshApiModels,
     populateApiKeyModelSelect,

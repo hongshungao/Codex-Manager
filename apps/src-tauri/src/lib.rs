@@ -32,100 +32,124 @@ async fn service_initialize(addr: Option<String>) -> Result<serde_json::Value, S
   Ok(v)
 }
 
+async fn rpc_call_in_background(
+  method: &'static str,
+  addr: Option<String>,
+  params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+  let method_name = method.to_string();
+  let method_for_task = method_name.clone();
+  tauri::async_runtime::spawn_blocking(move || rpc_call(&method_for_task, addr, params))
+    .await
+    .map_err(|err| format!("{method_name} task failed: {err}"))?
+}
+
 #[tauri::command]
-fn service_start(app: tauri::AppHandle, addr: String) -> Result<(), String> {
+async fn service_start(app: tauri::AppHandle, addr: String) -> Result<(), String> {
   let addr = normalize_addr(&addr)?;
-  log::info!("service_start requested addr={}", addr);
-  // 中文注释：保存地址与回调地址，按需启动 service
-  std::env::set_var("CODEXMANAGER_SERVICE_ADDR", &addr);
-  stop_service();
-  spawn_service_with_addr(&app, &addr)
+  tauri::async_runtime::spawn_blocking(move || {
+    log::info!("service_start requested addr={}", addr);
+    // 中文注释：保存地址与回调地址，按需启动 service
+    std::env::set_var("CODEXMANAGER_SERVICE_ADDR", &addr);
+    stop_service();
+    spawn_service_with_addr(&app, &addr)
+  })
+  .await
+  .map_err(|err| format!("service_start task failed: {err}"))?
 }
 
 #[tauri::command]
-fn service_stop() -> Result<(), String> {
-  // 中文注释：显式停止 service 进程
-  stop_service();
-  Ok(())
+async fn service_stop() -> Result<(), String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    // 中文注释：显式停止 service 进程
+    stop_service();
+    Ok(())
+  })
+  .await
+  .map_err(|err| format!("service_stop task failed: {err}"))?
 }
 
 #[tauri::command]
-fn service_account_list(addr: Option<String>) -> Result<serde_json::Value, String> {
-  rpc_call("account/list", addr, None)
+async fn service_account_list(addr: Option<String>) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("account/list", addr, None).await
 }
 
 #[tauri::command]
-fn service_account_delete(
+async fn service_account_delete(
   addr: Option<String>,
   account_id: String,
 ) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({ "accountId": account_id });
-  rpc_call("account/delete", addr, Some(params))
+  rpc_call_in_background("account/delete", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_account_update(
+async fn service_account_update(
   addr: Option<String>,
   account_id: String,
   sort: i64,
 ) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({ "accountId": account_id, "sort": sort });
-  rpc_call("account/update", addr, Some(params))
+  rpc_call_in_background("account/update", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn local_account_delete(
+async fn local_account_delete(
   app: tauri::AppHandle,
   account_id: String,
 ) -> Result<serde_json::Value, String> {
   let db_path = resolve_db_path_with_legacy_migration(&app)?;
-  let mut storage = Storage::open(db_path).map_err(|e| e.to_string())?;
-  storage
-    .delete_account(&account_id)
-    .map_err(|e| e.to_string())?;
-  Ok(serde_json::json!({ "ok": true }))
+  tauri::async_runtime::spawn_blocking(move || {
+    let mut storage = Storage::open(db_path).map_err(|e| e.to_string())?;
+    storage
+      .delete_account(&account_id)
+      .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true }))
+  })
+  .await
+  .map_err(|err| format!("local_account_delete task failed: {err}"))?
 }
 
 #[tauri::command]
-fn service_usage_read(
+async fn service_usage_read(
   addr: Option<String>,
   account_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
   let params = account_id.map(|id| serde_json::json!({ "accountId": id }));
-  rpc_call("account/usage/read", addr, params)
+  rpc_call_in_background("account/usage/read", addr, params).await
 }
 
 #[tauri::command]
-fn service_usage_list(addr: Option<String>) -> Result<serde_json::Value, String> {
-  rpc_call("account/usage/list", addr, None)
+async fn service_usage_list(addr: Option<String>) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("account/usage/list", addr, None).await
 }
 
 #[tauri::command]
-fn service_usage_refresh(
+async fn service_usage_refresh(
   addr: Option<String>,
   account_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
   let params = account_id.map(|id| serde_json::json!({ "accountId": id }));
-  rpc_call("account/usage/refresh", addr, params)
+  rpc_call_in_background("account/usage/refresh", addr, params).await
 }
 
 #[tauri::command]
-fn service_requestlog_list(
+async fn service_requestlog_list(
   addr: Option<String>,
   query: Option<String>,
   limit: Option<i64>,
 ) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({ "query": query, "limit": limit });
-  rpc_call("requestlog/list", addr, Some(params))
+  rpc_call_in_background("requestlog/list", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_requestlog_clear(addr: Option<String>) -> Result<serde_json::Value, String> {
-  rpc_call("requestlog/clear", addr, None)
+async fn service_requestlog_clear(addr: Option<String>) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("requestlog/clear", addr, None).await
 }
 
 #[tauri::command]
-fn service_login_start(
+async fn service_login_start(
   addr: Option<String>,
   login_type: String,
   open_browser: Option<bool>,
@@ -142,19 +166,19 @@ fn service_login_start(
     "groupName": group_name,
     "workspaceId": workspace_id
   });
-  rpc_call("account/login/start", addr, Some(params))
+  rpc_call_in_background("account/login/start", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_login_status(addr: Option<String>, login_id: String) -> Result<serde_json::Value, String> {
+async fn service_login_status(addr: Option<String>, login_id: String) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({
     "loginId": login_id
   });
-  rpc_call("account/login/status", addr, Some(params))
+  rpc_call_in_background("account/login/status", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_login_complete(
+async fn service_login_complete(
   addr: Option<String>,
   state: String,
   code: String,
@@ -165,16 +189,16 @@ fn service_login_complete(
     "code": code,
     "redirectUri": redirect_uri
   });
-  rpc_call("account/login/complete", addr, Some(params))
+  rpc_call_in_background("account/login/complete", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_apikey_list(addr: Option<String>) -> Result<serde_json::Value, String> {
-  rpc_call("apikey/list", addr, None)
+async fn service_apikey_list(addr: Option<String>) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("apikey/list", addr, None).await
 }
 
 #[tauri::command]
-fn service_apikey_create(
+async fn service_apikey_create(
   addr: Option<String>,
   name: Option<String>,
   model_slug: Option<String>,
@@ -187,16 +211,16 @@ fn service_apikey_create(
     "reasoningEffort": reasoning_effort,
     "protocolType": protocol_type,
   });
-  rpc_call("apikey/create", addr, Some(params))
+  rpc_call_in_background("apikey/create", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_apikey_models(addr: Option<String>) -> Result<serde_json::Value, String> {
-  rpc_call("apikey/models", addr, None)
+async fn service_apikey_models(addr: Option<String>) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("apikey/models", addr, None).await
 }
 
 #[tauri::command]
-fn service_apikey_update_model(
+async fn service_apikey_update_model(
   addr: Option<String>,
   key_id: String,
   model_slug: Option<String>,
@@ -209,32 +233,40 @@ fn service_apikey_update_model(
     "reasoningEffort": reasoning_effort,
     "protocolType": protocol_type,
   });
-  rpc_call("apikey/updateModel", addr, Some(params))
+  rpc_call_in_background("apikey/updateModel", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_apikey_delete(addr: Option<String>, key_id: String) -> Result<serde_json::Value, String> {
+async fn service_apikey_delete(addr: Option<String>, key_id: String) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({ "id": key_id });
-  rpc_call("apikey/delete", addr, Some(params))
+  rpc_call_in_background("apikey/delete", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_apikey_disable(addr: Option<String>, key_id: String) -> Result<serde_json::Value, String> {
+async fn service_apikey_disable(addr: Option<String>, key_id: String) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({ "id": key_id });
-  rpc_call("apikey/disable", addr, Some(params))
+  rpc_call_in_background("apikey/disable", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn service_apikey_enable(addr: Option<String>, key_id: String) -> Result<serde_json::Value, String> {
+async fn service_apikey_enable(addr: Option<String>, key_id: String) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({ "id": key_id });
-  rpc_call("apikey/enable", addr, Some(params))
+  rpc_call_in_background("apikey/enable", addr, Some(params)).await
 }
 
 #[tauri::command]
-fn open_in_browser(url: String) -> Result<(), String> {
+async fn open_in_browser(url: String) -> Result<(), String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    open_in_browser_blocking(&url)
+  })
+  .await
+  .map_err(|err| format!("open_in_browser task failed: {err}"))?
+}
+
+fn open_in_browser_blocking(url: &str) -> Result<(), String> {
   if cfg!(target_os = "windows") {
     let status = std::process::Command::new("rundll32.exe")
-      .args(["url.dll,FileProtocolHandler", &url])
+      .args(["url.dll,FileProtocolHandler", url])
       .status()
       .map_err(|e| e.to_string())?;
     if status.success() {
@@ -243,7 +275,7 @@ fn open_in_browser(url: String) -> Result<(), String> {
       Err(format!("rundll32 failed with status: {status}"))
     }
   } else {
-    webbrowser::open(&url).map(|_| ()).map_err(|e| e.to_string())
+    webbrowser::open(url).map(|_| ()).map_err(|e| e.to_string())
   }
 }
 
