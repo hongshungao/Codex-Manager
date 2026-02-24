@@ -192,6 +192,15 @@ GPTTOOLS_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 - 模型列表/请求被挑战拦截：可尝试设置 `GPTTOOLS_UPSTREAM_COOKIE`，或显式配置 `GPTTOOLS_UPSTREAM_FALLBACK_BASE_URL`。
 - 独立运行 service 报存储不可用：先设置 `GPTTOOLS_DB_PATH` 到可写路径。
 
+## 🤝 鸣谢项目 (Special Thanks)
+本项目在网关协议适配与稳定性治理上参考了以下开源项目的思路：
+
+- [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
+
+对应实现可见：
+- `crates/gpttools-service/src/gateway/protocol_adapter/request_mapping.rs`
+- `crates/gpttools-service/src/gateway/upstream/transport.rs`
+
 ## 联系方式
 ![个人](assets/images/personal.jpg)
 ![交流群](assets/images/group.jpg)

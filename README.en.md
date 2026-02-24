@@ -193,6 +193,15 @@ GPTTOOLS_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 - Model list/request blocked by challenge: try `GPTTOOLS_UPSTREAM_COOKIE` or explicit `GPTTOOLS_UPSTREAM_FALLBACK_BASE_URL`.
 - Standalone service reports storage unavailable: set `GPTTOOLS_DB_PATH` to a writable path first.
 
+## 🤝 Special Thanks
+This project references the following open-source project for gateway protocol adaptation and stability hardening ideas:
+
+- [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
+
+Related implementation points:
+- `crates/gpttools-service/src/gateway/protocol_adapter/request_mapping.rs`
+- `crates/gpttools-service/src/gateway/upstream/transport.rs`
+
 ## Contact
 ![Personal](assets/images/personal.jpg)
 ![Group](assets/images/group.jpg)
