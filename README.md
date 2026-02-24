@@ -13,13 +13,13 @@
 本地桌面端 + 服务进程的 Codex 账号池管理器，用于统一管理账号、用量与平台 Key，并提供本地网关能力。
 
 ## 最近变更
-- 网关协议适配继续拆分：`protocol_adapter` 的请求映射与响应转换进一步模块化，响应转换按 JSON/SSE 分离，维护边界更清晰。
-- 后端路由边界收敛：统一 backend router 分发路径，减少网关/代理双栈逻辑重复。
-- 稳定性增强：前端刷新与请求日志竞态治理、复制能力统一降级（clipboard API + execCommand fallback）、关键事件绑定幂等化。
-- 安全与运行时控制增强：`/rpc` token 鉴权强制开启，请求闸门等待预算、上游连接超时、代理 body 限制、账号并发上限等参数可配置。
-- 可观测性增强：补齐 route/status_class/protocol 维度指标，并新增 RPC 与 usage refresh 指标。
-- 工程链路增强：release workflow 仍保持手动触发，并新增可选质量门（`run_verify`）、目标 SHA 追踪、release 元信息文件。
-- 发布脚本对齐：`scripts/rebuild.ps1` 支持传递 `tag/ref/run_verify` 到 workflow，并按 `head_sha` 轮询匹配正确的 workflow run。
+- `v0.1.x` 汇总（最近版本）
+- 更新能力重构：更新按钮改为“两段式”（先检查、再执行更新），设置页新增“当前版本”展示，更新状态反馈更清晰。
+- GitHub 版本检查增强：当 Release API 限流或失败时，自动回退到 Release 页面解析最新版本，减少“检查失败”概率。
+- 发布流程拆分：原多平台 workflow 拆分为 `release-windows.yml`、`release-linux.yml`、`release-macos-beta.yml`，全部保持手动触发。
+- macOS 内测分发：提供未签名内测包流程（`macos-beta`），并附带运行说明，避免误解为正式签名发布。
+- 便携更新流程优化：便携包改为单文件可执行形式（如 `CodexManager-portable.exe`），更新端不再依赖 marker 文件作为唯一判定。
+- 更新下载简化：完全移除 `checksums.txt` 依赖，更新按版本与资产命名规则直接匹配并拉取。
 
 ## 功能概览
 - 账号池管理：分组、标签、排序、备注
@@ -95,8 +95,22 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 -Bundle nsis -CleanDist -Porta
 - `ci-verify.yml`
   - 用途：质量门（Rust tests + 前端 tests + 前端 build）
   - 触发：手动
-- `release-multi-platform.yml`
-  - 用途：三平台打包与 release 发布
+- `release-windows.yml`
+  - 用途：Windows 打包与 release 发布（安装包 + portable）
+  - 触发：手动
+  - 输入：
+    - `tag`（必填）
+    - `ref`（默认 `main`）
+    - `run_verify`（默认 `true`，可关闭）
+- `release-linux.yml`
+  - 用途：Linux 打包与 release 发布（AppImage/deb + portable）
+  - 触发：手动
+  - 输入：
+    - `tag`（必填）
+    - `ref`（默认 `main`）
+    - `run_verify`（默认 `true`，可关闭）
+- `release-macos-beta.yml`
+  - 用途：macOS 内测包发布（未签名，仅内测）
   - 触发：手动
   - 输入：
     - `tag`（必填）
@@ -112,7 +126,7 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 -Bundle nsis -CleanDist -Porta
 # 本地 Windows 构建
 pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 -Bundle nsis -CleanDist -Portable
 
-# 触发三平台 workflow（并下载工件）
+# 触发 release workflow（并下载工件）
 pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
   -AllPlatforms `
   -GitRef main `
@@ -130,9 +144,9 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
 - `-CleanDist`：构建前清理 `apps/dist`
 - `-Portable`：额外输出便携版
 - `-PortableDir <path>`：便携版输出目录，默认 `portable/`
-- `-AllPlatforms`：触发 `release-multi-platform.yml`
+- `-AllPlatforms`：触发指定 release workflow（由 `-WorkflowFile` 指定）
 - `-GithubToken <token>`：GitHub token；不传时尝试 `GITHUB_TOKEN`/`GH_TOKEN`
-- `-WorkflowFile <name>`：默认 `release-multi-platform.yml`
+- `-WorkflowFile <name>`：默认由脚本配置决定，建议显式传入（如 `release-windows.yml`）
 - `-GitRef <ref>`：workflow 构建 ref；默认当前分支或当前 tag
 - `-ReleaseTag <tag>`：发布 tag；`-AllPlatforms` 时建议显式传入
 - `-NoVerify`：将 workflow 输入 `run_verify` 设为 `false`
