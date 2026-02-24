@@ -41,8 +41,8 @@
 │  ├─ src-tauri/
 │  └─ dist/
 ├─ crates/              # Rust core/service
-│  ├─ gpttools-core
-│  └─ gpttools-service
+│  ├─ codexmanager-core
+│  └─ codexmanager-service
 ├─ scripts/             # 构建与发布脚本
 ├─ portable/            # 便携版输出目录
 └─ README.md
@@ -67,7 +67,7 @@ pnpm -C apps run build
 ### Rust
 ```bash
 cargo test --workspace
-cargo build -p gpttools-service --release
+cargo build -p codexmanager-service --release
 ```
 
 ### Tauri 打包（Windows）
@@ -136,39 +136,39 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
 
 ## 环境变量说明（完整）
 ### 加载与优先级
-- 桌面端会在可执行文件同目录按顺序查找环境文件：`gpttools.env` -> `CodexManager.env` -> `.env`（命中第一个即停止）。
+- 桌面端会在可执行文件同目录按顺序查找环境文件：`codexmanager.env` -> `CodexManager.env` -> `.env`（命中第一个即停止）。
 - 环境文件中只会注入“当前进程尚未定义”的变量，已有系统/用户变量不会被覆盖。
-- 绝大多数变量均为可选；`GPTTOOLS_DB_PATH` 在“独立运行 service 二进制”场景下属于必填。
+- 绝大多数变量均为可选；`CODEXMANAGER_DB_PATH` 在“独立运行 service 二进制”场景下属于必填。
 
-### 运行时变量（`GPTTOOLS_*`）
+### 运行时变量（`CODEXMANAGER_*`）
 | 变量 | 默认值 | 是否必填 | 说明 |
 |---|---|---|---|
-| `GPTTOOLS_SERVICE_ADDR` | `localhost:48760` | 可选 | service 监听地址；桌面端也会用它作为默认 RPC 目标地址。 |
-| `GPTTOOLS_DB_PATH` | 无 | 条件必填 | 数据库路径。桌面端会自动设为 `app_data_dir/gpttools.db`；独立运行 `gpttools-service` 时建议显式设置。 |
-| `GPTTOOLS_RPC_TOKEN` | 自动生成 64 位十六进制随机串 | 可选 | `/rpc` 鉴权 token。未设置时进程启动后自动生成，仅当前进程有效。 |
-| `GPTTOOLS_NO_SERVICE` | 未设置 | 可选 | 只要变量存在（值可为空）就不自动拉起内嵌 service。 |
-| `GPTTOOLS_ISSUER` | `https://auth.openai.com` | 可选 | OAuth issuer。 |
-| `GPTTOOLS_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | 可选 | OAuth client id。 |
-| `GPTTOOLS_ORIGINATOR` | `codex_cli_rs` | 可选 | OAuth authorize 请求中的 `originator`。 |
-| `GPTTOOLS_REDIRECT_URI` | `http://localhost:1455/auth/callback`（或登录服务动态端口） | 可选 | OAuth 回调地址。 |
-| `GPTTOOLS_LOGIN_ADDR` | `localhost:1455` | 可选 | 本地登录回调监听地址。 |
-| `GPTTOOLS_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | 可选 | 是否允许非 loopback 回调地址。仅 `1/true/TRUE/yes/YES` 视为开启。 |
-| `GPTTOOLS_USAGE_BASE_URL` | `https://chatgpt.com` | 可选 | 用量接口 base URL。 |
-| `GPTTOOLS_DISABLE_POLLING` | 未设置（即开启轮询） | 可选 | 只要变量存在（值可为空）就禁用后台用量轮询线程。 |
-| `GPTTOOLS_USAGE_POLL_INTERVAL_SECS` | `600` | 可选 | 用量轮询间隔（秒），最小 `30`。非法值回退默认。 |
-| `GPTTOOLS_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | 可选 | Gateway keepalive 间隔（秒），最小 `30`。 |
-| `GPTTOOLS_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | 可选 | 主上游地址。若填 `https://chatgpt.com`/`https://chat.openai.com` 会自动归一化到 backend-api/codex。 |
-| `GPTTOOLS_UPSTREAM_FALLBACK_BASE_URL` | 自动推断 | 可选 | 明确指定 fallback 上游。若未设置且主上游是 ChatGPT backend，则默认 fallback 到 `https://api.openai.com/v1`。 |
-| `GPTTOOLS_UPSTREAM_COOKIE` | 未设置 | 可选 | 上游 Cookie（主要用于 Cloudflare/WAF challenge 场景）。 |
-| `GPTTOOLS_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | 可选 | 上游连接阶段超时（秒）。 |
-| `GPTTOOLS_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | 可选 | 请求闸门等待预算（毫秒）。 |
-| `GPTTOOLS_ACCOUNT_MAX_INFLIGHT` | `0` | 可选 | 单账号并发软上限。`0` 表示不限制。 |
-| `GPTTOOLS_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | 可选 | Trace body 预览最大字节数。`0` 表示关闭 body 预览。 |
-| `GPTTOOLS_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | 可选 | 前置代理允许的请求体最大字节数（默认 16 MiB）。 |
-| `GPTTOOLS_HTTP_WORKER_FACTOR` | `4` | 可选 | backend worker 数量系数，worker = `max(cpu * factor, worker_min)`。 |
-| `GPTTOOLS_HTTP_WORKER_MIN` | `8` | 可选 | backend worker 最小值。 |
-| `GPTTOOLS_HTTP_QUEUE_FACTOR` | `4` | 可选 | backend 请求队列系数，queue = `max(worker * factor, queue_min)`。 |
-| `GPTTOOLS_HTTP_QUEUE_MIN` | `32` | 可选 | backend 请求队列最小值。 |
+| `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | 可选 | service 监听地址；桌面端也会用它作为默认 RPC 目标地址。 |
+| `CODEXMANAGER_DB_PATH` | 无 | 条件必填 | 数据库路径。桌面端会自动设为 `app_data_dir/codexmanager.db`；独立运行 `codexmanager-service` 时建议显式设置。 |
+| `CODEXMANAGER_RPC_TOKEN` | 自动生成 64 位十六进制随机串 | 可选 | `/rpc` 鉴权 token。未设置时进程启动后自动生成，仅当前进程有效。 |
+| `CODEXMANAGER_NO_SERVICE` | 未设置 | 可选 | 只要变量存在（值可为空）就不自动拉起内嵌 service。 |
+| `CODEXMANAGER_ISSUER` | `https://auth.openai.com` | 可选 | OAuth issuer。 |
+| `CODEXMANAGER_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | 可选 | OAuth client id。 |
+| `CODEXMANAGER_ORIGINATOR` | `codex_cli_rs` | 可选 | OAuth authorize 请求中的 `originator`。 |
+| `CODEXMANAGER_REDIRECT_URI` | `http://localhost:1455/auth/callback`（或登录服务动态端口） | 可选 | OAuth 回调地址。 |
+| `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | 可选 | 本地登录回调监听地址。 |
+| `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | 可选 | 是否允许非 loopback 回调地址。仅 `1/true/TRUE/yes/YES` 视为开启。 |
+| `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | 可选 | 用量接口 base URL。 |
+| `CODEXMANAGER_DISABLE_POLLING` | 未设置（即开启轮询） | 可选 | 只要变量存在（值可为空）就禁用后台用量轮询线程。 |
+| `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | 可选 | 用量轮询间隔（秒），最小 `30`。非法值回退默认。 |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | 可选 | Gateway keepalive 间隔（秒），最小 `30`。 |
+| `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | 可选 | 主上游地址。若填 `https://chatgpt.com`/`https://chat.openai.com` 会自动归一化到 backend-api/codex。 |
+| `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | 自动推断 | 可选 | 明确指定 fallback 上游。若未设置且主上游是 ChatGPT backend，则默认 fallback 到 `https://api.openai.com/v1`。 |
+| `CODEXMANAGER_UPSTREAM_COOKIE` | 未设置 | 可选 | 上游 Cookie（主要用于 Cloudflare/WAF challenge 场景）。 |
+| `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | 可选 | 上游连接阶段超时（秒）。 |
+| `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | 可选 | 请求闸门等待预算（毫秒）。 |
+| `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | 可选 | 单账号并发软上限。`0` 表示不限制。 |
+| `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | 可选 | Trace body 预览最大字节数。`0` 表示关闭 body 预览。 |
+| `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | 可选 | 前置代理允许的请求体最大字节数（默认 16 MiB）。 |
+| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | 可选 | backend worker 数量系数，worker = `max(cpu * factor, worker_min)`。 |
+| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | 可选 | backend worker 最小值。 |
+| `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | 可选 | backend 请求队列系数，queue = `max(worker * factor, queue_min)`。 |
+| `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | 可选 | backend 请求队列最小值。 |
 
 ### 发布脚本相关变量
 | 变量 | 默认值 | 是否必填 | 说明 |
@@ -178,19 +178,19 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
 
 ## 环境文件示例（放在可执行文件同目录）
 ```dotenv
-# gpttools.env / CodexManager.env / .env
-GPTTOOLS_SERVICE_ADDR=localhost:48760
-GPTTOOLS_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
-GPTTOOLS_USAGE_POLL_INTERVAL_SECS=600
-GPTTOOLS_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
+# codexmanager.env / CodexManager.env / .env
+CODEXMANAGER_SERVICE_ADDR=localhost:48760
+CODEXMANAGER_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
+CODEXMANAGER_USAGE_POLL_INTERVAL_SECS=600
+CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 # 可选：固定 RPC token 方便外部工具长期复用
-# GPTTOOLS_RPC_TOKEN=replace_with_your_static_token
+# CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
 ```
 
 ## 常见问题
-- 授权回调失败：优先检查 `GPTTOOLS_LOGIN_ADDR` 是否被占用，或在 UI 使用手动回调解析。
-- 模型列表/请求被挑战拦截：可尝试设置 `GPTTOOLS_UPSTREAM_COOKIE`，或显式配置 `GPTTOOLS_UPSTREAM_FALLBACK_BASE_URL`。
-- 独立运行 service 报存储不可用：先设置 `GPTTOOLS_DB_PATH` 到可写路径。
+- 授权回调失败：优先检查 `CODEXMANAGER_LOGIN_ADDR` 是否被占用，或在 UI 使用手动回调解析。
+- 模型列表/请求被挑战拦截：可尝试设置 `CODEXMANAGER_UPSTREAM_COOKIE`，或显式配置 `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`。
+- 独立运行 service 报存储不可用：先设置 `CODEXMANAGER_DB_PATH` 到可写路径。
 
 ## 🤝 鸣谢项目 (Special Thanks)
 本项目在网关协议适配与稳定性治理上参考了以下开源项目的思路：
@@ -198,8 +198,8 @@ GPTTOOLS_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 
 对应实现可见：
-- `crates/gpttools-service/src/gateway/protocol_adapter/request_mapping.rs`
-- `crates/gpttools-service/src/gateway/upstream/transport.rs`
+- `crates/codexmanager-service/src/gateway/protocol_adapter/request_mapping.rs`
+- `crates/codexmanager-service/src/gateway/upstream/transport.rs`
 
 ## 联系方式
 ![个人](assets/images/personal.jpg)

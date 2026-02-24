@@ -41,8 +41,8 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 │  ├─ src-tauri/
 │  └─ dist/
 ├─ crates/              # Rust core/service
-│  ├─ gpttools-core
-│  └─ gpttools-service
+│  ├─ codexmanager-core
+│  └─ codexmanager-service
 ├─ scripts/             # build/release scripts
 ├─ portable/            # portable output
 └─ README.en.md
@@ -67,7 +67,7 @@ pnpm -C apps run build
 ### Rust
 ```bash
 cargo test --workspace
-cargo build -p gpttools-service --release
+cargo build -p codexmanager-service --release
 ```
 
 ### Tauri Packaging (Windows)
@@ -137,39 +137,39 @@ Parameters (with defaults):
 ## Environment Variables (Complete)
 ### Load Rules and Precedence
 - Desktop app loads env files from executable directory in this order:
-  - `gpttools.env` -> `CodexManager.env` -> `.env` (first hit wins)
+  - `codexmanager.env` -> `CodexManager.env` -> `.env` (first hit wins)
 - Existing process/system env vars are not overridden by env-file values.
-- Most vars are optional. `GPTTOOLS_DB_PATH` is conditionally required when running `gpttools-service` standalone.
+- Most vars are optional. `CODEXMANAGER_DB_PATH` is conditionally required when running `codexmanager-service` standalone.
 
-### Runtime Variables (`GPTTOOLS_*`)
+### Runtime Variables (`CODEXMANAGER_*`)
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `GPTTOOLS_SERVICE_ADDR` | `localhost:48760` | Optional | Service bind address and default RPC target used by desktop app. |
-| `GPTTOOLS_DB_PATH` | None | Conditionally required | SQLite path. Desktop sets `app_data_dir/gpttools.db`; set explicitly for standalone service runs. |
-| `GPTTOOLS_RPC_TOKEN` | Auto-generated random 64-hex string | Optional | `/rpc` auth token. Generated at runtime if missing or empty. |
-| `GPTTOOLS_NO_SERVICE` | Unset | Optional | If present (any value), desktop app does not auto-start embedded service. |
-| `GPTTOOLS_ISSUER` | `https://auth.openai.com` | Optional | OAuth issuer. |
-| `GPTTOOLS_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | Optional | OAuth client id. |
-| `GPTTOOLS_ORIGINATOR` | `codex_cli_rs` | Optional | OAuth authorize `originator` value. |
-| `GPTTOOLS_REDIRECT_URI` | `http://localhost:1455/auth/callback` (or dynamic login-server port) | Optional | OAuth redirect URI. |
-| `GPTTOOLS_LOGIN_ADDR` | `localhost:1455` | Optional | Local login callback listener address. |
-| `GPTTOOLS_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | Optional | Allows non-loopback login callback address when set to `1/true/TRUE/yes/YES`. |
-| `GPTTOOLS_USAGE_BASE_URL` | `https://chatgpt.com` | Optional | Base URL for usage requests. |
-| `GPTTOOLS_DISABLE_POLLING` | Unset (polling enabled) | Optional | If present (any value), disables usage polling thread. |
-| `GPTTOOLS_USAGE_POLL_INTERVAL_SECS` | `600` | Optional | Usage polling interval in seconds, minimum `30`. Invalid values fall back to default. |
-| `GPTTOOLS_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | Optional | Gateway keepalive interval in seconds, minimum `30`. |
-| `GPTTOOLS_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | Optional | Primary upstream base URL. Bare ChatGPT host values are normalized to backend-api/codex. |
-| `GPTTOOLS_UPSTREAM_FALLBACK_BASE_URL` | Auto-inferred | Optional | Explicit fallback upstream. If unset and primary is ChatGPT backend, fallback defaults to `https://api.openai.com/v1`. |
-| `GPTTOOLS_UPSTREAM_COOKIE` | Unset | Optional | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
-| `GPTTOOLS_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | Optional | Upstream connect timeout in seconds. |
-| `GPTTOOLS_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | Optional | Request-gate wait budget in milliseconds. |
-| `GPTTOOLS_ACCOUNT_MAX_INFLIGHT` | `0` | Optional | Per-account soft inflight cap. `0` means unlimited. |
-| `GPTTOOLS_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Optional | Max bytes for trace body preview. `0` disables body preview. |
-| `GPTTOOLS_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | Optional | Max accepted request body size for front proxy (16 MiB default). |
-| `GPTTOOLS_HTTP_WORKER_FACTOR` | `4` | Optional | Backend worker factor; workers = `max(cpu * factor, worker_min)`. |
-| `GPTTOOLS_HTTP_WORKER_MIN` | `8` | Optional | Minimum backend workers. |
-| `GPTTOOLS_HTTP_QUEUE_FACTOR` | `4` | Optional | Backend queue factor; queue = `max(worker * factor, queue_min)`. |
-| `GPTTOOLS_HTTP_QUEUE_MIN` | `32` | Optional | Minimum backend queue size. |
+| `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | Optional | Service bind address and default RPC target used by desktop app. |
+| `CODEXMANAGER_DB_PATH` | None | Conditionally required | SQLite path. Desktop sets `app_data_dir/codexmanager.db`; set explicitly for standalone service runs. |
+| `CODEXMANAGER_RPC_TOKEN` | Auto-generated random 64-hex string | Optional | `/rpc` auth token. Generated at runtime if missing or empty. |
+| `CODEXMANAGER_NO_SERVICE` | Unset | Optional | If present (any value), desktop app does not auto-start embedded service. |
+| `CODEXMANAGER_ISSUER` | `https://auth.openai.com` | Optional | OAuth issuer. |
+| `CODEXMANAGER_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | Optional | OAuth client id. |
+| `CODEXMANAGER_ORIGINATOR` | `codex_cli_rs` | Optional | OAuth authorize `originator` value. |
+| `CODEXMANAGER_REDIRECT_URI` | `http://localhost:1455/auth/callback` (or dynamic login-server port) | Optional | OAuth redirect URI. |
+| `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | Optional | Local login callback listener address. |
+| `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | Optional | Allows non-loopback login callback address when set to `1/true/TRUE/yes/YES`. |
+| `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | Optional | Base URL for usage requests. |
+| `CODEXMANAGER_DISABLE_POLLING` | Unset (polling enabled) | Optional | If present (any value), disables usage polling thread. |
+| `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | Optional | Usage polling interval in seconds, minimum `30`. Invalid values fall back to default. |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | Optional | Gateway keepalive interval in seconds, minimum `30`. |
+| `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | Optional | Primary upstream base URL. Bare ChatGPT host values are normalized to backend-api/codex. |
+| `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | Auto-inferred | Optional | Explicit fallback upstream. If unset and primary is ChatGPT backend, fallback defaults to `https://api.openai.com/v1`. |
+| `CODEXMANAGER_UPSTREAM_COOKIE` | Unset | Optional | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
+| `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | Optional | Upstream connect timeout in seconds. |
+| `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | Optional | Request-gate wait budget in milliseconds. |
+| `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | Optional | Per-account soft inflight cap. `0` means unlimited. |
+| `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Optional | Max bytes for trace body preview. `0` disables body preview. |
+| `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | Optional | Max accepted request body size for front proxy (16 MiB default). |
+| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | Optional | Backend worker factor; workers = `max(cpu * factor, worker_min)`. |
+| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | Optional | Minimum backend workers. |
+| `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | Optional | Backend queue factor; queue = `max(worker * factor, queue_min)`. |
+| `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | Optional | Minimum backend queue size. |
 
 ### Release-Script Related Variables
 | Variable | Default | Required | Description |
@@ -179,19 +179,19 @@ Parameters (with defaults):
 
 ## Env File Example (next to executable)
 ```dotenv
-# gpttools.env / CodexManager.env / .env
-GPTTOOLS_SERVICE_ADDR=localhost:48760
-GPTTOOLS_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
-GPTTOOLS_USAGE_POLL_INTERVAL_SECS=600
-GPTTOOLS_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
+# codexmanager.env / CodexManager.env / .env
+CODEXMANAGER_SERVICE_ADDR=localhost:48760
+CODEXMANAGER_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
+CODEXMANAGER_USAGE_POLL_INTERVAL_SECS=600
+CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 # Optional: fixed RPC token for external clients
-# GPTTOOLS_RPC_TOKEN=replace_with_your_static_token
+# CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
 ```
 
 ## Troubleshooting
-- OAuth callback failures: check `GPTTOOLS_LOGIN_ADDR` conflicts, or use manual callback parsing in UI.
-- Model list/request blocked by challenge: try `GPTTOOLS_UPSTREAM_COOKIE` or explicit `GPTTOOLS_UPSTREAM_FALLBACK_BASE_URL`.
-- Standalone service reports storage unavailable: set `GPTTOOLS_DB_PATH` to a writable path first.
+- OAuth callback failures: check `CODEXMANAGER_LOGIN_ADDR` conflicts, or use manual callback parsing in UI.
+- Model list/request blocked by challenge: try `CODEXMANAGER_UPSTREAM_COOKIE` or explicit `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`.
+- Standalone service reports storage unavailable: set `CODEXMANAGER_DB_PATH` to a writable path first.
 
 ## 🤝 Special Thanks
 This project references the following open-source project for gateway protocol adaptation and stability hardening ideas:
@@ -199,8 +199,8 @@ This project references the following open-source project for gateway protocol a
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 
 Related implementation points:
-- `crates/gpttools-service/src/gateway/protocol_adapter/request_mapping.rs`
-- `crates/gpttools-service/src/gateway/upstream/transport.rs`
+- `crates/codexmanager-service/src/gateway/protocol_adapter/request_mapping.rs`
+- `crates/codexmanager-service/src/gateway/upstream/transport.rs`
 
 ## Contact
 ![Personal](assets/images/personal.jpg)
