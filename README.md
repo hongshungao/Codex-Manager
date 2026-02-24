@@ -41,8 +41,8 @@
 │  ├─ src-tauri/
 │  └─ dist/
 ├─ crates/              # Rust core/service
-│  ├─ codexmanager-core
-│  └─ codexmanager-service
+│  ├─ core
+│  └─ service
 ├─ scripts/             # 构建与发布脚本
 ├─ portable/            # 便携版输出目录
 └─ README.md

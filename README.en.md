@@ -41,8 +41,8 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 │  ├─ src-tauri/
 │  └─ dist/
 ├─ crates/              # Rust core/service
-│  ├─ codexmanager-core
-│  └─ codexmanager-service
+│  ├─ core
+│  └─ service
 ├─ scripts/             # build/release scripts
 ├─ portable/            # portable output
 └─ README.en.md
