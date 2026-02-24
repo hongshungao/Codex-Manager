@@ -68,6 +68,7 @@ const UPDATE_AUTO_CHECK_STORAGE_KEY = "codexmanager.update.auto_check";
 const UPDATE_CHECK_DELAY_MS = 1200;
 let refreshAllInFlight = null;
 let updateCheckInFlight = null;
+let pendingUpdateCandidate = null;
 
 function isTauriRuntime() {
   return Boolean(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
@@ -269,6 +270,27 @@ function setUpdateStatusText(message) {
   dom.updateStatusText.textContent = message || "尚未检查更新";
 }
 
+function setCurrentVersionText(version) {
+  if (!dom.updateCurrentVersion) return;
+  const clean = version == null ? "" : String(version).trim();
+  if (!clean) {
+    dom.updateCurrentVersion.textContent = "--";
+    return;
+  }
+  dom.updateCurrentVersion.textContent = clean.startsWith("v") ? clean : `v${clean}`;
+}
+
+function setCheckUpdateButtonLabel() {
+  if (!dom.checkUpdate) return;
+  if (pendingUpdateCandidate && pendingUpdateCandidate.version) {
+    const version = String(pendingUpdateCandidate.version).trim();
+    const display = version.startsWith("v") ? version : `v${version}`;
+    dom.checkUpdate.textContent = `更新到 ${display}`;
+    return;
+  }
+  dom.checkUpdate.textContent = "检查更新";
+}
+
 async function promptUpdateReady(info) {
   const versionLabel = buildVersionLabel(info.version);
   if (info.isPortable) {
@@ -322,6 +344,8 @@ async function runUpdateCheckFlow({ silentIfLatest = false } = {}) {
       const checkResult = await updateCheck();
       const checkInfo = normalizeUpdateInfo(checkResult);
       if (!checkInfo.available) {
+        pendingUpdateCandidate = null;
+        setCheckUpdateButtonLabel();
         setUpdateStatusText("当前已是最新版本");
         if (!silentIfLatest) {
           showToast("当前已是最新版本");
@@ -329,29 +353,32 @@ async function runUpdateCheckFlow({ silentIfLatest = false } = {}) {
         return false;
       }
 
+      pendingUpdateCandidate = {
+        version: checkInfo.version,
+        isPortable: checkInfo.isPortable,
+        canPrepare: checkInfo.canPrepare,
+      };
+      setCheckUpdateButtonLabel();
+
       if (!checkInfo.canPrepare) {
-        setUpdateStatusText(checkInfo.reason || "发现更新但当前平台缺少可用安装包");
-        showToast(checkInfo.reason || "发现更新但当前平台缺少可用安装包", "error");
-        return false;
+        const msg = checkInfo.reason || `发现新版本${buildVersionLabel(checkInfo.version)}，当前仅可查看版本`;
+        setUpdateStatusText(msg);
+        if (!silentIfLatest) {
+          showToast(msg);
+        }
+        return true;
       }
 
-      if (!checkInfo.downloaded) {
-        showToast(`发现新版本${buildVersionLabel(checkInfo.version)}，正在下载更新...`);
+      const tip = `发现新版本${buildVersionLabel(checkInfo.version)}，再次点击可更新`;
+      setUpdateStatusText(tip);
+      if (!silentIfLatest) {
+        showToast(tip);
       }
-      const downloadResult = checkInfo.downloaded ? null : await updateDownload();
-      const downloadInfo = downloadResult ? normalizeUpdateInfo(downloadResult) : null;
-      const finalInfo = {
-        available: true,
-        version: (downloadInfo && downloadInfo.version) || checkInfo.version,
-        isPortable: downloadInfo && downloadInfo.hasPortableHint
-          ? downloadInfo.isPortable
-          : checkInfo.isPortable,
-      };
-      setUpdateStatusText(`新版本 ${finalInfo.version || ""} 已下载，等待安装`);
-      await promptUpdateReady(finalInfo);
       return true;
     } catch (err) {
       console.error("[update] check/download failed", err);
+      pendingUpdateCandidate = null;
+      setCheckUpdateButtonLabel();
       setUpdateStatusText(`检查失败：${normalizeErrorMessage(err)}`);
       showToast(`检查更新失败：${normalizeErrorMessage(err)}`, "error");
       return false;
@@ -365,11 +392,45 @@ async function runUpdateCheckFlow({ silentIfLatest = false } = {}) {
   }
 }
 
+async function runUpdateApplyFlow() {
+  if (!pendingUpdateCandidate || !pendingUpdateCandidate.canPrepare) {
+    showToast("当前更新只支持版本检查，请稍后重试");
+    return false;
+  }
+  const checkVersionLabel = buildVersionLabel(pendingUpdateCandidate.version);
+  try {
+    showToast(`正在下载新版本${checkVersionLabel}...`);
+    const downloadResult = await updateDownload();
+    const downloadInfo = normalizeUpdateInfo(downloadResult);
+    const finalInfo = {
+      version: downloadInfo.version || pendingUpdateCandidate.version,
+      isPortable: downloadInfo.hasPortableHint ? downloadInfo.isPortable : pendingUpdateCandidate.isPortable,
+    };
+    setUpdateStatusText(`新版本 ${finalInfo.version || ""} 已下载，等待安装`);
+    await promptUpdateReady(finalInfo);
+    pendingUpdateCandidate = null;
+    setCheckUpdateButtonLabel();
+    return true;
+  } catch (err) {
+    console.error("[update] apply failed", err);
+    setUpdateStatusText(`更新失败：${normalizeErrorMessage(err)}`);
+    showToast(`更新失败：${normalizeErrorMessage(err)}`, "error");
+    return false;
+  }
+}
+
 async function handleCheckUpdateClick() {
-  await withButtonBusy(dom.checkUpdate, "检查中...", async () => {
+  const hasPreparedCheck = Boolean(pendingUpdateCandidate && pendingUpdateCandidate.version);
+  const busyText = hasPreparedCheck ? "更新中..." : "检查中...";
+  await withButtonBusy(dom.checkUpdate, busyText, async () => {
     await nextPaintTick();
+    if (hasPreparedCheck) {
+      await runUpdateApplyFlow();
+      return;
+    }
     await runUpdateCheckFlow({ silentIfLatest: false });
   });
+  setCheckUpdateButtonLabel();
 }
 
 function scheduleStartupUpdateCheck() {
@@ -383,19 +444,24 @@ function scheduleStartupUpdateCheck() {
 
 async function bootstrapUpdateStatus() {
   if (!isTauriRuntime()) {
+    setCurrentVersionText("--");
     setUpdateStatusText("仅桌面端支持更新");
     return;
   }
   try {
     const status = await updateStatus();
     const current = status && status.currentVersion ? String(status.currentVersion) : "";
+    setCurrentVersionText(current);
     if (current) {
-      setUpdateStatusText(`当前版本 v${current}`);
+      setUpdateStatusText("尚未检查更新");
     } else {
       setUpdateStatusText("尚未检查更新");
     }
+    setCheckUpdateButtonLabel();
   } catch {
+    setCurrentVersionText("--");
     setUpdateStatusText("尚未检查更新");
+    setCheckUpdateButtonLabel();
   }
 }
 

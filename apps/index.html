@@ -37,7 +37,7 @@
                     <div class="top-actions">
                         <div class="service-setup">
                             <input id="serviceAddr" type="text" placeholder="端口，如 5050" />
-                            <label class="service-toggle-control switch-control" for="serviceToggle">
+                            <label class="service-toggle-control update-auto-check switch-control" for="serviceToggle">
                                 <input id="serviceToggle" type="checkbox" />
                                 <span class="switch-track" aria-hidden="true">
                                     <span class="switch-thumb"></span>
@@ -214,6 +214,7 @@
                                     检查更新
                                 </button>
                             </div>
+                            <div class="hint">当前版本：<span id="updateCurrentVersion">--</span></div>
                             <div id="updateStatusText" class="hint">尚未检查更新</div>
                         </div>
 

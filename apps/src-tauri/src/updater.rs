@@ -168,6 +168,52 @@ fn http_client() -> Result<Client, String> {
     .map_err(|err| format!("build http client failed: {err}"))
 }
 
+fn resolve_github_token() -> Option<String> {
+  for key in ["CODEXMANAGER_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"] {
+    if let Ok(value) = std::env::var(key) {
+      let trimmed = value.trim().to_string();
+      if !trimmed.is_empty() {
+        return Some(trimmed);
+      }
+    }
+  }
+  None
+}
+
+fn extract_tag_from_release_url(url: &str) -> Option<String> {
+  let marker = "/releases/tag/";
+  let (_, tail) = url.split_once(marker)?;
+  let tag = tail
+    .split(['?', '#', '/'])
+    .next()
+    .map(|v| v.trim())
+    .unwrap_or("");
+  if tag.is_empty() {
+    None
+  } else {
+    Some(tag.to_string())
+  }
+}
+
+fn fetch_latest_tag_via_redirect(client: &Client, repo: &str) -> Result<String, String> {
+  let url = format!("https://github.com/{repo}/releases/latest");
+  let response = client
+    .get(url)
+    .header(reqwest::header::USER_AGENT, USER_AGENT)
+    .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml")
+    .send()
+    .map_err(|err| format!("request latest release redirect failed: {err}"))?
+    .error_for_status()
+    .map_err(|err| format!("latest release redirect response failed: {err}"))?;
+
+  let final_url = response.url().as_str().to_string();
+  extract_tag_from_release_url(&final_url).ok_or_else(|| {
+    format!(
+      "cannot parse latest tag from github releases url: {final_url}"
+    )
+  })
+}
+
 fn fetch_latest_release(client: &Client, repo: &str) -> Result<GitHubRelease, String> {
   if !repo.contains('/') {
     return Err(format!(
@@ -175,16 +221,51 @@ fn fetch_latest_release(client: &Client, repo: &str) -> Result<GitHubRelease, St
     ));
   }
   let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-  let release = client
+  let mut req = client
     .get(url)
     .header(reqwest::header::USER_AGENT, USER_AGENT)
-    .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-    .send()
-    .map_err(|err| format!("request latest release failed: {err}"))?
-    .error_for_status()
-    .map_err(|err| format!("latest release response not successful: {err}"))?
-    .json::<GitHubRelease>()
-    .map_err(|err| format!("parse latest release payload failed: {err}"))?;
+    .header(reqwest::header::ACCEPT, "application/vnd.github+json");
+  if let Some(token) = resolve_github_token() {
+    req = req.bearer_auth(token);
+  }
+
+  let release = match req.send() {
+    Ok(resp) => match resp.error_for_status() {
+      Ok(ok_resp) => ok_resp
+        .json::<GitHubRelease>()
+        .map_err(|err| format!("parse latest release payload failed: {err}"))?,
+      Err(api_err) => {
+        let fallback_tag = fetch_latest_tag_via_redirect(client, repo).map_err(|fallback_err| {
+          format!(
+            "latest release api failed ({api_err}); fallback redirect parse failed ({fallback_err})"
+          )
+        })?;
+        GitHubRelease {
+          tag_name: fallback_tag,
+          name: None,
+          published_at: None,
+          draft: false,
+          prerelease: false,
+          assets: Vec::new(),
+        }
+      }
+    },
+    Err(api_transport_err) => {
+      let fallback_tag = fetch_latest_tag_via_redirect(client, repo).map_err(|fallback_err| {
+        format!(
+          "latest release request failed ({api_transport_err}); fallback redirect parse failed ({fallback_err})"
+        )
+      })?;
+      GitHubRelease {
+        tag_name: fallback_tag,
+        name: None,
+        published_at: None,
+        draft: false,
+        prerelease: false,
+        assets: Vec::new(),
+      }
+    }
+  };
 
   if release.draft || release.prerelease {
     return Err("latest release must be a stable release".to_string());
@@ -273,9 +354,14 @@ fn resolve_update_context() -> Result<ResolvedUpdateContext, String> {
   let payload_asset = select_payload_asset(&mode, &release.assets);
   let checksums_asset = select_checksum_asset(&release.assets);
   let can_prepare = has_update && payload_asset.is_some() && checksums_asset.is_some();
+  let fetched_by_fallback = release.assets.is_empty();
 
   let reason = if !has_update {
     Some("current version is already up to date".to_string())
+  } else if fetched_by_fallback {
+    Some(
+      "new version found from GitHub releases page, but release asset metadata is unavailable (likely GitHub API rate limit); set CODEXMANAGER_GITHUB_TOKEN to enable one-click update".to_string(),
+    )
   } else if payload_asset.is_none() {
     Some("release asset for current platform/mode not found".to_string())
   } else if checksums_asset.is_none() {
