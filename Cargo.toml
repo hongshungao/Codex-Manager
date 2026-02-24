@@ -1,7 +1,7 @@
 [workspace]
 members = [
-  "crates/gpttools-core",
-  "crates/gpttools-service"
+  "crates/core",
+  "crates/service"
 ]
 exclude = [
   "apps/src-tauri"

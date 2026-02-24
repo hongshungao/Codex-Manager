@@ -1,0 +1,20 @@
+[package]
+name = "codexmanager-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+codexmanager-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking", "stream"] }
+rand = "0.8"
+sha2 = "0.10"
+tiny_http = "0.12"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
+url = "2"
+webbrowser = "0.8"
+urlencoding = "2"
+log = "0.4"
+crossbeam-channel = "0.5"
