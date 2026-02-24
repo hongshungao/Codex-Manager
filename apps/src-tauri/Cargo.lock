@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "CodexManager"
-version = "0.1.0"
+version = "0.0.9"
 dependencies = [
  "codexmanager-core",
  "codexmanager-service",

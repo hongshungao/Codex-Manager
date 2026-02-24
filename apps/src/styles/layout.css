@@ -159,11 +159,6 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: color-mix(in srgb, var(--accent) 72%, #244466);
-  user-select: none;
-  white-space: nowrap;
 }
 
 .service-toggle-control input:disabled + .switch-track {
