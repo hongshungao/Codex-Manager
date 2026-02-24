@@ -1,0 +1,68 @@
+name: release-finalize
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Resolve tag
+        id: meta
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [[ -z "$TAG" ]]; then
+            echo "release tag is required"
+            exit 1
+          fi
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          gh release view "$TAG" --repo "$GH_REPO" >/dev/null
+          mkdir -p release-assets
+          gh release download "$TAG" --repo "$GH_REPO" --dir release-assets --clobber
+          find release-assets -maxdepth 1 -type f -print | sort
+
+      - name: Generate single checksums file
+        shell: bash
+        run: |
+          rm -f release-assets/checksums.txt
+          mapfile -t FILES < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No release assets found to checksum."
+            exit 1
+          fi
+          : > release-assets/checksums.txt
+          for base in "${FILES[@]}"; do
+            hash="$(sha256sum "release-assets/$base" | awk '{print $1}')"
+            printf "%s  %s\n" "$hash" "$base" >> release-assets/checksums.txt
+          done
+          echo "Generated checksums for ${#FILES[@]} assets."
+
+      - name: Upload checksums.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          gh release upload "$TAG" "release-assets/checksums.txt" --repo "$GH_REPO" --clobber

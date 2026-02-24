@@ -1,0 +1,234 @@
+name: release-macos-beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.0.9 or v0.0.9-mac-beta)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref/branch/sha to build"
+        required: false
+        default: "main"
+        type: string
+      run_verify:
+        description: "Run quality gate before building artifacts"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: ${{ github.event.inputs.run_verify != 'false' }}
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Frontend unit tests
+        working-directory: apps
+        run: pnpm run test
+
+      - name: Frontend structure tests
+        working-directory: apps
+        run: pnpm run test:ui
+
+      - name: Frontend build
+        working-directory: apps
+        run: pnpm run build
+
+  build_macos_beta:
+    needs: verify
+    if: ${{ always() && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: Build macOS beta app bundle (unsigned)
+        working-directory: apps/src-tauri
+        run: cargo tauri build --bundles app
+
+      - name: Stage macOS beta package
+        shell: pwsh
+        run: |
+          $bundleRoot = "apps/src-tauri/target/release/bundle/macos"
+          if (-not (Test-Path $bundleRoot -PathType Container)) {
+            throw "bundle root not found: $bundleRoot"
+          }
+
+          $appBundle = Get-ChildItem -Path $bundleRoot -Filter "*.app" -Directory | Select-Object -First 1
+          if (-not $appBundle) {
+            throw "macOS .app bundle not found under $bundleRoot"
+          }
+
+          $portableDir = "apps/src-tauri/target/release/portable"
+          New-Item -ItemType Directory -Force $portableDir | Out-Null
+
+          $readmePath = Join-Path $portableDir "MACOS-BETA-README.txt"
+          @"
+          CodexManager macOS 内测包（未签名/未公证）
+
+          首次运行前，请在终端执行：
+          xattr -dr com.apple.quarantine /Applications/CodexManager.app
+
+          然后执行：
+          open /Applications/CodexManager.app
+
+          若仍被拦截，请在“系统设置 -> 隐私与安全性”中点击“仍要打开”。
+          "@ | Set-Content -Path $readmePath -Encoding utf8
+
+          $zipPath = Join-Path $portableDir "CodexManager-macos-beta-unsigned.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path $appBundle.FullName, $readmePath -DestinationPath $zipPath
+          Write-Host "beta package: $zipPath"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexmanager-macos-beta
+          path: |
+            apps/src-tauri/target/release/portable/CodexManager-macos-beta-unsigned.zip
+            apps/src-tauri/target/release/portable/MACOS-BETA-README.txt
+          if-no-files-found: error
+
+  release:
+    needs: build_macos_beta
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: codexmanager-macos-beta
+          merge-multiple: true
+          path: release-assets
+
+      - name: List release assets
+        run: find release-assets -type f | sort
+
+      - name: Resolve release meta
+        id: meta
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.event.inputs.tag }}"
+          REF="${{ github.event.inputs.ref || 'main' }}"
+
+          if [[ -z "$RAW_TAG" ]]; then
+            echo "release tag is required"
+            exit 1
+          fi
+          if [[ "$RAW_TAG" != v* ]]; then
+            RAW_TAG="v$RAW_TAG"
+          fi
+          if [[ "$RAW_TAG" == *"-mac-beta" ]]; then
+            TAG="$RAW_TAG"
+          else
+            TAG="${RAW_TAG}-mac-beta"
+          fi
+
+          TARGET_SHA="$(git rev-parse --verify "${REF}^{commit}")"
+          if [[ -z "$TARGET_SHA" ]]; then
+            echo "failed to resolve ref to commit: $REF"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          TARGET_SHA="${{ steps.meta.outputs.target_sha }}"
+          TITLE="CodexManager $TAG (macOS内测未签名)"
+
+          mapfile -t FILES < <(find release-assets -type f \( \
+            -name '*.zip' -o -name '*.txt' \
+          \) | sort)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --prerelease
+            gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
+          else
+            gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes --prerelease
+          fi

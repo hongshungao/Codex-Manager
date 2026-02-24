@@ -2,7 +2,7 @@ use reqwest::blocking::Client;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -195,7 +195,74 @@ fn extract_tag_from_release_url(url: &str) -> Option<String> {
   }
 }
 
-fn fetch_latest_tag_via_redirect(client: &Client, repo: &str) -> Result<String, String> {
+fn normalize_release_asset_url(raw: &str, repo: &str) -> Option<String> {
+  let href = raw.trim().replace("&amp;", "&");
+  if href.is_empty() {
+    return None;
+  }
+
+  let absolute = if href.starts_with("https://github.com/") {
+    href
+  } else if href.starts_with("http://github.com/") {
+    href.replacen("http://", "https://", 1)
+  } else if href.starts_with("//github.com/") {
+    format!("https:{href}")
+  } else if href.starts_with('/') {
+    format!("https://github.com{href}")
+  } else {
+    return None;
+  };
+
+  let marker = format!("/{repo}/releases/download/");
+  if absolute.contains(&marker) {
+    Some(absolute)
+  } else {
+    None
+  }
+}
+
+fn asset_name_from_download_url(url: &str) -> Option<String> {
+  let without_fragment = url.split('#').next().unwrap_or(url);
+  let without_query = without_fragment.split('?').next().unwrap_or(without_fragment);
+  let name = without_query.rsplit('/').next().unwrap_or("").trim();
+  if name.is_empty() {
+    None
+  } else {
+    Some(name.to_string())
+  }
+}
+
+fn parse_release_assets_from_html(html: &str, repo: &str) -> Vec<GitHubAsset> {
+  let mut assets = Vec::new();
+  let mut seen = HashSet::new();
+  let mut cursor = html;
+  loop {
+    let Some(idx) = cursor.find("href=\"") else {
+      break;
+    };
+    cursor = &cursor[idx + 6..];
+    let Some(end_idx) = cursor.find('"') else {
+      break;
+    };
+
+    let href = &cursor[..end_idx];
+    if let Some(url) = normalize_release_asset_url(href, repo) {
+      if let Some(name) = asset_name_from_download_url(&url) {
+        let key = name.to_ascii_lowercase();
+        if seen.insert(key) {
+          assets.push(GitHubAsset {
+            name,
+            browser_download_url: url,
+          });
+        }
+      }
+    }
+    cursor = &cursor[end_idx + 1..];
+  }
+  assets
+}
+
+fn fetch_latest_release_via_html(client: &Client, repo: &str) -> Result<GitHubRelease, String> {
   let url = format!("https://github.com/{repo}/releases/latest");
   let response = client
     .get(url)
@@ -207,10 +274,20 @@ fn fetch_latest_tag_via_redirect(client: &Client, repo: &str) -> Result<String, 
     .map_err(|err| format!("latest release redirect response failed: {err}"))?;
 
   let final_url = response.url().as_str().to_string();
-  extract_tag_from_release_url(&final_url).ok_or_else(|| {
-    format!(
-      "cannot parse latest tag from github releases url: {final_url}"
-    )
+  let tag = extract_tag_from_release_url(&final_url)
+    .ok_or_else(|| format!("cannot parse latest tag from github releases url: {final_url}"))?;
+  let html = response
+    .text()
+    .map_err(|err| format!("read latest release page failed: {err}"))?;
+  let assets = parse_release_assets_from_html(&html, repo);
+
+  Ok(GitHubRelease {
+    tag_name: tag,
+    name: None,
+    published_at: None,
+    draft: false,
+    prerelease: false,
+    assets,
   })
 }
 
@@ -235,35 +312,19 @@ fn fetch_latest_release(client: &Client, repo: &str) -> Result<GitHubRelease, St
         .json::<GitHubRelease>()
         .map_err(|err| format!("parse latest release payload failed: {err}"))?,
       Err(api_err) => {
-        let fallback_tag = fetch_latest_tag_via_redirect(client, repo).map_err(|fallback_err| {
+        fetch_latest_release_via_html(client, repo).map_err(|fallback_err| {
           format!(
-            "latest release api failed ({api_err}); fallback redirect parse failed ({fallback_err})"
+            "latest release api failed ({api_err}); fallback release page parse failed ({fallback_err})"
           )
-        })?;
-        GitHubRelease {
-          tag_name: fallback_tag,
-          name: None,
-          published_at: None,
-          draft: false,
-          prerelease: false,
-          assets: Vec::new(),
-        }
+        })?
       }
     },
     Err(api_transport_err) => {
-      let fallback_tag = fetch_latest_tag_via_redirect(client, repo).map_err(|fallback_err| {
+      fetch_latest_release_via_html(client, repo).map_err(|fallback_err| {
         format!(
-          "latest release request failed ({api_transport_err}); fallback redirect parse failed ({fallback_err})"
+          "latest release request failed ({api_transport_err}); fallback release page parse failed ({fallback_err})"
         )
-      })?;
-      GitHubRelease {
-        tag_name: fallback_tag,
-        name: None,
-        published_at: None,
-        draft: false,
-        prerelease: false,
-        assets: Vec::new(),
-      }
+      })?
     }
   };
 
@@ -360,7 +421,7 @@ fn resolve_update_context() -> Result<ResolvedUpdateContext, String> {
     Some("current version is already up to date".to_string())
   } else if fetched_by_fallback {
     Some(
-      "new version found from GitHub releases page, but release asset metadata is unavailable (likely GitHub API rate limit); set CODEXMANAGER_GITHUB_TOKEN to enable one-click update".to_string(),
+      "new version found from GitHub releases page, but release asset metadata is unavailable (possibly GitHub API rate limit or page parsing drift); you can set CODEXMANAGER_GITHUB_TOKEN to improve one-click update stability".to_string(),
     )
   } else if payload_asset.is_none() {
     Some("release asset for current platform/mode not found".to_string())

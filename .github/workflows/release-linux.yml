@@ -1,10 +1,10 @@
-name: release-multi-platform
+name: release-linux
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.0.6)"
+        description: "Release tag (e.g. v0.0.9)"
         required: true
         type: string
       ref:
@@ -70,29 +70,10 @@ jobs:
         working-directory: apps
         run: pnpm run build
 
-  build:
+  build_linux:
     needs: verify
     if: ${{ always() && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: windows
-            bundles: nsis
-            portable_source: CodexManager.exe
-            portable_filename: CodexManager.exe
-          - os: ubuntu-22.04
-            artifact_name: linux
-            bundles: appimage,deb
-            portable_source: CodexManager
-            portable_filename: CodexManager
-          - os: macos-14
-            artifact_name: macos
-            bundles: dmg
-            portable_source: CodexManager
-            portable_filename: CodexManager
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -124,7 +105,6 @@ jobs:
             apps/src-tauri
 
       - name: Install Linux dependencies
-        if: matrix.artifact_name == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev
@@ -138,42 +118,39 @@ jobs:
 
       - name: Build Tauri bundle
         working-directory: apps/src-tauri
-        run: cargo tauri build --bundles ${{ matrix.bundles }}
+        run: cargo tauri build --bundles appimage,deb
 
       - name: Stage portable package
-        shell: pwsh
+        shell: bash
         run: |
-          $releaseDir = "apps/src-tauri/target/release"
-          $portableDir = Join-Path $releaseDir "portable"
-          New-Item -ItemType Directory -Force $portableDir | Out-Null
+          release_dir="apps/src-tauri/target/release"
+          portable_dir="$release_dir/portable"
+          mkdir -p "$portable_dir"
 
-          $artifact = "${{ matrix.artifact_name }}"
-          $source = Join-Path $releaseDir "${{ matrix.portable_source }}"
-          if (-not (Test-Path $source -PathType Leaf)) {
-            throw "portable source binary not found: $source"
-          }
+          source_bin="$release_dir/CodexManager"
+          if [[ ! -f "$source_bin" ]]; then
+            echo "portable source binary not found: $source_bin"
+            exit 1
+          fi
 
-          $portableName = "${{ matrix.portable_filename }}"
-          $portableBinary = Join-Path $portableDir $portableName
-          Copy-Item -Force $source $portableBinary
+          portable_bin="$portable_dir/CodexManager"
+          cp -f "$source_bin" "$portable_bin"
+          chmod +x "$portable_bin"
+          : > "$portable_dir/.codexmanager-portable"
 
-          $portableMarker = Join-Path $portableDir ".codexmanager-portable"
-          Set-Content -Path $portableMarker -Value "" -NoNewline
-
-          $zipName = "CodexManager-$artifact-portable.zip"
-          $zipPath = Join-Path $portableDir $zipName
-          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-          Compress-Archive -Path $portableBinary, $portableMarker -DestinationPath $zipPath
-          Write-Host "portable package: $zipPath"
+          zip_path="$portable_dir/CodexManager-linux-portable.zip"
+          rm -f "$zip_path"
+          (
+            cd "$portable_dir"
+            zip -q "CodexManager-linux-portable.zip" "CodexManager" ".codexmanager-portable"
+          )
+          echo "portable package: $zip_path"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: codexmanager-${{ matrix.artifact_name }}
+          name: codexmanager-linux
           path: |
-            apps/src-tauri/target/release/bundle/**/*.exe
-            apps/src-tauri/target/release/bundle/**/*.msi
-            apps/src-tauri/target/release/bundle/**/*.dmg
             apps/src-tauri/target/release/bundle/**/*.AppImage
             apps/src-tauri/target/release/bundle/**/*.deb
             apps/src-tauri/target/release/bundle/**/*.rpm
@@ -181,7 +158,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: build_linux
     runs-on: ubuntu-22.04
 
     steps:
@@ -190,10 +167,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: codexmanager-*
+          pattern: codexmanager-linux
           merge-multiple: true
           path: release-assets
 
@@ -232,28 +209,6 @@ jobs:
           echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
-      - name: Create release metadata file
-        shell: bash
-        run: |
-          cat > release-assets/RELEASE-META.txt <<EOF
-          tag=${{ steps.meta.outputs.tag }}
-          ref=${{ steps.meta.outputs.ref }}
-          target_sha=${{ steps.meta.outputs.target_sha }}
-          workflow_run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          generated_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          EOF
-
-      - name: Generate checksums
-        shell: bash
-        run: |
-          cd release-assets
-          : > checksums.txt
-          while IFS= read -r -d '' file; do
-            base="$(basename "$file")"
-            hash="$(sha256sum "$file" | awk '{print $1}')"
-            printf "%s  %s\n" "$hash" "$base" >> checksums.txt
-          done < <(find . -maxdepth 1 -type f ! -name 'checksums.txt' -print0 | sort -z)
-
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -261,12 +216,11 @@ jobs:
         shell: bash
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          REF="${{ steps.meta.outputs.ref }}"
           TARGET_SHA="${{ steps.meta.outputs.target_sha }}"
           TITLE="CodexManager $TAG"
 
           mapfile -t FILES < <(find release-assets -type f \( \
-            -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.zip' -o -name 'RELEASE-META.txt' -o -name 'checksums.txt' \
+            -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.zip' \
           \) | sort)
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "No release assets found."

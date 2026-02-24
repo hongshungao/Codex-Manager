@@ -1,0 +1,230 @@
+name: release-windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.0.9)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref/branch/sha to build"
+        required: false
+        default: "main"
+        type: string
+      run_verify:
+        description: "Run quality gate before building artifacts"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: ${{ github.event.inputs.run_verify != 'false' }}
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Frontend unit tests
+        working-directory: apps
+        run: pnpm run test
+
+      - name: Frontend structure tests
+        working-directory: apps
+        run: pnpm run test:ui
+
+      - name: Frontend build
+        working-directory: apps
+        run: pnpm run build
+
+  build_windows:
+    needs: verify
+    if: ${{ always() && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: Build Tauri bundle
+        working-directory: apps/src-tauri
+        run: cargo tauri build --bundles nsis
+
+      - name: Stage portable package
+        shell: pwsh
+        run: |
+          $releaseDir = "apps/src-tauri/target/release"
+          $portableDir = Join-Path $releaseDir "portable"
+          New-Item -ItemType Directory -Force $portableDir | Out-Null
+
+          $source = Join-Path $releaseDir "CodexManager.exe"
+          if (-not (Test-Path $source -PathType Leaf)) {
+            throw "portable source binary not found: $source"
+          }
+
+          $portableBinary = Join-Path $portableDir "CodexManager.exe"
+          Copy-Item -Force $source $portableBinary
+
+          $portableMarker = Join-Path $portableDir ".codexmanager-portable"
+          Set-Content -Path $portableMarker -Value "" -NoNewline
+
+          $zipPath = Join-Path $portableDir "CodexManager-windows-portable.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path $portableBinary, $portableMarker -DestinationPath $zipPath
+          Write-Host "portable package: $zipPath"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexmanager-windows
+          path: |
+            apps/src-tauri/target/release/bundle/**/*.exe
+            apps/src-tauri/target/release/bundle/**/*.msi
+            apps/src-tauri/target/release/portable/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build_windows
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: codexmanager-windows
+          merge-multiple: true
+          path: release-assets
+
+      - name: List release assets
+        run: find release-assets -type f | sort
+
+      - name: Resolve release meta
+        id: meta
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          REF="${{ github.event.inputs.ref || 'main' }}"
+
+          if [[ -z "$TAG" ]]; then
+            echo "release tag is required"
+            exit 1
+          fi
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
+          fi
+
+          TARGET_SHA="$(git rev-parse --verify "${REF}^{commit}")"
+          if [[ -z "$TARGET_SHA" ]]; then
+            echo "failed to resolve ref to commit: $REF"
+            exit 1
+          fi
+
+          if [[ "$TAG" == *-* ]]; then
+            PRERELEASE="true"
+          else
+            PRERELEASE="false"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          TARGET_SHA="${{ steps.meta.outputs.target_sha }}"
+          TITLE="CodexManager $TAG"
+
+          mapfile -t FILES < <(find release-assets -type f \( \
+            -name '*.exe' -o -name '*.msi' -o -name '*.zip' \
+          \) | sort)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA"
+            gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
+          else
+            if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes --prerelease
+            else
+              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes
+            fi
+          fi
