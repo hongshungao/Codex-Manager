@@ -8,6 +8,7 @@ function renderApiKeysOnly(handlers) {
     onToggleStatus: handlers.onToggleApiKeyStatus,
     onDelete: handlers.onDeleteApiKey,
     onUpdateModel: handlers.onUpdateApiKeyModel,
+    onCopy: handlers.onCopyApiKey,
   });
 }
 

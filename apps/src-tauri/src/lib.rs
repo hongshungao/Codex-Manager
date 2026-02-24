@@ -198,6 +198,15 @@ async fn service_apikey_list(addr: Option<String>) -> Result<serde_json::Value, 
 }
 
 #[tauri::command]
+async fn service_apikey_read_secret(
+  addr: Option<String>,
+  key_id: String,
+) -> Result<serde_json::Value, String> {
+  let params = serde_json::json!({ "id": key_id });
+  rpc_call_in_background("apikey/readSecret", addr, Some(params)).await
+}
+
+#[tauri::command]
 async fn service_apikey_create(
   addr: Option<String>,
   name: Option<String>,
@@ -323,6 +332,7 @@ pub fn run() {
       service_login_status,
       service_login_complete,
       service_apikey_list,
+      service_apikey_read_secret,
       service_apikey_create,
       service_apikey_models,
       service_apikey_update_model,

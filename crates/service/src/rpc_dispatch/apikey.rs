@@ -2,7 +2,7 @@ use codexmanager_core::rpc::types::{ApiKeyListResult, JsonRpcRequest, JsonRpcRes
 
 use crate::{
     apikey_create, apikey_delete, apikey_disable, apikey_enable, apikey_list, apikey_models,
-    apikey_update_model,
+    apikey_read_secret, apikey_update_model,
 };
 
 pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
@@ -21,6 +21,10 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                 reasoning_effort,
                 protocol_type,
             ))
+        }
+        "apikey/readSecret" => {
+            let key_id = super::str_param(req, "id").unwrap_or("");
+            super::value_or_error(apikey_read_secret::read_api_key_secret(key_id))
         }
         "apikey/models" => super::value_or_error(apikey_models::read_model_options()),
         "apikey/updateModel" => {

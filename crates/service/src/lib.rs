@@ -36,6 +36,8 @@ mod apikey_models;
 mod apikey_profile;
 #[path = "apikey/apikey_update_model.rs"]
 mod apikey_update_model;
+#[path = "apikey/apikey_read_secret.rs"]
+mod apikey_read_secret;
 #[path = "auth/auth_login.rs"]
 mod auth_login;
 #[path = "auth/auth_callback.rs"]

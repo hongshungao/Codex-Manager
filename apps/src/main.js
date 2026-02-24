@@ -187,6 +187,7 @@ const {
   deleteApiKey,
   toggleApiKeyStatus,
   updateApiKeyModel,
+  copyApiKey,
 } = managementActions;
 
 function buildMainRenderActions() {
@@ -197,6 +198,7 @@ function buildMainRenderActions() {
     toggleApiKeyStatus,
     deleteApiKey,
     updateApiKeyModel,
+    copyApiKey,
   });
 }
 

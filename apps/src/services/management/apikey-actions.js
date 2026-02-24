@@ -1,4 +1,5 @@
 import * as api from "../../api";
+import { copyText } from "../../utils/clipboard";
 
 export function createApiKeyActions({
   dom,
@@ -121,7 +122,27 @@ export function createApiKeyActions({
     await refreshApiKeyList();
   }
 
-  actions = { createApiKey, deleteApiKey, toggleApiKeyStatus, updateApiKeyModel };
+  async function copyApiKey(item, button) {
+    if (!item || !item.id) return;
+    await withButtonBusy(button, "复制中...", async () => {
+      const ok = await ensureConnected();
+      if (!ok) return;
+      const res = await api.serviceApiKeyReadSecret(item.id);
+      const secret = res && typeof res.key === "string" ? res.key.trim() : "";
+      if (!secret) {
+        showToast("该 Key 创建于旧版本，无法找回明文，请删除后重新创建", "error");
+        return;
+      }
+      const copied = await copyText(secret);
+      if (copied) {
+        showToast("完整 Key 已复制");
+      } else {
+        showToast("复制失败，请重试", "error");
+      }
+    });
+  }
+
+  actions = { createApiKey, deleteApiKey, toggleApiKeyStatus, updateApiKeyModel, copyApiKey };
   return actions;
 }
 

@@ -229,8 +229,35 @@ impl Storage {
 
     pub fn delete_api_key(&self, key_id: &str) -> Result<()> {
         self.conn
+            .execute("DELETE FROM api_key_secrets WHERE key_id = ?1", [key_id])?;
+        self.conn
             .execute("DELETE FROM api_keys WHERE id = ?1", [key_id])?;
         Ok(())
+    }
+
+    pub fn upsert_api_key_secret(&self, key_id: &str, key_value: &str) -> Result<()> {
+        let now = now_ts();
+        self.conn.execute(
+            "INSERT INTO api_key_secrets (key_id, key_value, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT(key_id) DO UPDATE SET
+               key_value = excluded.key_value,
+               updated_at = excluded.updated_at",
+            (key_id, key_value, now),
+        )?;
+        Ok(())
+    }
+
+    pub fn find_api_key_secret_by_id(&self, key_id: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key_value FROM api_key_secrets WHERE key_id = ?1 LIMIT 1")?;
+        let mut rows = stmt.query([key_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(super) fn ensure_api_key_model_column(&self) -> Result<()> {
@@ -264,6 +291,23 @@ impl Storage {
             [],
         )?;
         self.backfill_api_key_profiles()
+    }
+
+    pub(super) fn ensure_api_key_secrets_table(&self) -> Result<()> {
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS api_key_secrets (
+                key_id TEXT PRIMARY KEY,
+                key_value TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_key_secrets_updated_at ON api_key_secrets(updated_at)",
+            [],
+        )?;
+        Ok(())
     }
 
     fn backfill_api_key_profiles(&self) -> Result<()> {

@@ -89,6 +89,10 @@ export async function serviceApiKeyList() {
   return invoke("service_apikey_list", withAddr());
 }
 
+export async function serviceApiKeyReadSecret(keyId) {
+  return invoke("service_apikey_read_secret", withAddr({ keyId }));
+}
+
 export async function serviceApiKeyCreate(name, modelSlug, reasoningEffort, profile = {}) {
   return invoke("service_apikey_create", withAddr({
     name,

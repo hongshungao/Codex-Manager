@@ -206,6 +206,11 @@ impl Storage {
         self.apply_sql_migration(
             "018_accounts_sort_updated_at_index",
             include_str!("../../migrations/018_accounts_sort_updated_at_index.sql"),
+        )?;
+        self.apply_sql_or_compat_migration(
+            "019_api_key_secrets",
+            include_str!("../../migrations/019_api_key_secrets.sql"),
+            |s| s.ensure_api_key_secrets_table(),
         )
     }
 

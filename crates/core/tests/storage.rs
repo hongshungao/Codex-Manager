@@ -408,3 +408,42 @@ fn storage_api_keys_include_profile_fields() {
     assert_eq!(key.model_slug.as_deref(), Some("claude-sonnet-4"));
 }
 
+#[test]
+fn storage_can_roundtrip_api_key_secret() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+
+    storage
+        .insert_api_key(&ApiKey {
+            id: "key-secret-1".to_string(),
+            name: Some("secret".to_string()),
+            model_slug: None,
+            reasoning_effort: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: "hash-secret-1".to_string(),
+            status: "active".to_string(),
+            created_at: now_ts(),
+            last_used_at: None,
+        })
+        .expect("insert key");
+
+    storage
+        .upsert_api_key_secret("key-secret-1", "sk-secret-value")
+        .expect("upsert secret");
+
+    let loaded = storage
+        .find_api_key_secret_by_id("key-secret-1")
+        .expect("load secret");
+    assert_eq!(loaded.as_deref(), Some("sk-secret-value"));
+
+    storage.delete_api_key("key-secret-1").expect("delete key");
+    let removed = storage
+        .find_api_key_secret_by_id("key-secret-1")
+        .expect("load removed secret");
+    assert!(removed.is_none());
+}
+

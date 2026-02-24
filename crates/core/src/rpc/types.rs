@@ -112,6 +112,13 @@ pub struct ApiKeyCreateResult {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ApiKeySecretResult {
+    pub id: String,
+    pub key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelOption {
     pub slug: String,
     pub display_name: String,

@@ -5,6 +5,7 @@ export function buildRenderActions({
   toggleApiKeyStatus,
   deleteApiKey,
   updateApiKeyModel,
+  copyApiKey,
 }) {
   return {
     onUpdateSort: updateAccountSort,
@@ -13,5 +14,6 @@ export function buildRenderActions({
     onToggleApiKeyStatus: toggleApiKeyStatus,
     onDeleteApiKey: deleteApiKey,
     onUpdateApiKeyModel: updateApiKeyModel,
+    onCopyApiKey: copyApiKey,
   };
 }

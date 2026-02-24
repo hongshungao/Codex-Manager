@@ -76,6 +76,23 @@ test("handleApiKeyRowsClick delegates toggle action", () => {
   assert.deepEqual(toggled, item);
 });
 
+test("handleApiKeyRowsClick handles copy action", () => {
+  const item = { id: "k-copy", status: "active" };
+  const lookup = new Map([[item.id, item]]);
+  let copied = null;
+  const handled = handleApiKeyRowsClick(
+    createApiKeyActionTarget("copy", "k-copy"),
+    {
+      onCopy: (value) => {
+        copied = value;
+      },
+    },
+    lookup,
+  );
+  assert.equal(handled, true);
+  assert.deepEqual(copied, item);
+});
+
 test("handleApiKeyRowsChange syncs reasoning when model override cleared", () => {
   const item = { id: "k-2" };
   const lookup = new Map([[item.id, item]]);

@@ -1,6 +1,5 @@
 import { state } from "../../state.js";
 import { dom } from "../../ui/dom.js";
-import { formatTs } from "../../utils/format.js";
 import {
   REASONING_OPTIONS,
   getProtocolProfileLabel,
@@ -10,6 +9,7 @@ import {
 
 const APIKEY_ACTION_TOGGLE = "toggle";
 const APIKEY_ACTION_DELETE = "delete";
+const APIKEY_ACTION_COPY = "copy";
 const APIKEY_FIELD_MODEL = "model";
 const APIKEY_FIELD_REASONING = "reasoning";
 
@@ -114,16 +114,16 @@ function createStatusCell(item) {
   return { cellStatus, isDisabled: statusViewModel.isDisabled };
 }
 
-function createUsedCell(item) {
-  const cellUsed = document.createElement("td");
-  cellUsed.textContent = formatTs(item.lastUsedAt, { emptyLabel: "-" });
-  return cellUsed;
-}
-
 function createActionsCell(isDisabled) {
   const cellActions = document.createElement("td");
   const actionsWrap = document.createElement("div");
   actionsWrap.className = "cell-actions";
+  const btnCopy = document.createElement("button");
+  btnCopy.className = "ghost";
+  btnCopy.type = "button";
+  btnCopy.setAttribute("data-action", APIKEY_ACTION_COPY);
+  btnCopy.textContent = "复制Key";
+
   const btnDisable = document.createElement("button");
   btnDisable.className = "secondary";
   btnDisable.type = "button";
@@ -135,6 +135,7 @@ function createActionsCell(isDisabled) {
   btnDelete.type = "button";
   btnDelete.setAttribute("data-action", APIKEY_ACTION_DELETE);
   btnDelete.textContent = "删除";
+  actionsWrap.appendChild(btnCopy);
   actionsWrap.appendChild(btnDisable);
   actionsWrap.appendChild(btnDelete);
   cellActions.appendChild(actionsWrap);
@@ -157,7 +158,6 @@ function renderApiKeyRow(item) {
 
   const cellModel = createModelCell(item);
   const { cellStatus, isDisabled } = createStatusCell(item);
-  const cellUsed = createUsedCell(item);
   const cellActions = createActionsCell(isDisabled);
 
   row.appendChild(cellId);
@@ -165,7 +165,6 @@ function renderApiKeyRow(item) {
   row.appendChild(cellProfile);
   row.appendChild(cellModel);
   row.appendChild(cellStatus);
-  row.appendChild(cellUsed);
   row.appendChild(cellActions);
   dom.apiKeyRows.appendChild(row);
 }
@@ -190,6 +189,10 @@ export function handleApiKeyRowsClick(target, handlers = apiKeyRowHandlers, look
   }
   if (action === APIKEY_ACTION_DELETE) {
     handlers?.onDelete?.(item);
+    return true;
+  }
+  if (action === APIKEY_ACTION_COPY) {
+    handlers?.onCopy?.(item, actionButton);
     return true;
   }
   return false;
@@ -228,16 +231,16 @@ function ensureApiKeyRowsEventsBound() {
 function renderEmptyRow() {
   const emptyRow = document.createElement("tr");
   const emptyCell = document.createElement("td");
-  emptyCell.colSpan = 7;
+  emptyCell.colSpan = 6;
   emptyCell.textContent = "暂无平台 Key";
   emptyRow.appendChild(emptyCell);
   dom.apiKeyRows.appendChild(emptyRow);
 }
 
 // 渲染 API Key 列表
-export function renderApiKeys({ onToggleStatus, onDelete, onUpdateModel }) {
+export function renderApiKeys({ onToggleStatus, onDelete, onUpdateModel, onCopy }) {
   ensureApiKeyRowsEventsBound();
-  apiKeyRowHandlers = { onToggleStatus, onDelete, onUpdateModel };
+  apiKeyRowHandlers = { onToggleStatus, onDelete, onUpdateModel, onCopy };
   dom.apiKeyRows.innerHTML = "";
   if (state.apiKeyList.length === 0) {
     apiKeyLookupById = new Map();
