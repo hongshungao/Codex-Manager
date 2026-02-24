@@ -14,10 +14,41 @@ export function bindNavigationAndServiceEvents({
   }
   navigationEventsBound = true;
 
-  if (dom.navDashboard) dom.navDashboard.addEventListener("click", () => switchPage("dashboard"));
-  if (dom.navAccounts) dom.navAccounts.addEventListener("click", () => switchPage("accounts"));
-  if (dom.navApiKeys) dom.navApiKeys.addEventListener("click", () => switchPage("apikeys"));
-  if (dom.navRequestLogs) dom.navRequestLogs.addEventListener("click", () => switchPage("requestlogs"));
+  let themeGlobalListenersBound = false;
+  const bindThemeGlobalListeners = () => {
+    if (themeGlobalListenersBound) return;
+    document.addEventListener("click", handleOutsideThemeClick);
+    document.addEventListener("keydown", handleThemeEscape);
+    themeGlobalListenersBound = true;
+  };
+  const unbindThemeGlobalListeners = () => {
+    if (!themeGlobalListenersBound) return;
+    document.removeEventListener("click", handleOutsideThemeClick);
+    document.removeEventListener("keydown", handleThemeEscape);
+    themeGlobalListenersBound = false;
+  };
+  const handleOutsideThemeClick = () => {
+    if (!dom.themePanel || dom.themePanel.hidden) {
+      unbindThemeGlobalListeners();
+      return;
+    }
+    closeThemePanel();
+    unbindThemeGlobalListeners();
+  };
+  const handleThemeEscape = (event) => {
+    if (event.key !== "Escape") return;
+    closeThemePanel();
+    unbindThemeGlobalListeners();
+  };
+  const handleSwitchPage = (page) => {
+    switchPage(page);
+    unbindThemeGlobalListeners();
+  };
+
+  if (dom.navDashboard) dom.navDashboard.addEventListener("click", () => handleSwitchPage("dashboard"));
+  if (dom.navAccounts) dom.navAccounts.addEventListener("click", () => handleSwitchPage("accounts"));
+  if (dom.navApiKeys) dom.navApiKeys.addEventListener("click", () => handleSwitchPage("apikeys"));
+  if (dom.navRequestLogs) dom.navRequestLogs.addEventListener("click", () => handleSwitchPage("requestlogs"));
 
   if (dom.refreshAll) {
     dom.refreshAll.addEventListener("click", refreshAll);
@@ -26,7 +57,14 @@ export function bindNavigationAndServiceEvents({
   if (dom.themeToggle) {
     dom.themeToggle.addEventListener("click", (event) => {
       event.stopPropagation();
+      const wasHidden = !dom.themePanel || dom.themePanel.hidden;
       toggleThemePanel();
+      const isHidden = !dom.themePanel || dom.themePanel.hidden;
+      if (wasHidden && !isHidden) {
+        bindThemeGlobalListeners();
+      } else if (!wasHidden && isHidden) {
+        unbindThemeGlobalListeners();
+      }
     });
   }
   if (dom.themePanel) {
@@ -37,15 +75,12 @@ export function bindNavigationAndServiceEvents({
         if (themeButton && themeButton.dataset.theme) {
           setTheme(themeButton.dataset.theme);
           closeThemePanel();
+          unbindThemeGlobalListeners();
         }
       }
       event.stopPropagation();
     });
   }
-  document.addEventListener("click", () => closeThemePanel());
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeThemePanel();
-  });
 
   if (dom.serviceToggleBtn) {
     dom.serviceToggleBtn.addEventListener("click", handleServiceToggle);

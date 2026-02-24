@@ -32,10 +32,54 @@ export function buildGroupFilterOptions(accounts) {
   ];
 }
 
-export function filterAccounts(accounts, usageList, query, filter, groupFilter = "all") {
+function isDerivedAccountValue(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, "status") &&
+      Object.prototype.hasOwnProperty.call(value, "primaryRemain") &&
+      Object.prototype.hasOwnProperty.call(value, "secondaryRemain"),
+  );
+}
+
+function toUsageMap(usageSource) {
+  if (usageSource instanceof Map) {
+    return usageSource;
+  }
+  return new Map((usageSource || []).map((item) => [item.accountId, item]));
+}
+
+export function buildAccountDerivedMap(accounts, usageSource) {
+  const usageMap = toUsageMap(usageSource);
+  const derived = new Map();
+  for (const account of accounts || []) {
+    const usage = usageMap.get(account.id);
+    derived.set(account.id, {
+      usage,
+      primaryRemain: remainingPercent(usage ? usage.usedPercent : null),
+      secondaryRemain: remainingPercent(
+        usage ? usage.secondaryUsedPercent : null,
+      ),
+      status: calcAvailability(usage),
+    });
+  }
+  return derived;
+}
+
+function toDerivedMap(accounts, usageSource) {
+  if (usageSource instanceof Map) {
+    const iterator = usageSource.values().next();
+    if (!iterator.done && isDerivedAccountValue(iterator.value)) {
+      return usageSource;
+    }
+  }
+  return buildAccountDerivedMap(accounts, usageSource);
+}
+
+export function filterAccounts(accounts, usageSource, query, filter, groupFilter = "all") {
   const keyword = String(query || "").trim().toLowerCase();
   const normalizedGroupFilter = normalizeGroupName(groupFilter) || "all";
-  const usageMap = new Map((usageList || []).map((item) => [item.accountId, item]));
+  const derivedMap = toDerivedMap(accounts, usageSource);
 
   return (accounts || []).filter((account) => {
     if (keyword) {
@@ -50,18 +94,13 @@ export function filterAccounts(accounts, usageList, query, filter, groupFilter =
     }
 
     if (filter === "active" || filter === "low") {
-      const usage = usageMap.get(account.id);
-      const primaryRemain = remainingPercent(usage ? usage.usedPercent : null);
-      const secondaryRemain = remainingPercent(
-        usage ? usage.secondaryUsedPercent : null,
-      );
-      const status = calcAvailability(usage);
-      if (filter === "active" && status.level !== "ok") return false;
+      const derived = derivedMap.get(account.id);
+      if (filter === "active" && derived?.status?.level !== "ok") return false;
       if (
         filter === "low" &&
         !(
-          (primaryRemain != null && primaryRemain <= 20) ||
-          (secondaryRemain != null && secondaryRemain <= 20)
+          (derived?.primaryRemain != null && derived.primaryRemain <= 20) ||
+          (derived?.secondaryRemain != null && derived.secondaryRemain <= 20)
         )
       ) {
         return false;

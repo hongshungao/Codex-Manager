@@ -25,9 +25,15 @@ export function ensureAutoRefreshTimer(stateRef, onTick, intervalMs = DEFAULT_AU
   if (stateRef.autoRefreshTimer) {
     return false;
   }
+  let tickInFlight = null;
   // 中文注释：统一从这里创建定时器，避免启动链路多个入口重复 setInterval 导致刷新风暴。
   stateRef.autoRefreshTimer = setInterval(() => {
-    void onTick();
+    if (tickInFlight) return;
+    tickInFlight = Promise.resolve()
+      .then(() => onTick())
+      .finally(() => {
+        tickInFlight = null;
+      });
   }, intervalMs);
   return true;
 }

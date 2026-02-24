@@ -1,9 +1,27 @@
+const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+const monthFormatterZh = new Intl.DateTimeFormat("zh-CN", {
+  month: "numeric",
+});
+
+function formatDateTime(date) {
+  return dateTimeFormatter.format(date);
+}
+
 // 时间与用量展示相关工具函数
-export function formatTs(ts) {
-  if (!ts) return "未知";
+export function formatTs(ts, options = {}) {
+  const emptyLabel = options.emptyLabel || "未知";
+  if (!ts) return emptyLabel;
   const date = new Date(ts * 1000);
-  if (Number.isNaN(date.getTime())) return "未知";
-  return date.toLocaleString();
+  if (Number.isNaN(date.getTime())) return emptyLabel;
+  return formatDateTime(date);
 }
 
 export function formatLimitLabel(windowMinutes, fallback) {
@@ -41,7 +59,7 @@ export function formatResetLabel(ts) {
     return `重置：${hh}:${mm}`;
   }
   const day = date.getDate();
-  const month = date.toLocaleString("zh-CN", { month: "numeric" });
+  const month = monthFormatterZh.format(date);
   return `重置：${month}月${day}日 ${hh}:${mm}`;
 }
 
@@ -75,13 +93,21 @@ export function remainingPercent(value) {
   return Math.max(0, 100 - used);
 }
 
-export function computeUsageStats(accounts, usageList) {
-  const usageMap = new Map(usageList.map((u) => [u.accountId, u]));
-  let total = accounts.length;
+export function computeUsageStats(accounts, usageSource) {
+  const usageMap = usageSource instanceof Map
+    ? usageSource
+    : new Map((usageSource || []).map((u) => [u.accountId, u]));
+  let total = 0;
+  let okCount = 0;
+  let unavailableCount = 0;
   let lowCount = 0;
 
-  accounts.forEach((acc) => {
+  (accounts || []).forEach((acc) => {
+    total += 1;
     const usage = usageMap.get(acc.id);
+    const status = calcAvailability(usage);
+    if (status.level === "ok") okCount += 1;
+    if (status.level === "warn" || status.level === "bad") unavailableCount += 1;
     const primaryRemain = remainingPercent(usage ? usage.usedPercent : null);
     const secondaryRemain = remainingPercent(
       usage ? usage.secondaryUsedPercent : null,
@@ -96,6 +122,8 @@ export function computeUsageStats(accounts, usageList) {
 
   return {
     total,
+    okCount,
+    unavailableCount,
     lowCount,
   };
 }

@@ -13,8 +13,8 @@
   width: min(34vw, 420px);
   height: min(34vw, 420px);
   border-radius: 50%;
-  filter: blur(72px);
-  opacity: 0.2;
+  filter: blur(44px);
+  opacity: 0.16;
   z-index: 0;
   pointer-events: none;
 }

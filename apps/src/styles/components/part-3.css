@@ -19,7 +19,7 @@
   top: 0;
   z-index: 2;
   background: color-mix(in srgb, var(--panel-bg, #ffffff) 92%, #ffffff);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(1px);
 }
 
 .data-table tbody td {

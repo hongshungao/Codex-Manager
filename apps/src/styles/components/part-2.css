@@ -66,7 +66,7 @@
   gap: 14px;
   align-items: center;
   box-shadow: var(--shadow);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
 .stat-icon {
@@ -131,7 +131,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
 .panel {
@@ -143,7 +143,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
 .stat-card:hover,
@@ -151,7 +151,7 @@
 .panel:hover {
   transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
-  box-shadow: 0 18px 34px color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: 0 12px 22px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .panel-header {

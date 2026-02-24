@@ -16,7 +16,7 @@ test("startService retries initialize before surfacing error", async () => {
     serviceInitialize: async () => {
       initCalls += 1;
       if (initCalls < 3) throw new Error("not ready");
-      return { server_name: "gpttools-service", version: "test" };
+      return { server_name: "codexmanager-service", version: "test" };
     },
     serviceStop: async () => {},
   };
@@ -76,7 +76,7 @@ test("waitForConnection can be silent and succeed after retries", async () => {
     serviceInitialize: async () => {
       initCalls += 1;
       if (initCalls < 2) throw new Error("down");
-      return { server_name: "gpttools-service", version: "test" };
+      return { server_name: "codexmanager-service", version: "test" };
     },
     serviceStart: async () => {},
     serviceStop: async () => {},
@@ -104,7 +104,7 @@ test("waitForConnection accepts JSON-RPC wrapped initialize result", async () =>
     serviceInitialize: async () => ({
       jsonrpc: "2.0",
       id: 1,
-      result: { server_name: "gpttools-service", version: "test" },
+      result: { server_name: "codexmanager-service", version: "test" },
     }),
     serviceStart: async () => {},
     serviceStop: async () => {},
@@ -130,7 +130,7 @@ test("waitForConnection shows retry reason even when silent", async () => {
     serviceInitialize: async () => {
       initCalls += 1;
       if (initCalls < 3) throw new Error("connection timed out");
-      return { server_name: "gpttools-service", version: "test" };
+      return { server_name: "codexmanager-service", version: "test" };
     },
     serviceStart: async () => {},
     serviceStop: async () => {},

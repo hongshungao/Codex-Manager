@@ -37,7 +37,7 @@ import { openAccountModal, closeAccountModal } from "./views/accounts";
 import { renderApiKeys, openApiKeyModal, closeApiKeyModal, populateApiKeyModelSelect } from "./views/apikeys";
 import { openUsageModal, closeUsageModal, renderUsageSnapshot } from "./views/usage";
 import { renderRequestLogs } from "./views/requestlogs";
-import { renderAllViews, renderAccountsOnly } from "./views/renderers";
+import { renderAllViews, renderAccountsOnly, renderCurrentView } from "./views/renderers";
 import { buildRenderActions } from "./views/render-actions";
 import { createNavigationHandlers } from "./views/navigation";
 import { bindMainEvents } from "./views/event-bindings";
@@ -51,36 +51,52 @@ const {
   toggleThemePanel,
 } = createThemeController({ dom });
 
+function renderCurrentPageView(page = state.currentPage) {
+  renderCurrentView(page, buildMainRenderActions());
+}
+
 const { switchPage, updateRequestLogFilterButtons } = createNavigationHandlers({
   state,
   dom,
   closeThemePanel,
+  onPageActivated: renderCurrentPageView,
 });
 
 const { setStartupMask } = createStartupMaskController({ dom, state });
+let refreshAllInFlight = null;
 
 async function refreshAll() {
-  const ok = await ensureConnected();
-  serviceLifecycle.updateServiceToggle();
-  if (!ok) return;
-  const results = await runRefreshTasks(
-    [
-      { name: "accounts", run: refreshAccounts },
-      { name: "usage", run: refreshUsageList },
-      { name: "api-models", run: refreshApiModels },
-      { name: "api-keys", run: refreshApiKeys },
-      { name: "request-logs", run: () => refreshRequestLogs(state.requestLogQuery) },
-    ],
-    (taskName, err) => {
-      console.error(`[refreshAll] ${taskName} failed`, err);
-    },
-  );
-  // 中文注释：并行刷新时允许“部分失败部分成功”，否则某个慢/失败接口会拖垮整页刷新体验。
-  const hasFailedTask = results.some((item) => item.status === "rejected");
-  if (hasFailedTask) {
-    showToast("部分数据刷新失败，已展示可用数据", "error");
+  if (refreshAllInFlight) {
+    return refreshAllInFlight;
   }
-  renderAllViews(buildMainRenderActions());
+  refreshAllInFlight = (async () => {
+    const ok = await ensureConnected();
+    serviceLifecycle.updateServiceToggle();
+    if (!ok) return;
+    const results = await runRefreshTasks(
+      [
+        { name: "accounts", run: refreshAccounts },
+        { name: "usage", run: refreshUsageList },
+        { name: "api-models", run: refreshApiModels },
+        { name: "api-keys", run: refreshApiKeys },
+        { name: "request-logs", run: () => refreshRequestLogs(state.requestLogQuery) },
+      ],
+      (taskName, err) => {
+        console.error(`[refreshAll] ${taskName} failed`, err);
+      },
+    );
+    // 中文注释：并行刷新时允许“部分失败部分成功”，否则某个慢/失败接口会拖垮整页刷新体验。
+    const hasFailedTask = results.some((item) => item.status === "rejected");
+    if (hasFailedTask) {
+      showToast("部分数据刷新失败，已展示可用数据", "error");
+    }
+    renderCurrentPageView();
+  })();
+  try {
+    return await refreshAllInFlight;
+  } finally {
+    refreshAllInFlight = null;
+  }
 }
 
 async function refreshAccountsAndUsage() {

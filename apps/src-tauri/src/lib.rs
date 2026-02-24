@@ -1,7 +1,9 @@
-use gpttools_core::rpc::types::JsonRpcRequest;
-use gpttools_core::storage::Storage;
+use codexmanager_core::rpc::types::JsonRpcRequest;
+use codexmanager_core::storage::Storage;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -13,13 +15,13 @@ async fn service_initialize(addr: Option<String>) -> Result<serde_json::Value, S
   let v = tauri::async_runtime::spawn_blocking(move || rpc_call("initialize", addr, None))
     .await
     .map_err(|err| format!("initialize task failed: {err}"))??;
-  // 连接探测必须确认对端确实是 gpttools-service，避免端口被其他服务占用时误判“已连接”。
+  // 连接探测必须确认对端确实是 codexmanager-service，避免端口被其他服务占用时误判“已连接”。
   let server_name = v
     .get("result")
     .and_then(|r| r.get("server_name"))
     .and_then(|s| s.as_str())
     .unwrap_or("");
-  if server_name != "gpttools-service" {
+  if server_name != "codexmanager-service" {
     let hint = if server_name.is_empty() {
       "missing server_name"
     } else {
@@ -35,7 +37,7 @@ fn service_start(app: tauri::AppHandle, addr: String) -> Result<(), String> {
   let addr = normalize_addr(&addr)?;
   log::info!("service_start requested addr={}", addr);
   // 中文注释：保存地址与回调地址，按需启动 service
-  std::env::set_var("GPTTOOLS_SERVICE_ADDR", &addr);
+  std::env::set_var("CODEXMANAGER_SERVICE_ADDR", &addr);
   stop_service();
   spawn_service_with_addr(&app, &addr)
 }
@@ -76,12 +78,8 @@ fn local_account_delete(
   app: tauri::AppHandle,
   account_id: String,
 ) -> Result<serde_json::Value, String> {
-  let mut data_dir = app
-    .path()
-    .app_data_dir()
-    .map_err(|_| "app data dir not found".to_string())?;
-  data_dir.push("gpttools.db");
-  let mut storage = Storage::open(data_dir).map_err(|e| e.to_string())?;
+  let db_path = resolve_db_path_with_legacy_migration(&app)?;
+  let mut storage = Storage::open(db_path).map_err(|e| e.to_string())?;
   storage
     .delete_account(&account_id)
     .map_err(|e| e.to_string())?;
@@ -321,8 +319,8 @@ fn load_env_from_exe_dir() {
   // into process environment so the embedded service (gateway) can read them.
   //
   // This avoids relying on global/system env vars when distributing a portable folder.
-  // File names (first match wins): gpttools.env, CodexManager.env, .env
-  let candidates = ["gpttools.env", "CodexManager.env", ".env"];
+  // File names (first match wins): codexmanager.env, CodexManager.env, .env
+  let candidates = ["codexmanager.env", "CodexManager.env", ".env"];
   let mut chosen = None;
   for name in candidates {
     let p = exe_dir.join(name);
@@ -383,34 +381,148 @@ fn load_env_from_exe_dir() {
 }
 
 fn spawn_service_with_addr(app: &tauri::AppHandle, addr: &str) -> Result<(), String> {
-  if std::env::var("GPTTOOLS_NO_SERVICE").is_ok() {
+  if std::env::var("CODEXMANAGER_NO_SERVICE").is_ok() {
     return Ok(());
   }
 
-  if let Ok(mut data_dir) = app.path().app_data_dir() {
-    if let Err(err) = std::fs::create_dir_all(&data_dir) {
-      log::warn!("Failed to create app data dir: {}", err);
-    }
-    data_dir.push("gpttools.db");
-    std::env::set_var("GPTTOOLS_DB_PATH", data_dir);
-    if let Ok(path) = std::env::var("GPTTOOLS_DB_PATH") {
+  if let Ok(data_path) = resolve_db_path_with_legacy_migration(app) {
+    std::env::set_var("CODEXMANAGER_DB_PATH", data_path);
+    if let Ok(path) = std::env::var("CODEXMANAGER_DB_PATH") {
       log::info!("db path: {}", path);
     }
   }
 
-  std::env::set_var("GPTTOOLS_SERVICE_ADDR", addr);
-  gpttools_service::clear_shutdown_flag();
+  std::env::set_var("CODEXMANAGER_SERVICE_ADDR", addr);
+  codexmanager_service::clear_shutdown_flag();
 
   let addr = addr.to_string();
   let thread_addr = addr.clone();
   log::info!("service starting at {}", addr);
   let handle = thread::spawn(move || {
-    if let Err(err) = gpttools_service::start_server(&thread_addr) {
+    if let Err(err) = codexmanager_service::start_server(&thread_addr) {
       log::error!("service stopped: {}", err);
     }
   });
   set_service_runtime(ServiceRuntime { addr, join: handle });
   Ok(())
+}
+
+fn resolve_db_path_with_legacy_migration(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let mut data_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|_| "app data dir not found".to_string())?;
+  if let Err(err) = fs::create_dir_all(&data_dir) {
+    log::warn!("Failed to create app data dir: {}", err);
+  }
+  data_dir.push("codexmanager.db");
+  maybe_migrate_legacy_db(&data_dir);
+  Ok(data_dir)
+}
+
+fn maybe_migrate_legacy_db(current_db: &Path) {
+  let current_has_data = db_has_user_data(current_db);
+  if current_has_data {
+    return;
+  }
+
+  let needs_bootstrap = !current_db.is_file() || !current_has_data;
+  if !needs_bootstrap {
+    return;
+  }
+
+  for legacy_db in legacy_db_candidates(current_db) {
+    if !legacy_db.is_file() {
+      continue;
+    }
+    if !db_has_user_data(&legacy_db) {
+      continue;
+    }
+
+    if let Some(parent) = current_db.parent() {
+      let _ = fs::create_dir_all(parent);
+    }
+
+    if current_db.is_file() {
+      let backup = current_db.with_extension("db.empty.bak");
+      if let Err(err) = fs::copy(current_db, &backup) {
+        log::warn!(
+          "Failed to backup empty current db {} -> {}: {}",
+          current_db.display(),
+          backup.display(),
+          err
+        );
+      }
+    }
+
+    match fs::copy(&legacy_db, current_db) {
+      Ok(_) => {
+        log::info!(
+          "Migrated legacy db {} -> {}",
+          legacy_db.display(),
+          current_db.display()
+        );
+        return;
+      }
+      Err(err) => {
+        log::warn!(
+          "Failed to migrate legacy db {} -> {}: {}",
+          legacy_db.display(),
+          current_db.display(),
+          err
+        );
+      }
+    }
+  }
+}
+
+fn db_has_user_data(path: &Path) -> bool {
+  if !path.is_file() {
+    return false;
+  }
+  let storage = match Storage::open(path) {
+    Ok(storage) => storage,
+    Err(_) => return false,
+  };
+  let _ = storage.init();
+  storage
+    .list_accounts()
+    .map(|items| !items.is_empty())
+    .unwrap_or(false)
+    || storage
+      .list_tokens()
+      .map(|items| !items.is_empty())
+      .unwrap_or(false)
+    || storage
+      .list_api_keys()
+      .map(|items| !items.is_empty())
+      .unwrap_or(false)
+}
+
+fn legacy_db_candidates(current_db: &Path) -> Vec<PathBuf> {
+  let mut out = Vec::new();
+
+  if let Some(parent) = current_db.parent() {
+    out.push(parent.join("gpttools.db"));
+    if parent
+      .file_name()
+      .and_then(|name| name.to_str())
+      .is_some_and(|name| name.eq_ignore_ascii_case("com.codexmanager.desktop"))
+    {
+      if let Some(root) = parent.parent() {
+        out.push(root.join("com.gpttools.desktop").join("gpttools.db"));
+      }
+    }
+  }
+
+  out.retain(|candidate| candidate != current_db);
+  let mut dedup = Vec::new();
+  for candidate in out {
+    if !dedup.iter().any(|item| item == &candidate) {
+      dedup.push(candidate);
+    }
+  }
+  dedup
 }
 
 #[cfg(target_os = "windows")]
@@ -445,12 +557,12 @@ fn resolve_service_addr(addr: Option<String>) -> Result<String, String> {
   if let Some(addr) = addr {
     return normalize_addr(&addr);
   }
-  if let Ok(env_addr) = std::env::var("GPTTOOLS_SERVICE_ADDR") {
+  if let Ok(env_addr) = std::env::var("CODEXMANAGER_SERVICE_ADDR") {
     if let Ok(addr) = normalize_addr(&env_addr) {
       return Ok(addr);
     }
   }
-  Ok(gpttools_service::DEFAULT_ADDR.to_string())
+  Ok(codexmanager_service::DEFAULT_ADDR.to_string())
 }
 
 fn split_http_response(buf: &str) -> Option<(&str, &str)> {
@@ -540,9 +652,9 @@ fn rpc_call(
       params: params.clone(),
     };
     let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-    let rpc_token = gpttools_service::rpc_auth_token();
+    let rpc_token = codexmanager_service::rpc_auth_token();
     let http = format!(
-      "POST /rpc HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nX-Gpttools-Rpc-Token: {rpc_token}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+      "POST /rpc HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nX-CodexManager-Rpc-Token: {rpc_token}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
       json.len(),
       json
     );
@@ -628,7 +740,7 @@ fn take_service_runtime() -> Option<ServiceRuntime> {
 fn stop_service() {
   if let Some(runtime) = take_service_runtime() {
     log::info!("service stopping at {}", runtime.addr);
-    gpttools_service::request_shutdown(&runtime.addr);
+    codexmanager_service::request_shutdown(&runtime.addr);
     thread::spawn(move || {
       let _ = runtime.join.join();
     });

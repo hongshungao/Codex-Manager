@@ -29,7 +29,7 @@ export function createThemeController({ dom }) {
     const validThemes = new Set(THEME_OPTIONS.map((item) => item.id));
     const nextTheme = validThemes.has(theme) ? theme : "tech";
     document.body.dataset.theme = nextTheme;
-    localStorage.setItem("gpttools.ui.theme", nextTheme);
+    localStorage.setItem("codexmanager.ui.theme", nextTheme);
     if (dom.themePanel) {
       dom.themePanel.querySelectorAll("button[data-theme]").forEach((button) => {
         button.classList.toggle("is-active", button.dataset.theme === nextTheme);
@@ -42,7 +42,7 @@ export function createThemeController({ dom }) {
   }
 
   function restoreTheme() {
-    const savedTheme = localStorage.getItem("gpttools.ui.theme");
+    const savedTheme = localStorage.getItem("codexmanager.ui.theme");
     setTheme(savedTheme || "tech");
   }
 

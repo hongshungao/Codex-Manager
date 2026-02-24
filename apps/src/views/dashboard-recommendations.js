@@ -1,5 +1,5 @@
-import { dom } from "../ui/dom";
-import { remainingPercent } from "../utils/format";
+import { dom } from "../ui/dom.js";
+import { remainingPercent } from "../utils/format.js";
 
 export function renderRecommendations(accounts, usageMap) {
   if (!dom.recommendations) return;
@@ -26,8 +26,7 @@ export function renderRecommendations(accounts, usageMap) {
   const list = document.createElement("div");
   list.className = "mini-usage";
 
-  const primaryPick = pickBest(accounts, usageMap, false);
-  const secondaryPick = pickBest(accounts, usageMap, true);
+  const { primaryPick, secondaryPick } = pickBestRecommendations(accounts, usageMap);
   list.appendChild(
     renderRecommendationItem("用于 5小时", primaryPick?.account, primaryPick?.remain),
   );
@@ -38,18 +37,26 @@ export function renderRecommendations(accounts, usageMap) {
   dom.recommendations.appendChild(list);
 }
 
-function pickBest(accounts, usageMap, secondary) {
-  const ranked = accounts
-    .map((account) => {
-      const usage = usageMap.get(account.id);
-      const remain = remainingPercent(
-        usage ? (secondary ? usage.secondaryUsedPercent : usage.usedPercent) : null,
-      );
-      return { account, remain };
-    })
-    .filter((item) => item.remain != null)
-    .sort((a, b) => (b.remain ?? 0) - (a.remain ?? 0));
-  return ranked[0] || null;
+export function pickBestRecommendations(accounts, usageMap) {
+  let primaryPick = null;
+  let secondaryPick = null;
+
+  (accounts || []).forEach((account) => {
+    const usage = usageMap.get(account.id);
+    const primaryRemain = remainingPercent(usage ? usage.usedPercent : null);
+    const secondaryRemain = remainingPercent(
+      usage ? usage.secondaryUsedPercent : null,
+    );
+
+    if (primaryRemain != null && (!primaryPick || primaryRemain > primaryPick.remain)) {
+      primaryPick = { account, remain: primaryRemain };
+    }
+    if (secondaryRemain != null && (!secondaryPick || secondaryRemain > secondaryPick.remain)) {
+      secondaryPick = { account, remain: secondaryRemain };
+    }
+  });
+
+  return { primaryPick, secondaryPick };
 }
 
 function renderRecommendationItem(label, account, remain) {

@@ -29,7 +29,7 @@
   z-index: 10;
   background: var(--top-nav-bg);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(4px);
 }
 
 button {
@@ -40,7 +40,11 @@ button {
   color: #fff;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  transition:
+    transform 0.16s ease,
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    opacity 0.16s ease;
   box-shadow: var(--btn-primary-shadow);
 }
 
@@ -67,7 +71,7 @@ button.danger {
 
 button:hover {
   transform: translateY(-1px);
-  filter: saturate(1.03);
+  opacity: 0.96;
 }
 
 button:active {

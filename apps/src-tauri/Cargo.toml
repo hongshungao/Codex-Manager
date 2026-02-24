@@ -21,6 +21,6 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.9.5", features = [] }
 tauri-plugin-log = "2"
-gpttools-core = { path = "../../crates/gpttools-core" }
-gpttools-service = { path = "../../crates/gpttools-service" }
+codexmanager-core = { path = "../../crates/core" }
+codexmanager-service = { path = "../../crates/service" }
 webbrowser = "0.8"

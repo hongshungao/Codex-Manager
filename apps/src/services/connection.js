@@ -52,7 +52,7 @@ function readServerNameFromInitialize(res) {
 }
 
 function isExpectedInitializeResult(res) {
-  return readServerNameFromInitialize(res) === "gpttools-service";
+  return readServerNameFromInitialize(res) === "codexmanager-service";
 }
 
 // 初始化连接（不负责启动 service）

@@ -57,3 +57,22 @@ test("ensureAutoRefreshTimer creates one timer only", async () => {
   assert.equal(state.autoRefreshTimer, null);
   assert.ok(tickCount >= 1);
 });
+
+test("ensureAutoRefreshTimer skips overlapping ticks", async () => {
+  const state = { autoRefreshTimer: null };
+  let inFlight = 0;
+  let maxInFlight = 0;
+
+  const started = ensureAutoRefreshTimer(state, async () => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    inFlight -= 1;
+  }, 5);
+
+  assert.equal(started, true);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  stopAutoRefreshTimer(state);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(maxInFlight, 1);
+});

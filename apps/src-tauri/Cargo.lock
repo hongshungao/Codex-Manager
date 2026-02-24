@@ -6,8 +6,8 @@ version = 3
 name = "CodexManager"
 version = "0.1.0"
 dependencies = [
- "gpttools-core",
- "gpttools-service",
+ "codexmanager-core",
+ "codexmanager-service",
  "log",
  "serde",
  "serde_json",
@@ -496,6 +496,39 @@ name = "chunked_transfer"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
+
+[[package]]
+name = "codexmanager-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "rand 0.8.5",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "urlencoding",
+]
+
+[[package]]
+name = "codexmanager-service"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "codexmanager-core",
+ "crossbeam-channel",
+ "log",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tiny_http",
+ "tokio",
+ "url",
+ "urlencoding",
+ "webbrowser",
+]
 
 [[package]]
 name = "combine"
@@ -1352,38 +1385,6 @@ dependencies = [
  "glib-sys",
  "libc",
  "system-deps",
-]
-
-[[package]]
-name = "gpttools-core"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "rand 0.8.5",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "urlencoding",
-]
-
-[[package]]
-name = "gpttools-service"
-version = "0.1.0"
-dependencies = [
- "axum",
- "gpttools-core",
- "log",
- "rand 0.8.5",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tiny_http",
- "tokio",
- "url",
- "urlencoding",
- "webbrowser",
 ]
 
 [[package]]

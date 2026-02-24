@@ -46,7 +46,7 @@ export function createServiceLifecycle({
   }
 
   function restoreServiceAddr() {
-    const savedAddr = localStorage.getItem("gpttools.service.addr");
+    const savedAddr = localStorage.getItem("codexmanager.service.addr");
     if (savedAddr) {
       state.serviceAddr = savedAddr;
       dom.serviceAddrInput.value = savedAddr;
@@ -67,7 +67,7 @@ export function createServiceLifecycle({
       skipInitialize: true,
     });
     dom.serviceAddrInput.value = state.serviceAddr;
-    localStorage.setItem("gpttools.service.addr", state.serviceAddr);
+    localStorage.setItem("codexmanager.service.addr", state.serviceAddr);
     if (!started) {
       setServiceBusy(false);
       updateServiceToggle();

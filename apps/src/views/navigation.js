@@ -1,5 +1,9 @@
-export function createNavigationHandlers({ state, dom, closeThemePanel }) {
+export function createNavigationHandlers({ state, dom, closeThemePanel, onPageActivated }) {
   function switchPage(page) {
+    if (state.currentPage === page) {
+      closeThemePanel();
+      return;
+    }
     state.currentPage = page;
     closeThemePanel();
     dom.navDashboard.classList.toggle("active", page === "dashboard");
@@ -18,6 +22,7 @@ export function createNavigationHandlers({ state, dom, closeThemePanel }) {
           : page === "apikeys"
             ? "平台 Key"
             : "请求日志";
+    onPageActivated?.(page);
   }
 
   function updateRequestLogFilterButtons() {

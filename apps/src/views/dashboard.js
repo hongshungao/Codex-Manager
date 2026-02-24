@@ -6,26 +6,14 @@ import { renderRecommendations } from "./dashboard-recommendations";
 
 // 渲染仪表盘视图
 export function renderDashboard() {
-  let okCount = 0;
-  let warnCount = 0;
-  let badCount = 0;
-
   const usageMap = new Map(
     state.usageList.map((item) => [item.accountId, item]),
   );
 
-  state.accountList.forEach((account) => {
-    const usage = usageMap.get(account.id);
-    const status = calcAvailability(usage);
-    if (status.level === "ok") okCount += 1;
-    if (status.level === "warn") warnCount += 1;
-    if (status.level === "bad") badCount += 1;
-  });
-
-  const stats = computeUsageStats(state.accountList, state.usageList);
+  const stats = computeUsageStats(state.accountList, usageMap);
   if (dom.metricTotal) dom.metricTotal.textContent = stats.total;
-  if (dom.metricAvailable) dom.metricAvailable.textContent = okCount;
-  if (dom.metricUnavailable) dom.metricUnavailable.textContent = warnCount + badCount;
+  if (dom.metricAvailable) dom.metricAvailable.textContent = stats.okCount;
+  if (dom.metricUnavailable) dom.metricUnavailable.textContent = stats.unavailableCount;
   if (dom.metricLowQuota) dom.metricLowQuota.textContent = stats.lowCount;
 
   renderCurrentAccount(state.accountList, usageMap);

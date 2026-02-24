@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildGroupFilterOptions, filterAccounts } from "./accounts.js";
+import { buildAccountDerivedMap } from "./accounts/state.js";
 
 test("buildGroupFilterOptions returns all option and dynamic groups", () => {
   const accounts = [
@@ -40,6 +41,21 @@ test("filterAccounts supports group and status composite filtering", () => {
 
   const teamKeywordActive = filterAccounts(accounts, usage, "alp", "active", "TEAM");
   assert.deepEqual(teamKeywordActive.map((item) => item.id), ["a"]);
+});
+
+test("filterAccounts accepts precomputed derived usage state", () => {
+  const accounts = [
+    { id: "a", label: "alpha", groupName: "TEAM" },
+    { id: "b", label: "beta", groupName: "TEAM" },
+  ];
+  const usage = [
+    { accountId: "a", usedPercent: 85, secondaryUsedPercent: 10, windowMinutes: 300, secondaryWindowMinutes: 10080 },
+    { accountId: "b", usedPercent: 40, secondaryUsedPercent: 40, windowMinutes: 300, secondaryWindowMinutes: 10080 },
+  ];
+
+  const derived = buildAccountDerivedMap(accounts, usage);
+  const low = filterAccounts(accounts, derived, "", "low", "TEAM");
+  assert.deepEqual(low.map((item) => item.id), ["a"]);
 });
 
 

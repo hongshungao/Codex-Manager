@@ -1,6 +1,8 @@
 let requestLogSearchTimer = null;
 let filterEventsBound = false;
 let requestLogInputSeq = 0;
+let accountSearchTimer = null;
+let accountSearchInputSeq = 0;
 
 export function bindFilterEvents({
   dom,
@@ -63,8 +65,18 @@ export function bindFilterEvents({
 
   if (dom.accountSearch) {
     dom.accountSearch.addEventListener("input", (event) => {
-      state.accountSearch = event.target.value || "";
-      renderAccountsView();
+      const query = event.target.value || "";
+      state.accountSearch = query;
+      const currentSeq = ++accountSearchInputSeq;
+      if (accountSearchTimer) {
+        clearTimeout(accountSearchTimer);
+      }
+      accountSearchTimer = setTimeout(() => {
+        if (currentSeq !== accountSearchInputSeq) {
+          return;
+        }
+        renderAccountsView();
+      }, 220);
     });
   }
 
