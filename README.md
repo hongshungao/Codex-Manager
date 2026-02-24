@@ -1,8 +1,16 @@
-# CodexManager
+<p align="center">
+  <img src="assets/logo/logo.png" alt="CodexManager Logo" width="220" />
+</p>
+
+<h1 align="center">CodexManager</h1>
+
+<p align="center">本地桌面端 + 服务进程的 Codex 账号池管理器</p>
+
+<p align="center">
+  <a href="README.en.md">English</a>
+</p>
 
 本地桌面端 + 服务进程的 Codex 账号池管理器，用于统一管理账号、用量与平台 Key，并提供本地网关能力。
-
-[English](README.en.md)
 
 ## 最近变更
 - 网关协议适配继续拆分：`protocol_adapter` 的请求映射与响应转换进一步模块化，响应转换按 JSON/SSE 分离，维护边界更清晰。

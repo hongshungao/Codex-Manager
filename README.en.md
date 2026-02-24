@@ -1,8 +1,16 @@
-# CodexManager
+<p align="center">
+  <img src="assets/logo/logo.png" alt="CodexManager Logo" width="220" />
+</p>
+
+<h1 align="center">CodexManager</h1>
+
+<p align="center">A local desktop + service toolkit for Codex-compatible account and gateway management.</p>
+
+<p align="center">
+  <a href="README.md">中文</a>
+</p>
 
 A local desktop + service toolkit for managing a Codex-compatible ChatGPT account pool, usage, and platform keys, with a built-in local gateway.
-
-[中文](README.md)
 
 ## Recent Changes
 - Gateway protocol adapter was further modularized: request mapping and response conversion were split, and response conversion is now separated into JSON/SSE modules.
