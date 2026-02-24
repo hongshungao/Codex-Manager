@@ -182,20 +182,15 @@ jobs:
         id: meta
         shell: bash
         run: |
-          RAW_TAG="${{ github.event.inputs.tag }}"
+          TAG="${{ github.event.inputs.tag }}"
           REF="${{ github.event.inputs.ref || 'main' }}"
 
-          if [[ -z "$RAW_TAG" ]]; then
+          if [[ -z "$TAG" ]]; then
             echo "release tag is required"
             exit 1
           fi
-          if [[ "$RAW_TAG" != v* ]]; then
-            RAW_TAG="v$RAW_TAG"
-          fi
-          if [[ "$RAW_TAG" == *"-mac-beta" ]]; then
-            TAG="$RAW_TAG"
-          else
-            TAG="${RAW_TAG}-mac-beta"
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
           fi
 
           TARGET_SHA="$(git rev-parse --verify "${REF}^{commit}")"
@@ -204,11 +199,18 @@ jobs:
             exit 1
           fi
 
+          if [[ "$TAG" == *-* ]]; then
+            PRERELEASE="true"
+          else
+            PRERELEASE="false"
+          fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
-      - name: Publish GitHub pre-release
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -227,8 +229,12 @@ jobs:
           fi
 
           if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --prerelease
+            gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA"
             gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
           else
-            gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes --prerelease
+            if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes --prerelease
+            else
+              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes
+            fi
           fi
