@@ -24,3 +24,7 @@ tauri-plugin-log = "2"
 codexmanager-core = { path = "../../crates/core" }
 codexmanager-service = { path = "../../crates/service" }
 webbrowser = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+semver = "1.0"
+sha2 = "0.10"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }

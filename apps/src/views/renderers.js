@@ -33,6 +33,9 @@ export function renderCurrentView(page, handlers) {
     renderRequestLogs();
     return;
   }
+  if (page === "settings") {
+    return;
+  }
   renderDashboard();
 }
 

@@ -6,14 +6,16 @@ export function createNavigationHandlers({ state, dom, closeThemePanel, onPageAc
     }
     state.currentPage = page;
     closeThemePanel();
-    dom.navDashboard.classList.toggle("active", page === "dashboard");
-    dom.navAccounts.classList.toggle("active", page === "accounts");
-    dom.navApiKeys.classList.toggle("active", page === "apikeys");
-    dom.navRequestLogs.classList.toggle("active", page === "requestlogs");
-    dom.pageDashboard.classList.toggle("active", page === "dashboard");
-    dom.pageAccounts.classList.toggle("active", page === "accounts");
-    dom.pageApiKeys.classList.toggle("active", page === "apikeys");
-    dom.pageRequestLogs.classList.toggle("active", page === "requestlogs");
+    dom.navDashboard?.classList.toggle("active", page === "dashboard");
+    dom.navAccounts?.classList.toggle("active", page === "accounts");
+    dom.navApiKeys?.classList.toggle("active", page === "apikeys");
+    dom.navRequestLogs?.classList.toggle("active", page === "requestlogs");
+    dom.navSettings?.classList.toggle("active", page === "settings");
+    dom.pageDashboard?.classList.toggle("active", page === "dashboard");
+    dom.pageAccounts?.classList.toggle("active", page === "accounts");
+    dom.pageApiKeys?.classList.toggle("active", page === "apikeys");
+    dom.pageRequestLogs?.classList.toggle("active", page === "requestlogs");
+    dom.pageSettings?.classList.toggle("active", page === "settings");
     dom.pageTitle.textContent =
       page === "dashboard"
         ? "仪表盘"
@@ -21,7 +23,9 @@ export function createNavigationHandlers({ state, dom, closeThemePanel, onPageAc
           ? "账号管理"
           : page === "apikeys"
             ? "平台 Key"
-            : "请求日志";
+            : page === "requestlogs"
+              ? "请求日志"
+              : "设置";
     onPageActivated?.(page);
   }
 

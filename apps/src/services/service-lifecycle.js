@@ -19,16 +19,22 @@ export function createServiceLifecycle({
   function updateServiceToggle() {
     if (!dom.serviceToggleBtn) return;
     if (state.serviceBusy) return;
-    dom.serviceToggleBtn.textContent = state.serviceConnected ? "停止服务" : "启动服务";
+    dom.serviceToggleBtn.checked = state.serviceConnected;
+    dom.serviceToggleBtn.setAttribute("aria-checked", state.serviceConnected ? "true" : "false");
+    if (dom.serviceToggleText) {
+      dom.serviceToggleText.textContent = state.serviceConnected ? "已连接" : "未连接";
+    }
   }
 
   function setServiceBusy(busy, mode) {
     state.serviceBusy = busy;
     if (!dom.serviceToggleBtn) return;
     dom.serviceToggleBtn.disabled = busy;
-    dom.serviceToggleBtn.classList.toggle("is-loading", busy);
+    dom.serviceToggleBtn.classList.toggle("is-busy", busy);
     if (busy) {
-      dom.serviceToggleBtn.textContent = mode === "stop" ? "停止中..." : "启动中...";
+      if (dom.serviceToggleText) {
+        dom.serviceToggleText.textContent = mode === "stop" ? "断开中..." : "连接中...";
+      }
     } else {
       updateServiceToggle();
     }

@@ -10,6 +10,8 @@ use std::time::Duration;
 use tauri::Manager;
 use std::thread;
 
+mod updater;
+
 #[tauri::command]
 async fn service_initialize(addr: Option<String>) -> Result<serde_json::Value, String> {
   let v = tauri::async_runtime::spawn_blocking(move || rpc_call("initialize", addr, None))
@@ -339,7 +341,12 @@ pub fn run() {
       service_apikey_delete,
       service_apikey_disable,
       service_apikey_enable,
-      open_in_browser
+      open_in_browser,
+      updater::app_update_check,
+      updater::app_update_prepare,
+      updater::app_update_apply_portable,
+      updater::app_update_launch_installer,
+      updater::app_update_status
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

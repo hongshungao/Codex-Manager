@@ -49,6 +49,7 @@ export function bindNavigationAndServiceEvents({
   if (dom.navAccounts) dom.navAccounts.addEventListener("click", () => handleSwitchPage("accounts"));
   if (dom.navApiKeys) dom.navApiKeys.addEventListener("click", () => handleSwitchPage("apikeys"));
   if (dom.navRequestLogs) dom.navRequestLogs.addEventListener("click", () => handleSwitchPage("requestlogs"));
+  if (dom.navSettings) dom.navSettings.addEventListener("click", () => handleSwitchPage("settings"));
 
   if (dom.refreshAll) {
     dom.refreshAll.addEventListener("click", refreshAll);
@@ -83,6 +84,9 @@ export function bindNavigationAndServiceEvents({
   }
 
   if (dom.serviceToggleBtn) {
-    dom.serviceToggleBtn.addEventListener("click", handleServiceToggle);
+    dom.serviceToggleBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      void handleServiceToggle();
+    });
   }
 }

@@ -24,6 +24,7 @@
                     <button id="navAccounts">账号管理</button>
                     <button id="navApiKeys">平台 Key</button>
                     <button id="navRequestLogs">请求日志</button>
+                    <button id="navSettings">设置</button>
                 </nav>
             </header>
 
@@ -36,28 +37,16 @@
                     <div class="top-actions">
                         <div class="service-setup">
                             <input id="serviceAddr" type="text" placeholder="端口，如 5050" />
-                            <button id="serviceToggle" class="secondary">启动服务</button>
+                            <label class="service-toggle-control switch-control" for="serviceToggle">
+                                <input id="serviceToggle" type="checkbox" />
+                                <span class="switch-track" aria-hidden="true">
+                                    <span class="switch-thumb"></span>
+                                </span>
+                                <span id="serviceToggleText">未连接</span>
+                            </label>
                         </div>
                         <div class="service-meta">
-                            <div id="status" class="status-pill">未启动</div>
                             <div id="serviceHint" class="hint"></div>
-                        </div>
-                        <div class="theme-popover">
-                            <button
-                                id="themeToggle"
-                                class="secondary theme-toggle"
-                                type="button"
-                                aria-expanded="false"
-                                aria-controls="themePanel"
-                            >
-                                主题
-                            </button>
-                            <div
-                                id="themePanel"
-                                class="theme-panel"
-                                aria-label="主题切换"
-                                hidden
-                            ></div>
                         </div>
                     </div>
                 </section>
@@ -200,6 +189,48 @@
                                 </thead>
                                 <tbody id="requestLogRows"></tbody>
                             </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="pageSettings" class="page">
+                    <div class="settings-grid">
+                        <div class="panel settings-card">
+                            <div class="panel-header">
+                                <div>
+                                    <h3>更新设置</h3>
+                                    <p>启动自动检查与手动更新入口</p>
+                                </div>
+                            </div>
+                            <div class="settings-row">
+                                <label class="update-auto-check switch-control" for="autoCheckUpdate">
+                                    <input id="autoCheckUpdate" type="checkbox" checked />
+                                    <span class="switch-track" aria-hidden="true">
+                                        <span class="switch-thumb"></span>
+                                    </span>
+                                    <span>自动检查更新</span>
+                                </label>
+                                <button id="checkUpdate" class="secondary" type="button">
+                                    检查更新
+                                </button>
+                            </div>
+                            <div id="updateStatusText" class="hint">尚未检查更新</div>
+                        </div>
+
+                        <div class="panel settings-card">
+                            <div class="panel-header">
+                                <div>
+                                    <h3>主题设置</h3>
+                                    <p>切换界面配色主题</p>
+                                </div>
+                            </div>
+                            <div class="theme-popover settings-theme">
+                                <div
+                                    id="themePanel"
+                                    class="theme-panel"
+                                    aria-label="主题切换"
+                                ></div>
+                            </div>
                         </div>
                     </div>
                 </section>

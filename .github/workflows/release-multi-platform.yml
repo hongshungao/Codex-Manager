@@ -157,10 +157,13 @@ jobs:
           $portableBinary = Join-Path $portableDir $portableName
           Copy-Item -Force $source $portableBinary
 
+          $portableMarker = Join-Path $portableDir ".codexmanager-portable"
+          Set-Content -Path $portableMarker -Value "" -NoNewline
+
           $zipName = "CodexManager-$artifact-portable.zip"
           $zipPath = Join-Path $portableDir $zipName
           if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-          Compress-Archive -Path $portableBinary -DestinationPath $zipPath
+          Compress-Archive -Path $portableBinary, $portableMarker -DestinationPath $zipPath
           Write-Host "portable package: $zipPath"
 
       - name: Upload artifacts
@@ -240,6 +243,17 @@ jobs:
           generated_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
 
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd release-assets
+          : > checksums.txt
+          while IFS= read -r -d '' file; do
+            base="$(basename "$file")"
+            hash="$(sha256sum "$file" | awk '{print $1}')"
+            printf "%s  %s\n" "$hash" "$base" >> checksums.txt
+          done < <(find . -maxdepth 1 -type f ! -name 'checksums.txt' -print0 | sort -z)
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -252,7 +266,7 @@ jobs:
           TITLE="CodexManager $TAG"
 
           mapfile -t FILES < <(find release-assets -type f \( \
-            -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.zip' -o -name 'RELEASE-META.txt' \
+            -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.zip' -o -name 'RELEASE-META.txt' -o -name 'checksums.txt' \
           \) | sort)
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "No release assets found."

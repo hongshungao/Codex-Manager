@@ -15,6 +15,10 @@
     width: 108px;
     min-width: 84px;
   }
+
+  .update-auto-check span {
+    max-width: none;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -32,6 +36,12 @@
     right: auto;
     left: 0;
     justify-content: flex-start;
+  }
+
+  .settings-theme .theme-panel {
+    right: auto;
+    left: auto;
+    width: 100%;
   }
 
   .content {
@@ -79,6 +89,10 @@
     width: 100%;
     min-width: 0;
   }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -98,6 +112,10 @@
 
   .theme-panel {
     width: min(320px, calc(100vw - 24px));
+  }
+
+  .settings-theme .theme-panel {
+    width: 100%;
   }
 
   .stats-grid,

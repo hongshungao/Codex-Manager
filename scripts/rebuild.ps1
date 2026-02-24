@@ -39,6 +39,7 @@ if (Test-Path $tauriConfig) {
 
 $portableRoot = if ($PortableDir) { $PortableDir } else { Join-Path $root "portable" }
 $portableExe = Join-Path $portableRoot "$appName.exe"
+$portableMarker = Join-Path $portableRoot ".codexmanager-portable"
 $appExe = Join-Path $tauriDir "target\\release\\$appName.exe"
 $artifactsRoot = if ($ArtifactsDir) { $ArtifactsDir } else { Join-Path $root "artifacts" }
 
@@ -154,6 +155,7 @@ function Invoke-LocalWindowsBuild {
       if ($DryRun) {
         Write-Step "DRY RUN: stage portable -> $portableRoot"
         Write-Step "DRY RUN: copy $appExe -> $portableExe"
+        Write-Step "DRY RUN: write marker -> $portableMarker"
       } else {
         if (-not (Test-Path $portableRoot)) {
           New-Item -ItemType Directory -Force $portableRoot | Out-Null
@@ -162,6 +164,7 @@ function Invoke-LocalWindowsBuild {
           throw "missing app exe: $appExe"
         }
         Copy-Item -Force $appExe $portableExe
+        Set-Content -Path $portableMarker -Value "" -NoNewline
       }
     }
   } finally {

@@ -13,6 +13,38 @@ export async function invoke(method, params) {
   return res;
 }
 
+function isCommandMissingError(err) {
+  const msg = String(err && err.message ? err.message : err).toLowerCase();
+  if (
+    msg.includes("not found")
+    || msg.includes("unknown command")
+    || msg.includes("no such command")
+    || msg.includes("not managed")
+    || msg.includes("does not exist")
+  ) {
+    return true;
+  }
+  return msg.includes("invalid args") && msg.includes("for command");
+}
+
+async function invokeFirst(methods, params) {
+  let lastErr = null;
+  for (const method of methods) {
+    try {
+      return await invoke(method, params);
+    } catch (err) {
+      lastErr = err;
+      if (!isCommandMissingError(err)) {
+        throw err;
+      }
+    }
+  }
+  if (lastErr) {
+    throw lastErr;
+  }
+  throw new Error("未配置可用命令");
+}
+
 function withAddr(extra) {
   return {
     addr: state.serviceAddr || null,
@@ -130,4 +162,25 @@ export async function serviceApiKeyEnable(keyId) {
 // 打开浏览器
 export async function openInBrowser(url) {
   return invoke("open_in_browser", { url });
+}
+
+// 应用更新
+export async function updateCheck() {
+  return invokeFirst(["app_update_check", "update_check", "check_update"], {});
+}
+
+export async function updateDownload(payload = {}) {
+  return invokeFirst(["app_update_prepare", "update_download", "download_update"], payload);
+}
+
+export async function updateInstall(payload = {}) {
+  return invokeFirst(["app_update_launch_installer", "update_install", "install_update"], payload);
+}
+
+export async function updateRestart(payload = {}) {
+  return invokeFirst(["app_update_apply_portable", "update_restart", "restart_update"], payload);
+}
+
+export async function updateStatus() {
+  return invokeFirst(["app_update_status", "update_status"], {});
 }
