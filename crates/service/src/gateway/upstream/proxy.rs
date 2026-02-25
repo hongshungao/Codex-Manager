@@ -96,18 +96,7 @@ pub(in super::super) fn proxy_validated_request(
     let account_max_inflight = super::super::account_max_inflight_limit();
     let anthropic_has_prompt_cache_key = protocol_type == PROTOCOL_ANTHROPIC_NATIVE
         && has_prompt_cache_key;
-    if let Some(preferred_account_id) =
-        super::super::preferred_route_account(&key_id, &path, model_for_log.as_deref())
-    {
-        if let Some(pos) = candidates
-            .iter()
-            .position(|(account, _)| account.id == preferred_account_id)
-        {
-            if pos > 0 {
-                candidates.rotate_left(pos);
-            }
-        }
-    }
+    super::super::apply_route_strategy(&mut candidates, &key_id, model_for_log.as_deref());
 
     let context = GatewayUpstreamExecutionContext::new(
         &trace_id,
@@ -326,9 +315,6 @@ pub(in super::super) fn proxy_validated_request(
                     final_error,
                     elapsed_ms,
                 );
-                if status_code >= 200 && status_code < 300 {
-                    context.remember_success_account(&account.id);
-                }
                 return Ok(());
             }
         }

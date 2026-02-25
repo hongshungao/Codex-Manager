@@ -169,6 +169,7 @@ Parameters (with defaults):
 | `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | Optional | Primary upstream base URL. Bare ChatGPT host values are normalized to backend-api/codex. |
 | `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | Auto-inferred | Optional | Explicit fallback upstream. If unset and primary is ChatGPT backend, fallback defaults to `https://api.openai.com/v1`. |
 | `CODEXMANAGER_UPSTREAM_COOKIE` | Unset | Optional | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
+| `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | Optional | Gateway account routing strategy: default `ordered` (follow account order, fail over to next on failure); set `balanced`/`round_robin`/`rr` to enable key+model-based balanced round-robin starts. |
 | `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | Optional | Upstream connect timeout in seconds. |
 | `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | Optional | Request-gate wait budget in milliseconds. |
 | `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | Optional | Per-account soft inflight cap. `0` means unlimited. |

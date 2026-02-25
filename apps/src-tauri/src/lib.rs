@@ -156,6 +156,22 @@ async fn service_requestlog_today_summary(addr: Option<String>) -> Result<serde_
 }
 
 #[tauri::command]
+async fn service_gateway_route_strategy_get(
+  addr: Option<String>,
+) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("gateway/routeStrategy/get", addr, None).await
+}
+
+#[tauri::command]
+async fn service_gateway_route_strategy_set(
+  addr: Option<String>,
+  strategy: String,
+) -> Result<serde_json::Value, String> {
+  let params = serde_json::json!({ "strategy": strategy });
+  rpc_call_in_background("gateway/routeStrategy/set", addr, Some(params)).await
+}
+
+#[tauri::command]
 async fn service_login_start(
   addr: Option<String>,
   login_type: String,
@@ -336,6 +352,8 @@ pub fn run() {
       service_requestlog_list,
       service_requestlog_clear,
       service_requestlog_today_summary,
+      service_gateway_route_strategy_get,
+      service_gateway_route_strategy_set,
       service_login_start,
       service_login_status,
       service_login_complete,

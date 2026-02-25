@@ -14,6 +14,8 @@ export const dom = {
   checkUpdate: byId("checkUpdate"),
   updateCurrentVersion: byId("updateCurrentVersion"),
   updateStatusText: byId("updateStatusText"),
+  routeStrategySelect: byId("routeStrategySelect"),
+  routeStrategyHint: byId("routeStrategyHint"),
   themeToggle: byId("themeToggle"),
   themePanel: byId("themePanel"),
   serviceHint: byId("serviceHint"),

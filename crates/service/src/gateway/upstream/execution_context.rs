@@ -144,15 +144,6 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
             Some(self.protocol_type),
         );
     }
-
-    pub(super) fn remember_success_account(&self, account_id: &str) {
-        super::super::remember_success_route_account(
-            self.key_id,
-            self.path,
-            self.model_for_log,
-            account_id,
-        );
-    }
 }
 
 

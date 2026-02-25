@@ -240,7 +240,7 @@
 
 .settings-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   width: 100%;
 }
@@ -268,6 +268,32 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.settings-field-label {
+  margin-right: auto;
+}
+
+.settings-inline-select {
+  width: auto;
+  min-width: 220px;
+}
+
+.settings-card-gateway .settings-inline-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-card-gateway .settings-row {
+  align-items: flex-start;
+}
+
+.settings-card-gateway .settings-field-label {
+  margin-right: 0;
+}
+
+.settings-card-span-2 {
+  grid-column: 1 / -1;
 }
 
 .settings-theme {

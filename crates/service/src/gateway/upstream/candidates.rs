@@ -9,16 +9,8 @@ pub(crate) enum CandidateSkipReason {
 pub(crate) fn prepare_gateway_candidates(
     storage: &Storage,
 ) -> Result<Vec<(Account, Token)>, String> {
-    let mut candidates = super::super::collect_gateway_candidates(storage)?;
-    // 中文注释：先避开冷却中的账号，再按历史路由质量与并发负载排序，减少反复命中不稳定账号。
-    candidates.sort_by_key(|(account, _)| {
-        (
-            super::super::is_account_in_cooldown(&account.id),
-            super::super::route_quality_penalty(&account.id),
-            super::super::account_inflight_count(&account.id),
-        )
-    });
-    Ok(candidates)
+    // 中文注释：保持账号原始顺序（按账户排序字段）作为候选顺序，失败时再依次切下一个。
+    super::super::collect_gateway_candidates(storage)
 }
 
 pub(crate) fn candidate_skip_reason_for_proxy(

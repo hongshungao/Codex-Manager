@@ -51,6 +51,7 @@ pub(crate) fn record_route_quality(account_id: &str, status_code: u16) {
     });
 }
 
+#[allow(dead_code)]
 pub(crate) fn route_quality_penalty(account_id: &str) -> i64 {
     let lock = ROUTE_QUALITY.get_or_init(|| Mutex::new(RouteQualityState::default()));
     let Ok(mut state) = lock.lock() else {

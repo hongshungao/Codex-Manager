@@ -182,6 +182,7 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
 | `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | 可选 | 主上游地址。若填 `https://chatgpt.com`/`https://chat.openai.com` 会自动归一化到 backend-api/codex。 |
 | `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | 自动推断 | 可选 | 明确指定 fallback 上游。若未设置且主上游是 ChatGPT backend，则默认 fallback 到 `https://api.openai.com/v1`。 |
 | `CODEXMANAGER_UPSTREAM_COOKIE` | 未设置 | 可选 | 上游 Cookie（主要用于 Cloudflare/WAF challenge 场景）。 |
+| `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | 可选 | 网关账号选路策略：默认 `ordered`（按账号顺序优先，失败再下一个）；可设 `balanced`/`round_robin`/`rr` 启用按 `Key+模型` 的均衡轮询起点。 |
 | `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | 可选 | 上游连接阶段超时（秒）。 |
 | `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | 可选 | 请求闸门等待预算（毫秒）。 |
 | `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | 可选 | 单账号并发软上限。`0` 表示不限制。 |

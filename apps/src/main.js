@@ -3,7 +3,15 @@ import "./styles/layout.css";
 import "./styles/components.css";
 import "./styles/responsive.css";
 
-import { updateCheck, updateDownload, updateInstall, updateRestart, updateStatus } from "./api";
+import {
+  serviceGatewayRouteStrategyGet,
+  serviceGatewayRouteStrategySet,
+  updateCheck,
+  updateDownload,
+  updateInstall,
+  updateRestart,
+  updateStatus,
+} from "./api";
 import { state } from "./state";
 import { dom } from "./ui/dom";
 import { setStatus, setServiceHint } from "./ui/status";
@@ -66,10 +74,15 @@ const { switchPage, updateRequestLogFilterButtons } = createNavigationHandlers({
 
 const { setStartupMask } = createStartupMaskController({ dom, state });
 const UPDATE_AUTO_CHECK_STORAGE_KEY = "codexmanager.update.auto_check";
+const ROUTE_STRATEGY_STORAGE_KEY = "codexmanager.gateway.route_strategy";
+const ROUTE_STRATEGY_ORDERED = "ordered";
+const ROUTE_STRATEGY_BALANCED = "balanced";
 const UPDATE_CHECK_DELAY_MS = 1200;
 let refreshAllInFlight = null;
 let updateCheckInFlight = null;
 let pendingUpdateCandidate = null;
+let routeStrategySyncInFlight = null;
+let routeStrategySyncedProbeId = -1;
 
 function isTauriRuntime() {
   return Boolean(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
@@ -101,6 +114,124 @@ function initUpdateAutoCheckSetting() {
   }
   if (dom.autoCheckUpdate) {
     dom.autoCheckUpdate.checked = enabled;
+  }
+}
+
+function normalizeRouteStrategy(strategy) {
+  const raw = String(strategy || "").trim().toLowerCase();
+  if (["balanced", "round_robin", "round-robin", "rr"].includes(raw)) {
+    return ROUTE_STRATEGY_BALANCED;
+  }
+  return ROUTE_STRATEGY_ORDERED;
+}
+
+function routeStrategyLabel(strategy) {
+  return normalizeRouteStrategy(strategy) === ROUTE_STRATEGY_BALANCED ? "均衡轮询" : "顺序优先";
+}
+
+function updateRouteStrategyHint(strategy) {
+  if (!dom.routeStrategyHint) return;
+  if (normalizeRouteStrategy(strategy) === ROUTE_STRATEGY_BALANCED) {
+    dom.routeStrategyHint.textContent = "按 Key + 模型 均衡轮询起点，降低单账号热点。";
+    return;
+  }
+  dom.routeStrategyHint.textContent = "按账号顺序优先请求，失败后再切换到下一个账号。";
+}
+
+function readRouteStrategySetting() {
+  if (typeof localStorage === "undefined") {
+    return ROUTE_STRATEGY_ORDERED;
+  }
+  return normalizeRouteStrategy(localStorage.getItem(ROUTE_STRATEGY_STORAGE_KEY));
+}
+
+function saveRouteStrategySetting(strategy) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  localStorage.setItem(ROUTE_STRATEGY_STORAGE_KEY, normalizeRouteStrategy(strategy));
+}
+
+function setRouteStrategySelect(strategy) {
+  const normalized = normalizeRouteStrategy(strategy);
+  if (dom.routeStrategySelect) {
+    dom.routeStrategySelect.value = normalized;
+  }
+  updateRouteStrategyHint(normalized);
+}
+
+function initRouteStrategySetting() {
+  const mode = readRouteStrategySetting();
+  if (typeof localStorage !== "undefined" && localStorage.getItem(ROUTE_STRATEGY_STORAGE_KEY) == null) {
+    saveRouteStrategySetting(mode);
+  }
+  setRouteStrategySelect(mode);
+}
+
+function resolveRouteStrategyFromPayload(payload) {
+  const picked = pickFirstValue(payload, ["strategy", "result.strategy"]);
+  return normalizeRouteStrategy(picked);
+}
+
+async function applyRouteStrategyToService(strategy, { silent = true } = {}) {
+  const normalized = normalizeRouteStrategy(strategy);
+  if (routeStrategySyncInFlight) {
+    return routeStrategySyncInFlight;
+  }
+  routeStrategySyncInFlight = (async () => {
+    const connected = await ensureConnected();
+    serviceLifecycle.updateServiceToggle();
+    if (!connected) {
+      if (!silent) {
+        showToast("服务未连接，稍后会自动应用选路策略", "error");
+      }
+      return false;
+    }
+    const response = await serviceGatewayRouteStrategySet(normalized);
+    const applied = resolveRouteStrategyFromPayload(response);
+    saveRouteStrategySetting(applied);
+    setRouteStrategySelect(applied);
+    routeStrategySyncedProbeId = state.serviceProbeId;
+    if (!silent) {
+      showToast(`已切换为${routeStrategyLabel(applied)}`);
+    }
+    return true;
+  })();
+
+  try {
+    return await routeStrategySyncInFlight;
+  } catch (err) {
+    if (!silent) {
+      showToast(`切换失败：${normalizeErrorMessage(err)}`, "error");
+    }
+    return false;
+  } finally {
+    routeStrategySyncInFlight = null;
+  }
+}
+
+async function syncRouteStrategyOnStartup() {
+  const connected = await ensureConnected();
+  serviceLifecycle.updateServiceToggle();
+  if (!connected) {
+    return;
+  }
+
+  const hasLocalSetting = typeof localStorage !== "undefined"
+    && localStorage.getItem(ROUTE_STRATEGY_STORAGE_KEY) != null;
+  if (hasLocalSetting) {
+    await applyRouteStrategyToService(readRouteStrategySetting(), { silent: true });
+    return;
+  }
+
+  try {
+    const response = await serviceGatewayRouteStrategyGet();
+    const strategy = resolveRouteStrategyFromPayload(response);
+    saveRouteStrategySetting(strategy);
+    setRouteStrategySelect(strategy);
+    routeStrategySyncedProbeId = state.serviceProbeId;
+  } catch {
+    setRouteStrategySelect(readRouteStrategySetting());
   }
 }
 
@@ -484,6 +615,9 @@ async function refreshAll() {
     const ok = await ensureConnected();
     serviceLifecycle.updateServiceToggle();
     if (!ok) return;
+    if (routeStrategySyncedProbeId !== state.serviceProbeId) {
+      await applyRouteStrategyToService(readRouteStrategySetting(), { silent: true });
+    }
     const results = await runRefreshTasks(
       [
         { name: "accounts", run: refreshAccounts },
@@ -651,6 +785,15 @@ function bindEvents() {
       void handleCheckUpdateClick();
     });
   }
+  if (dom.routeStrategySelect && dom.routeStrategySelect.dataset.bound !== "1") {
+    dom.routeStrategySelect.dataset.bound = "1";
+    dom.routeStrategySelect.addEventListener("change", () => {
+      const selected = normalizeRouteStrategy(dom.routeStrategySelect.value);
+      saveRouteStrategySetting(selected);
+      setRouteStrategySelect(selected);
+      void applyRouteStrategyToService(selected, { silent: false });
+    });
+  }
 }
 
 function bootstrap() {
@@ -660,6 +803,7 @@ function bootstrap() {
   renderThemeButtons();
   restoreTheme();
   initUpdateAutoCheckSetting();
+  initRouteStrategySetting();
   void bootstrapUpdateStatus();
   serviceLifecycle.restoreServiceAddr();
   serviceLifecycle.updateServiceToggle();
@@ -668,6 +812,7 @@ function bootstrap() {
   updateRequestLogFilterButtons();
   scheduleStartupUpdateCheck();
   void serviceLifecycle.autoStartService().finally(() => {
+    void syncRouteStrategyOnStartup();
     setStartupMask(false);
   });
 }

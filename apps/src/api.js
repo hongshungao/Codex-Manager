@@ -107,6 +107,14 @@ export async function serviceRequestLogTodaySummary() {
   return invoke("service_requestlog_today_summary", withAddr());
 }
 
+export async function serviceGatewayRouteStrategyGet() {
+  return invoke("service_gateway_route_strategy_get", withAddr());
+}
+
+export async function serviceGatewayRouteStrategySet(strategy) {
+  return invoke("service_gateway_route_strategy_set", withAddr({ strategy }));
+}
+
 // 登录
 export async function serviceLoginStart(payload) {
   return invoke("service_login_start", withAddr(payload));

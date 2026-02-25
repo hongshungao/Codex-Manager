@@ -71,9 +71,9 @@ use openai_fallback::try_openai_fallback;
 use request_log::write_request_log;
 pub(crate) use request_entry::handle_gateway_request;
 pub(super) use incoming_headers::IncomingHeaderSnapshot;
-use route_hint::{preferred_route_account, remember_success_route_account};
+use route_hint::apply_route_strategy;
 use local_count_tokens::maybe_respond_local_count_tokens;
-use route_quality::{record_route_quality, route_quality_penalty};
+use route_quality::record_route_quality;
 use request_gate::{request_gate_lock, RequestGateAcquireError};
 use runtime_config::{
     account_max_inflight_limit, request_gate_wait_timeout, trace_body_preview_max_bytes,
@@ -87,8 +87,19 @@ use upstream::proxy::proxy_validated_request;
 pub(crate) fn reload_runtime_config_from_env() {
     runtime_config::reload_from_env();
     selection::reload_from_env();
+    route_hint::reload_from_env();
     upstream::config::reload_from_env();
     trace_log::reload_from_env();
+}
+
+pub(crate) fn current_route_strategy() -> &'static str {
+    route_hint::current_route_strategy()
+}
+
+pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String> {
+    let applied = route_hint::set_route_strategy(strategy)?;
+    std::env::set_var("CODEXMANAGER_ROUTE_STRATEGY", applied);
+    Ok(applied)
 }
 
 #[cfg(test)]

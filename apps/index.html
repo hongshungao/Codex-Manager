@@ -251,7 +251,24 @@
                             <div id="updateStatusText" class="hint">尚未检查更新</div>
                         </div>
 
-                        <div class="panel settings-card">
+                        <div class="panel settings-card settings-card-gateway">
+                            <div class="panel-header">
+                                <div>
+                                    <h3>网关策略</h3>
+                                    <p>配置请求路由策略</p>
+                                </div>
+                            </div>
+                            <div class="settings-row">
+                                <label class="hint settings-field-label" for="routeStrategySelect">网关选路策略</label>
+                                <select id="routeStrategySelect" class="inline-select settings-inline-select">
+                                    <option value="ordered">顺序优先</option>
+                                    <option value="balanced">均衡轮询</option>
+                                </select>
+                            </div>
+                            <div id="routeStrategyHint" class="hint">默认按账号顺序优先，失败后再切换到下一个账号。</div>
+                        </div>
+
+                        <div class="panel settings-card settings-card-span-2">
                             <div class="panel-header">
                                 <div>
                                     <h3>主题设置</h3>
