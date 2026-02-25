@@ -125,7 +125,7 @@ jobs:
 
       - name: Build Tauri bundle
         working-directory: apps
-        run: pnpm dlx @tauri-apps/cli@2.9.6 tauri build --bundles appimage,deb
+        run: pnpm dlx @tauri-apps/cli@2.9.6 build --bundles appimage,deb
 
       - name: Stage portable package
         shell: bash
