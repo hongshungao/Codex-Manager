@@ -27,12 +27,14 @@ pub(super) fn prepare_candidates_for_proxy(
             super::super::write_request_log(
                 storage,
                 Some(key_id),
+                None,
                 path,
                 request_method,
                 model_for_log,
                 reasoning_for_log,
                 None,
                 Some(500),
+                super::super::request_log::RequestLogUsage::default(),
                 Some(err_text.as_str()),
             );
             let response = Response::from_string(err_text.clone()).with_status_code(500);
@@ -53,12 +55,14 @@ pub(super) fn prepare_candidates_for_proxy(
         super::super::write_request_log(
             storage,
             Some(key_id),
+            None,
             path,
             request_method,
             model_for_log,
             reasoning_for_log,
             None,
             Some(503),
+            super::super::request_log::RequestLogUsage::default(),
             Some("no available account"),
         );
         let response = Response::from_string("no available account").with_status_code(503);

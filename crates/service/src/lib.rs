@@ -67,6 +67,8 @@ mod gateway;
 mod requestlog_list;
 #[path = "requestlog/requestlog_clear.rs"]
 mod requestlog_clear;
+#[path = "requestlog/requestlog_today_summary.rs"]
+mod requestlog_today_summary;
 mod reasoning_effort;
 mod rpc_dispatch;
 

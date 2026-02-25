@@ -150,9 +150,17 @@ fn read_http_request_once(stream: &mut TcpStream) -> CapturedUpstreamRequest {
 }
 
 fn start_mock_upstream_once(response_json: &str) -> (String, Receiver<CapturedUpstreamRequest>, thread::JoinHandle<()>) {
+    start_mock_upstream_once_with_content_type(response_json, "application/json")
+}
+
+fn start_mock_upstream_once_with_content_type(
+    response_body: &str,
+    content_type: &str,
+) -> (String, Receiver<CapturedUpstreamRequest>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock upstream");
     let addr = listener.local_addr().expect("mock upstream addr");
-    let response = response_json.as_bytes().to_vec();
+    let response = response_body.as_bytes().to_vec();
+    let content_type = content_type.to_string();
     let (tx, rx) = mpsc::channel();
 
     let join = thread::spawn(move || {
@@ -161,7 +169,7 @@ fn start_mock_upstream_once(response_json: &str) -> (String, Receiver<CapturedUp
         let _ = tx.send(captured);
 
         let header = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             response.len()
         );
         stream.write_all(header.as_bytes()).expect("write upstream status");
@@ -304,6 +312,10 @@ fn gateway_logs_invalid_api_key_error() {
     let found = logs.iter().any(|item| {
         item.request_path == "/v1/responses"
             && item.status_code == Some(403)
+            && item.input_tokens.unwrap_or(0) == 0
+            && item.cached_input_tokens.unwrap_or(0) == 0
+            && item.output_tokens.unwrap_or(0) == 0
+            && item.reasoning_output_tokens.unwrap_or(0) == 0
             && item.error.as_deref() == Some("invalid api key")
     });
     assert!(
@@ -497,6 +509,122 @@ fn gateway_claude_protocol_end_to_end_uses_codex_headers() {
     assert_eq!(upstream_payload["stream"], true);
     assert_eq!(upstream_payload["input"][0]["role"], "user");
     assert_eq!(upstream_payload["input"][0]["content"][0]["text"], "你好");
+}
+
+#[test]
+fn gateway_openai_stream_logs_cached_and_reasoning_tokens() {
+    let _lock = ENV_LOCK.lock().expect("lock env");
+    let mut dir = std::env::temp_dir();
+    dir.push(format!(
+        "codexmanager-gateway-openai-stream-usage-{}",
+        std::process::id()
+    ));
+    let _ = fs::create_dir_all(&dir);
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let upstream_sse = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream_usage_1\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":120,\"input_tokens_details\":{\"cached_tokens\":90},\"output_tokens\":18,\"output_tokens_details\":{\"reasoning_tokens\":7}}}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let (upstream_addr, upstream_rx, upstream_join) =
+        start_mock_upstream_once_with_content_type(upstream_sse, "text/event-stream");
+    let upstream_base = format!("http://{upstream_addr}/backend-api/codex");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    storage
+        .insert_account(&Account {
+            id: "acc_openai_stream_usage".to_string(),
+            label: "openai-stream-usage".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("chatgpt_openai_stream_usage".to_string()),
+            workspace_id: None,
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_openai_stream_usage".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_openai_stream_usage".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_openai_stream_usage".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+
+    let platform_key = "pk_openai_stream_usage";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_openai_stream_usage".to_string(),
+            name: Some("openai-stream-usage".to_string()),
+            model_slug: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: Some("high".to_string()),
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let request_body = serde_json::json!({
+        "model": "gpt-5.3-codex",
+        "input": "hello",
+        "stream": true
+    });
+    let request_body = serde_json::to_string(&request_body).expect("serialize request");
+    let (status, gateway_body) = post_http_raw(
+        &server.addr,
+        "/v1/responses",
+        &request_body,
+        &[
+            ("Content-Type", "application/json"),
+            ("Authorization", &format!("Bearer {platform_key}")),
+        ],
+    );
+    server.join();
+    assert_eq!(status, 200, "gateway response: {gateway_body}");
+
+    let captured = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive upstream request");
+    upstream_join.join().expect("join upstream");
+    assert_eq!(captured.path, "/backend-api/codex/responses");
+
+    let mut matched = None;
+    for _ in 0..40 {
+        let logs = storage
+            .list_request_logs(Some("key:=gk_openai_stream_usage"), 20)
+            .expect("list request logs");
+        matched = logs.into_iter().find(|item| item.request_path == "/v1/responses");
+        if matched.is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    let log = matched.expect("openai stream request log");
+    assert_eq!(log.status_code, Some(200));
+    assert_eq!(log.input_tokens, Some(120));
+    assert_eq!(log.cached_input_tokens, Some(90));
+    assert_eq!(log.output_tokens, Some(18));
+    assert_eq!(log.reasoning_output_tokens, Some(7));
 }
 
 #[test]

@@ -102,6 +102,15 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
         )
         .expect("count 018 migration");
     assert_eq!(applied_018, 1);
+    let applied_022: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '022_request_token_stats'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 022 migration");
+    assert_eq!(applied_022, 1);
 
     assert!(!storage.has_column("accounts", "note").expect("check accounts.note"));
     assert!(!storage.has_column("accounts", "tags").expect("check accounts.tags"));

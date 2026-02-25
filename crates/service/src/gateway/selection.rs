@@ -1,12 +1,11 @@
 use codexmanager_core::storage::{Account, Storage, Token, UsageSnapshotRecord};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::account_availability::is_available;
 
-static CANDIDATE_CURSOR: AtomicUsize = AtomicUsize::new(0);
 static CANDIDATE_SNAPSHOT_CACHE: OnceLock<Mutex<Option<CandidateSnapshotCache>>> = OnceLock::new();
 static SELECTION_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
 static CANDIDATE_CACHE_TTL_MS: AtomicU64 = AtomicU64::new(DEFAULT_CANDIDATE_CACHE_TTL_MS);
@@ -19,18 +18,6 @@ struct CandidateSnapshotCache {
     db_path: String,
     expires_at: Instant,
     candidates: Vec<(Account, Token)>,
-}
-
-pub(crate) fn rotate_candidates_for_fairness(candidates: &mut Vec<(Account, Token)>) {
-    if candidates.len() <= 1 {
-        return;
-    }
-    let cursor = CANDIDATE_CURSOR.fetch_add(1, Ordering::Relaxed);
-    let offset = cursor % candidates.len();
-    if offset > 0 {
-        // 中文注释：轮转起点可把并发请求均匀打散到不同账号，降低首账号被并发打爆的概率。
-        candidates.rotate_left(offset);
-    }
 }
 
 pub(crate) fn collect_gateway_candidates(storage: &Storage) -> Result<Vec<(Account, Token)>, String> {

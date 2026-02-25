@@ -51,12 +51,14 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
                 super::write_request_log(
                     &storage,
                     None,
+                    None,
                     &request_path_for_log,
                     &request_method_for_log,
                     None,
                     None,
                     None,
                     Some(err.status_code),
+                    super::request_log::RequestLogUsage::default(),
                     Some(err.message.as_str()),
                 );
             }

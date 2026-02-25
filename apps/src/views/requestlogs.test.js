@@ -249,6 +249,8 @@ function createRequestLogLayout() {
 function makeLog(index, statusCode = 200) {
   return {
     createdAt: 1735689600000 + index * 1000,
+    accountLabel: `账号${index}`,
+    accountId: `acc-${index}`,
     keyId: `key-${index}`,
     method: "GET",
     requestPath: `/v1/request/${index}`,
@@ -279,19 +281,47 @@ test("renderRequestLogs keeps status filter behavior", () => {
   const previousDocument = globalThis.document;
   const previousRowsEl = dom.requestLogRows;
   const previousList = state.requestLogList;
+  const previousAccounts = state.accountList;
   const previousFilter = state.requestLogStatusFilter;
   globalThis.document = new FakeDocument();
   const { rows } = createRequestLogLayout();
   dom.requestLogRows = rows;
   state.requestLogList = [makeLog(1, 200), makeLog(2, 500), makeLog(3, 503), makeLog(4, 404)];
+  state.accountList = [{ id: "acc-2", label: "prospergao@126.com" }];
   state.requestLogStatusFilter = "5xx";
 
   try {
     renderRequestLogs();
     const renderedRows = getDataRows(rows);
     assert.equal(renderedRows.length, 2);
-    assert.equal(renderedRows[0].children[6].textContent, "500");
-    assert.equal(renderedRows[1].children[6].textContent, "503");
+    assert.equal(renderedRows[0].children[7].textContent, "500");
+    assert.equal(renderedRows[1].children[7].textContent, "503");
+    assert.equal(renderedRows[0].children[1].textContent, "账号2");
+  } finally {
+    globalThis.document = previousDocument;
+    dom.requestLogRows = previousRowsEl;
+    state.requestLogList = previousList;
+    state.accountList = previousAccounts;
+    state.requestLogStatusFilter = previousFilter;
+  }
+});
+
+test("renderRequestLogs empty state keeps new column span", () => {
+  const previousDocument = globalThis.document;
+  const previousRowsEl = dom.requestLogRows;
+  const previousList = state.requestLogList;
+  const previousFilter = state.requestLogStatusFilter;
+  globalThis.document = new FakeDocument();
+  const { rows } = createRequestLogLayout();
+  dom.requestLogRows = rows;
+  state.requestLogStatusFilter = "all";
+  state.requestLogList = [];
+
+  try {
+    renderRequestLogs();
+    const firstRow = rows.children[0];
+    assert.ok(firstRow);
+    assert.equal(firstRow.children[0].colSpan, 9);
   } finally {
     globalThis.document = previousDocument;
     dom.requestLogRows = previousRowsEl;
@@ -472,6 +502,46 @@ test("request log copy uses delegated tbody click handler", async () => {
     globalThis.document = previousDocument;
     dom.requestLogRows = previousRowsEl;
     state.requestLogList = previousList;
+    state.requestLogStatusFilter = previousFilter;
+  }
+});
+
+test("renderRequestLogs resolves account label from account list and composite id", () => {
+  const previousDocument = globalThis.document;
+  const previousRowsEl = dom.requestLogRows;
+  const previousList = state.requestLogList;
+  const previousAccounts = state.accountList;
+  const previousFilter = state.requestLogStatusFilter;
+  globalThis.document = new FakeDocument();
+  const { rows } = createRequestLogLayout();
+  dom.requestLogRows = rows;
+  state.requestLogStatusFilter = "all";
+  state.accountList = [
+    { id: "auth0|BCfCgLzzLw3FOSaYqN2jDimX::Frank Smith", label: "prospergao@126.com" },
+  ];
+  state.requestLogList = [
+    {
+      ...makeLog(10, 200),
+      accountLabel: "",
+      accountId: "auth0|BCfCgLzzLw3FOSaYqN2jDimX::Frank Smith",
+    },
+    {
+      ...makeLog(11, 200),
+      accountLabel: "",
+      accountId: "auth0|fallback-only::Frank Smith",
+    },
+  ];
+
+  try {
+    renderRequestLogs();
+    const renderedRows = getDataRows(rows);
+    assert.equal(renderedRows[0].children[1].textContent, "prospergao@126.com");
+    assert.equal(renderedRows[1].children[1].textContent, "Frank Smith");
+  } finally {
+    globalThis.document = previousDocument;
+    dom.requestLogRows = previousRowsEl;
+    state.requestLogList = previousList;
+    state.accountList = previousAccounts;
     state.requestLogStatusFilter = previousFilter;
   }
 });

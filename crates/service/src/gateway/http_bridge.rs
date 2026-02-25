@@ -1,17 +1,204 @@
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, BufReader, Cursor, Read};
+use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Request, Response, StatusCode};
 
 use super::AccountInFlightGuard;
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct UpstreamResponseUsage {
+    pub input_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub reasoning_output_tokens: Option<i64>,
+    pub output_text: Option<String>,
+}
+
+fn merge_usage(target: &mut UpstreamResponseUsage, source: UpstreamResponseUsage) {
+    if source.input_tokens.is_some() {
+        target.input_tokens = source.input_tokens;
+    }
+    if source.cached_input_tokens.is_some() {
+        target.cached_input_tokens = source.cached_input_tokens;
+    }
+    if source.output_tokens.is_some() {
+        target.output_tokens = source.output_tokens;
+    }
+    if source.reasoning_output_tokens.is_some() {
+        target.reasoning_output_tokens = source.reasoning_output_tokens;
+    }
+    if let Some(source_text) = source.output_text {
+        let target_text = target.output_text.get_or_insert_with(String::new);
+        target_text.push_str(source_text.as_str());
+    }
+}
+
+fn parse_usage_from_object(usage: Option<&Map<String, Value>>) -> UpstreamResponseUsage {
+    let input_tokens = usage
+        .and_then(|map| map.get("input_tokens").and_then(Value::as_i64))
+        .or_else(|| usage.and_then(|map| map.get("prompt_tokens").and_then(Value::as_i64)));
+    let output_tokens = usage
+        .and_then(|map| map.get("output_tokens").and_then(Value::as_i64))
+        .or_else(|| usage.and_then(|map| map.get("completion_tokens").and_then(Value::as_i64)));
+    let cached_input_tokens = usage
+        .and_then(|map| map.get("input_tokens_details"))
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            usage.and_then(|map| map.get("prompt_tokens_details"))
+                .and_then(Value::as_object)
+                .and_then(|details| details.get("cached_tokens"))
+                .and_then(Value::as_i64)
+        });
+    let reasoning_output_tokens = usage
+        .and_then(|map| map.get("output_tokens_details"))
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            usage.and_then(|map| map.get("completion_tokens_details"))
+                .and_then(Value::as_object)
+                .and_then(|details| details.get("reasoning_tokens"))
+                .and_then(Value::as_i64)
+        });
+    UpstreamResponseUsage {
+        input_tokens,
+        cached_input_tokens,
+        output_tokens,
+        reasoning_output_tokens,
+        output_text: None,
+    }
+}
+
+fn append_output_text(buffer: &mut String, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    if !buffer.is_empty() {
+        buffer.push('\n');
+    }
+    buffer.push_str(text);
+}
+
+fn collect_response_output_text(value: &Value, output: &mut String) {
+    match value {
+        Value::String(text) => append_output_text(output, text),
+        Value::Array(items) => {
+            for item in items {
+                collect_response_output_text(item, output);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(text) = map.get("output_text").and_then(Value::as_str) {
+                append_output_text(output, text);
+            }
+            if let Some(text) = map.get("text").and_then(Value::as_str) {
+                append_output_text(output, text);
+            }
+            if let Some(content) = map.get("content") {
+                collect_response_output_text(content, output);
+            }
+            if let Some(message) = map.get("message") {
+                collect_response_output_text(message, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_output_text_from_json(value: &Value) -> Option<String> {
+    let mut output = String::new();
+    if let Some(text) = value.get("output_text").and_then(Value::as_str) {
+        append_output_text(&mut output, text);
+    }
+    if let Some(response) = value.get("response") {
+        collect_response_output_text(response, &mut output);
+    }
+    if let Some(choices) = value.get("choices") {
+        collect_response_output_text(choices, &mut output);
+    }
+    if output.trim().is_empty() {
+        None
+    } else {
+        Some(output)
+    }
+}
+
+fn parse_usage_from_json(value: &Value) -> UpstreamResponseUsage {
+    let mut usage = parse_usage_from_object(value.get("usage").and_then(Value::as_object));
+    let response_usage = value
+        .get("response")
+        .and_then(Value::as_object)
+        .and_then(|response| response.get("usage"))
+        .and_then(Value::as_object);
+    merge_usage(&mut usage, parse_usage_from_object(response_usage));
+    usage.output_text = extract_output_text_from_json(value);
+    usage
+}
+
+fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage> {
+    let mut data_lines = Vec::new();
+    for line in lines {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if let Some(rest) = trimmed.strip_prefix("data:") {
+            data_lines.push(rest.trim_start().to_string());
+        }
+    }
+    if data_lines.is_empty() {
+        return None;
+    }
+    let data = data_lines.join("\n");
+    if data.trim() == "[DONE]" {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(&data).ok()?;
+    if let Some(choices) = value.get("choices").and_then(Value::as_array) {
+        let mut text_out = String::new();
+        for choice in choices {
+            if let Some(delta) = choice
+                .get("delta")
+                .and_then(Value::as_object)
+                .and_then(|delta| delta.get("content"))
+            {
+                collect_response_output_text(delta, &mut text_out);
+            }
+        }
+        let mut usage = parse_usage_from_json(&value);
+        if !text_out.trim().is_empty() {
+            usage.output_text = Some(match usage.output_text {
+                Some(existing) if !existing.is_empty() => format!("{existing}\n{text_out}"),
+                _ => text_out,
+            });
+        }
+        return Some(usage);
+    }
+    if let Some(delta) = value.get("delta").and_then(Value::as_str) {
+        let mut usage = parse_usage_from_json(&value);
+        if !delta.is_empty() {
+            usage.output_text = Some(match usage.output_text {
+                Some(existing) if !existing.is_empty() => format!("{existing}\n{delta}"),
+                _ => delta.to_string(),
+            });
+        }
+        return Some(usage);
+    }
+    Some(parse_usage_from_json(&value))
+}
 
 pub(super) fn respond_with_upstream(
     request: Request,
     upstream: reqwest::blocking::Response,
     _inflight_guard: AccountInFlightGuard,
     response_adapter: super::ResponseAdapter,
-) -> Result<(), String> {
+) -> Result<UpstreamResponseUsage, String> {
     match response_adapter {
         super::ResponseAdapter::Passthrough => {
+            let upstream_content_type = upstream
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.to_string());
             let status = StatusCode(upstream.status().as_u16());
             let mut headers = Vec::new();
             for (name, value) in upstream.headers().iter() {
@@ -26,10 +213,53 @@ pub(super) fn respond_with_upstream(
                     headers.push(header);
                 }
             }
+            let is_json = upstream_content_type
+                .as_deref()
+                .map(|value| value.to_ascii_lowercase().contains("application/json"))
+                .unwrap_or(false);
+            let is_sse = upstream_content_type
+                .as_deref()
+                .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
+                .unwrap_or(false);
+            if is_json {
+                let upstream_body = upstream
+                    .bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
+                let usage = serde_json::from_slice::<Value>(upstream_body.as_ref())
+                    .ok()
+                    .map(|value| parse_usage_from_json(&value))
+                    .unwrap_or_default();
+                let len = Some(upstream_body.len());
+                let response = Response::new(
+                    status,
+                    headers,
+                    std::io::Cursor::new(upstream_body.to_vec()),
+                    len,
+                    None,
+                );
+                let _ = request.respond(response);
+                return Ok(usage);
+            }
+            if is_sse {
+                let usage_collector = Arc::new(Mutex::new(UpstreamResponseUsage::default()));
+                let response = Response::new(
+                    status,
+                    headers,
+                    PassthroughSseUsageReader::new(upstream, Arc::clone(&usage_collector)),
+                    None,
+                    None,
+                );
+                let _ = request.respond(response);
+                let usage = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                return Ok(usage);
+            }
             let len = upstream.content_length().map(|v| v as usize);
             let response = Response::new(status, headers, upstream, len, None);
             let _ = request.respond(response);
-            Ok(())
+            Ok(UpstreamResponseUsage::default())
         }
         super::ResponseAdapter::AnthropicJson | super::ResponseAdapter::AnthropicSse => {
             let status = StatusCode(upstream.status().as_u16());
@@ -65,20 +295,29 @@ pub(super) fn respond_with_upstream(
                 ) {
                     headers.push(content_type_header);
                 }
+                let usage_collector = Arc::new(Mutex::new(UpstreamResponseUsage::default()));
                 let response = Response::new(
                     status,
                     headers,
-                    AnthropicSseReader::new(upstream),
+                    AnthropicSseReader::new(upstream, Arc::clone(&usage_collector)),
                     None,
                     None,
                 );
                 let _ = request.respond(response);
-                return Ok(());
+                let usage = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                return Ok(usage);
             }
 
             let upstream_body = upstream
                 .bytes()
                 .map_err(|err| format!("read upstream body failed: {err}"))?;
+            let usage = serde_json::from_slice::<Value>(upstream_body.as_ref())
+                .ok()
+                .map(|value| parse_usage_from_json(&value))
+                .unwrap_or_default();
 
             let (body, content_type) = match super::adapt_upstream_response(
                 response_adapter,
@@ -102,7 +341,76 @@ pub(super) fn respond_with_upstream(
             let len = Some(body.len());
             let response = Response::new(status, headers, std::io::Cursor::new(body), len, None);
             let _ = request.respond(response);
-            Ok(())
+            Ok(usage)
+        }
+    }
+}
+
+struct PassthroughSseUsageReader {
+    upstream: BufReader<reqwest::blocking::Response>,
+    pending_frame_lines: Vec<String>,
+    out_cursor: Cursor<Vec<u8>>,
+    usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
+    finished: bool,
+}
+
+impl PassthroughSseUsageReader {
+    fn new(
+        upstream: reqwest::blocking::Response,
+        usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
+    ) -> Self {
+        Self {
+            upstream: BufReader::new(upstream),
+            pending_frame_lines: Vec::new(),
+            out_cursor: Cursor::new(Vec::new()),
+            usage_collector,
+            finished: false,
+        }
+    }
+
+    fn update_usage_from_frame(&self, lines: &[String]) {
+        let Some(parsed) = parse_usage_from_sse_frame(lines) else {
+            return;
+        };
+        if let Ok(mut usage) = self.usage_collector.lock() {
+            merge_usage(&mut usage, parsed);
+        }
+    }
+
+    fn next_chunk(&mut self) -> std::io::Result<Vec<u8>> {
+        let mut line = String::new();
+        let read = self.upstream.read_line(&mut line)?;
+        if read == 0 {
+            if !self.pending_frame_lines.is_empty() {
+                let frame = std::mem::take(&mut self.pending_frame_lines);
+                self.update_usage_from_frame(&frame);
+            }
+            self.finished = true;
+            return Ok(Vec::new());
+        }
+        if line == "\n" || line == "\r\n" {
+            if !self.pending_frame_lines.is_empty() {
+                let frame = std::mem::take(&mut self.pending_frame_lines);
+                self.update_usage_from_frame(&frame);
+            }
+        } else {
+            self.pending_frame_lines.push(line.clone());
+        }
+        Ok(line.into_bytes())
+    }
+}
+
+impl Read for PassthroughSseUsageReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let read = self.out_cursor.read(buf)?;
+            if read > 0 {
+                return Ok(read);
+            }
+            if self.finished {
+                return Ok(0);
+            }
+            self.out_cursor = Cursor::new(self.next_chunk()?);
         }
     }
 }
@@ -112,6 +420,7 @@ struct AnthropicSseReader {
     pending_frame_lines: Vec<String>,
     out_cursor: Cursor<Vec<u8>>,
     state: AnthropicSseState,
+    usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
 }
 
 #[derive(Default)]
@@ -123,17 +432,23 @@ struct AnthropicSseState {
     response_id: Option<String>,
     model: Option<String>,
     input_tokens: i64,
+    cached_input_tokens: i64,
     output_tokens: i64,
+    reasoning_output_tokens: i64,
     stop_reason: Option<&'static str>,
 }
 
 impl AnthropicSseReader {
-    fn new(upstream: reqwest::blocking::Response) -> Self {
+    fn new(
+        upstream: reqwest::blocking::Response,
+        usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
+    ) -> Self {
         Self {
             upstream: BufReader::new(upstream),
             pending_frame_lines: Vec::new(),
             out_cursor: Cursor::new(Vec::new()),
             state: AnthropicSseState::default(),
+            usage_collector,
         }
     }
 
@@ -322,11 +637,35 @@ impl AnthropicSseReader {
                     .and_then(Value::as_i64)
                     .or_else(|| usage.get("prompt_tokens").and_then(Value::as_i64))
                     .unwrap_or(self.state.input_tokens);
+                self.state.cached_input_tokens = usage
+                    .get("input_tokens_details")
+                    .and_then(Value::as_object)
+                    .and_then(|details| details.get("cached_tokens"))
+                    .and_then(Value::as_i64)
+                    .or_else(|| {
+                        usage.get("prompt_tokens_details")
+                            .and_then(Value::as_object)
+                            .and_then(|details| details.get("cached_tokens"))
+                            .and_then(Value::as_i64)
+                    })
+                    .unwrap_or(self.state.cached_input_tokens);
                 self.state.output_tokens = usage
                     .get("output_tokens")
                     .and_then(Value::as_i64)
                     .or_else(|| usage.get("completion_tokens").and_then(Value::as_i64))
                     .unwrap_or(self.state.output_tokens);
+                self.state.reasoning_output_tokens = usage
+                    .get("output_tokens_details")
+                    .and_then(Value::as_object)
+                    .and_then(|details| details.get("reasoning_tokens"))
+                    .and_then(Value::as_i64)
+                    .or_else(|| {
+                        usage.get("completion_tokens_details")
+                            .and_then(Value::as_object)
+                            .and_then(|details| details.get("reasoning_tokens"))
+                            .and_then(Value::as_i64)
+                    })
+                    .unwrap_or(self.state.reasoning_output_tokens);
             }
         }
     }
@@ -398,6 +737,12 @@ impl AnthropicSseReader {
             return Vec::new();
         }
         self.state.finished = true;
+        if let Ok(mut usage) = self.usage_collector.lock() {
+            usage.input_tokens = Some(self.state.input_tokens.max(0));
+            usage.cached_input_tokens = Some(self.state.cached_input_tokens.max(0));
+            usage.output_tokens = Some(self.state.output_tokens.max(0));
+            usage.reasoning_output_tokens = Some(self.state.reasoning_output_tokens.max(0));
+        }
         let mut out = String::new();
         self.ensure_message_start(&mut out);
         self.close_text_block(&mut out);
@@ -477,4 +822,62 @@ fn tool_input_partial_json(value: Value) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_usage_from_json, parse_usage_from_sse_frame};
+    use serde_json::json;
+
+    #[test]
+    fn parse_usage_from_json_reads_cached_and_reasoning_details() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 321,
+                "input_tokens_details": { "cached_tokens": 280 },
+                "output_tokens": 55,
+                "output_tokens_details": { "reasoning_tokens": 21 }
+            }
+        });
+        let usage = parse_usage_from_json(&payload);
+        assert_eq!(usage.input_tokens, Some(321));
+        assert_eq!(usage.cached_input_tokens, Some(280));
+        assert_eq!(usage.output_tokens, Some(55));
+        assert_eq!(usage.reasoning_output_tokens, Some(21));
+    }
+
+    #[test]
+    fn parse_usage_from_json_reads_response_usage_compat_fields() {
+        let payload = json!({
+            "type": "response.completed",
+            "response": {
+                "usage": {
+                    "prompt_tokens": 100,
+                    "prompt_tokens_details": { "cached_tokens": 75 },
+                    "completion_tokens": 20,
+                    "completion_tokens_details": { "reasoning_tokens": 9 }
+                }
+            }
+        });
+        let usage = parse_usage_from_json(&payload);
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.cached_input_tokens, Some(75));
+        assert_eq!(usage.output_tokens, Some(20));
+        assert_eq!(usage.reasoning_output_tokens, Some(9));
+    }
+
+    #[test]
+    fn parse_usage_from_sse_frame_reads_response_completed_usage() {
+        let frame_lines = vec![
+            "event: message\n".to_string(),
+            r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":88,"input_tokens_details":{"cached_tokens":61},"output_tokens":17,"output_tokens_details":{"reasoning_tokens":6}}}}"#
+                .to_string(),
+            "\n".to_string(),
+        ];
+        let usage = parse_usage_from_sse_frame(&frame_lines).expect("extract usage from sse frame");
+        assert_eq!(usage.input_tokens, Some(88));
+        assert_eq!(usage.cached_input_tokens, Some(61));
+        assert_eq!(usage.output_tokens, Some(17));
+        assert_eq!(usage.reasoning_output_tokens, Some(6));
+    }
 }

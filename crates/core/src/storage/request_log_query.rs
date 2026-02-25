@@ -31,6 +31,7 @@ fn parse_prefixed_request_log_query(raw: &str) -> Option<RequestLogQuery> {
     let (is_exact, needle) = parse_match_mode(normalized_value)?;
 
     match normalized_prefix.as_str() {
+        "account" | "account_id" => Some(parse_field_query("account_id", is_exact, needle)),
         "path" | "request_path" => Some(parse_field_query("request_path", is_exact, needle)),
         "method" => Some(parse_field_query("method", is_exact, needle)),
         "model" => Some(parse_field_query("model", is_exact, needle)),
@@ -110,6 +111,18 @@ mod tests {
                 column: "key_id",
                 pattern
             } if pattern == "%key-alpha%"
+        ));
+    }
+
+    #[test]
+    fn prefixed_account_query_supports_alias() {
+        let query = parse_request_log_query(Some("account:acc-1"));
+        assert!(matches!(
+            query,
+            RequestLogQuery::FieldLike {
+                column: "account_id",
+                pattern
+            } if pattern == "%acc-1%"
         ));
     }
 }

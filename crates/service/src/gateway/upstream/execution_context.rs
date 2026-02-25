@@ -113,18 +113,21 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
         final_account_id: Option<&str>,
         upstream_url: Option<&str>,
         status_code: u16,
+        usage: super::super::request_log::RequestLogUsage,
         error: Option<&str>,
         elapsed_ms: u128,
     ) {
         super::super::write_request_log(
             self.storage,
             Some(self.key_id),
+            final_account_id,
             self.path,
             self.request_method,
             self.model_for_log,
             self.reasoning_for_log,
             upstream_url,
             Some(status_code),
+            usage,
             error,
         );
         super::super::trace_log::log_request_final(

@@ -4,6 +4,27 @@ import { calcAvailability, computeUsageStats, formatTs } from "../utils/format";
 import { buildProgressLine } from "./dashboard-progress";
 import { renderRecommendations } from "./dashboard-recommendations";
 
+function toSafeNumber(value, fallback = 0) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function formatTokenCount(value) {
+  const num = Math.max(0, Math.round(toSafeNumber(value, 0)));
+  return num.toLocaleString("zh-CN");
+}
+
+function formatEstimatedCost(value) {
+  const num = Math.max(0, toSafeNumber(value, 0));
+  return `$${num.toFixed(2)}`;
+}
+
 // 渲染仪表盘视图
 export function renderDashboard() {
   const usageMap = new Map(
@@ -15,6 +36,22 @@ export function renderDashboard() {
   if (dom.metricAvailable) dom.metricAvailable.textContent = stats.okCount;
   if (dom.metricUnavailable) dom.metricUnavailable.textContent = stats.unavailableCount;
   if (dom.metricLowQuota) dom.metricLowQuota.textContent = stats.lowCount;
+  if (dom.metricTodayTokens) {
+    dom.metricTodayTokens.textContent = formatTokenCount(state.requestLogTodaySummary?.todayTokens);
+  }
+  if (dom.metricCachedInputTokens) {
+    dom.metricCachedInputTokens.textContent = formatTokenCount(
+      state.requestLogTodaySummary?.cachedInputTokens,
+    );
+  }
+  if (dom.metricReasoningOutputTokens) {
+    dom.metricReasoningOutputTokens.textContent = formatTokenCount(
+      state.requestLogTodaySummary?.reasoningOutputTokens,
+    );
+  }
+  if (dom.metricTodayCost) {
+    dom.metricTodayCost.textContent = formatEstimatedCost(state.requestLogTodaySummary?.estimatedCost);
+  }
 
   renderCurrentAccount(state.accountList, usageMap);
   renderRecommendations(state.accountList, usageMap);

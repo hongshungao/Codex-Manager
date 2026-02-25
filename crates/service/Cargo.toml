@@ -18,3 +18,5 @@ webbrowser = "0.8"
 urlencoding = "2"
 log = "0.4"
 crossbeam-channel = "0.5"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tiktoken-rs = "0.6"

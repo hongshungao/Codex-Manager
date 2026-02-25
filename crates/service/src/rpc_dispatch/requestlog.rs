@@ -1,6 +1,6 @@
 use codexmanager_core::rpc::types::{JsonRpcRequest, JsonRpcResponse, RequestLogListResult};
 
-use crate::{requestlog_clear, requestlog_list};
+use crate::{requestlog_clear, requestlog_list, requestlog_today_summary};
 
 pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
     let result = match req.method.as_str() {
@@ -13,6 +13,9 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             )
         }
         "requestlog/clear" => super::ok_or_error(requestlog_clear::clear_request_logs()),
+        "requestlog/today_summary" => {
+            super::value_or_error(requestlog_today_summary::read_requestlog_today_summary())
+        }
         _ => return None,
     };
 

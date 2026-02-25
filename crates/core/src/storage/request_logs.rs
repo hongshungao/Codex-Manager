@@ -1,13 +1,15 @@
 use rusqlite::{Result, Row};
 
-use super::{request_log_query, RequestLog, Storage};
+use super::{request_log_query, RequestLog, RequestLogTodaySummary, Storage};
 
 impl Storage {
-    pub fn insert_request_log(&self, log: &RequestLog) -> Result<()> {
+    pub fn insert_request_log(&self, log: &RequestLog) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO request_logs (key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO request_logs (key_id, account_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             (
                 &log.key_id,
+                &log.account_id,
                 &log.request_path,
                 &log.method,
                 &log.model,
@@ -18,7 +20,7 @@ impl Storage {
                 log.created_at,
             ),
         )?;
-        Ok(())
+        Ok(self.conn.last_insert_rowid())
     }
 
     pub fn list_request_logs(&self, query: Option<&str>, limit: i64) -> Result<Vec<RequestLog>> {
@@ -28,9 +30,13 @@ impl Storage {
         match request_log_query::parse_request_log_query(query) {
             request_log_query::RequestLogQuery::All => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
-                     FROM request_logs
-                     ORDER BY created_at DESC, id DESC
+                    "SELECT
+                        r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        r.error, r.created_at
+                     FROM request_logs r
+                     LEFT JOIN request_token_stats t ON t.request_log_id = r.id
+                     ORDER BY r.created_at DESC, r.id DESC
                      LIMIT ?1",
                 )?;
                 let mut rows = stmt.query([normalized_limit])?;
@@ -40,10 +46,14 @@ impl Storage {
             }
             request_log_query::RequestLogQuery::FieldLike { column, pattern } => {
                 let sql = format!(
-                    "SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
-                     FROM request_logs
-                     WHERE IFNULL({column}, '') LIKE ?1
-                     ORDER BY created_at DESC, id DESC
+                    "SELECT
+                        r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        r.error, r.created_at
+                     FROM request_logs r
+                     LEFT JOIN request_token_stats t ON t.request_log_id = r.id
+                     WHERE IFNULL(r.{column}, '') LIKE ?1
+                     ORDER BY r.created_at DESC, r.id DESC
                      LIMIT ?2"
                 );
                 let mut stmt = self.conn.prepare(&sql)?;
@@ -54,10 +64,14 @@ impl Storage {
             }
             request_log_query::RequestLogQuery::FieldExact { column, value } => {
                 let sql = format!(
-                    "SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
-                     FROM request_logs
-                     WHERE {column} = ?1
-                     ORDER BY created_at DESC, id DESC
+                    "SELECT
+                        r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        r.error, r.created_at
+                     FROM request_logs r
+                     LEFT JOIN request_token_stats t ON t.request_log_id = r.id
+                     WHERE r.{column} = ?1
+                     ORDER BY r.created_at DESC, r.id DESC
                      LIMIT ?2"
                 );
                 let mut stmt = self.conn.prepare(&sql)?;
@@ -68,10 +82,14 @@ impl Storage {
             }
             request_log_query::RequestLogQuery::StatusExact(status) => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
-                     FROM request_logs
-                     WHERE status_code = ?1
-                     ORDER BY created_at DESC, id DESC
+                    "SELECT
+                        r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        r.error, r.created_at
+                     FROM request_logs r
+                     LEFT JOIN request_token_stats t ON t.request_log_id = r.id
+                     WHERE r.status_code = ?1
+                     ORDER BY r.created_at DESC, r.id DESC
                      LIMIT ?2",
                 )?;
                 let mut rows = stmt.query((status, normalized_limit))?;
@@ -81,10 +99,14 @@ impl Storage {
             }
             request_log_query::RequestLogQuery::StatusRange(start, end) => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
-                     FROM request_logs
-                     WHERE status_code >= ?1 AND status_code <= ?2
-                     ORDER BY created_at DESC, id DESC
+                    "SELECT
+                        r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        r.error, r.created_at
+                     FROM request_logs r
+                     LEFT JOIN request_token_stats t ON t.request_log_id = r.id
+                     WHERE r.status_code >= ?1 AND r.status_code <= ?2
+                     ORDER BY r.created_at DESC, r.id DESC
                      LIMIT ?3",
                 )?;
                 let mut rows = stmt.query((start, end, normalized_limit))?;
@@ -94,17 +116,27 @@ impl Storage {
             }
             request_log_query::RequestLogQuery::GlobalLike(pattern) => {
                 let mut stmt = self.conn.prepare(
-                    "SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
-                     FROM request_logs
-                     WHERE request_path LIKE ?1
-                        OR method LIKE ?1
-                        OR IFNULL(model,'') LIKE ?1
-                        OR IFNULL(reasoning_effort,'') LIKE ?1
-                        OR IFNULL(error,'') LIKE ?1
-                        OR IFNULL(key_id,'') LIKE ?1
-                        OR IFNULL(upstream_url,'') LIKE ?1
-                        OR IFNULL(CAST(status_code AS TEXT),'') LIKE ?1
-                     ORDER BY created_at DESC, id DESC
+                    "SELECT
+                        r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        r.error, r.created_at
+                     FROM request_logs r
+                     LEFT JOIN request_token_stats t ON t.request_log_id = r.id
+                     WHERE r.request_path LIKE ?1
+                        OR r.method LIKE ?1
+                        OR IFNULL(r.account_id,'') LIKE ?1
+                        OR IFNULL(r.model,'') LIKE ?1
+                        OR IFNULL(r.reasoning_effort,'') LIKE ?1
+                        OR IFNULL(r.error,'') LIKE ?1
+                        OR IFNULL(r.key_id,'') LIKE ?1
+                        OR IFNULL(r.upstream_url,'') LIKE ?1
+                        OR IFNULL(CAST(r.status_code AS TEXT),'') LIKE ?1
+                        OR IFNULL(CAST(t.input_tokens AS TEXT),'') LIKE ?1
+                        OR IFNULL(CAST(t.cached_input_tokens AS TEXT),'') LIKE ?1
+                        OR IFNULL(CAST(t.output_tokens AS TEXT),'') LIKE ?1
+                        OR IFNULL(CAST(t.reasoning_output_tokens AS TEXT),'') LIKE ?1
+                        OR IFNULL(CAST(t.estimated_cost_usd AS TEXT),'') LIKE ?1
+                     ORDER BY r.created_at DESC, r.id DESC
                      LIMIT ?2",
                 )?;
                 let mut rows = stmt.query((pattern, normalized_limit))?;
@@ -118,8 +150,17 @@ impl Storage {
     }
 
     pub fn clear_request_logs(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM request_token_stats", [])?;
         self.conn.execute("DELETE FROM request_logs", [])?;
         Ok(())
+    }
+
+    pub fn summarize_request_logs_between(
+        &self,
+        start_ts: i64,
+        end_ts: i64,
+    ) -> Result<RequestLogTodaySummary> {
+        self.summarize_request_token_stats_between(start_ts, end_ts)
     }
 
     pub(super) fn ensure_request_logs_table(&self) -> Result<()> {
@@ -127,6 +168,7 @@ impl Storage {
             "CREATE TABLE IF NOT EXISTS request_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 key_id TEXT,
+                account_id TEXT,
                 request_path TEXT NOT NULL,
                 method TEXT NOT NULL,
                 model TEXT,
@@ -142,6 +184,14 @@ impl Storage {
             "CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at DESC)",
             [],
         )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_logs_account_id_created_at ON request_logs(account_id, created_at DESC)",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_logs_created_at_id ON request_logs(created_at DESC, id DESC)",
+            [],
+        )?;
         Ok(())
     }
 
@@ -149,19 +199,42 @@ impl Storage {
         self.ensure_column("request_logs", "reasoning_effort", "TEXT")?;
         Ok(())
     }
+
+    pub(super) fn ensure_request_log_account_tokens_cost_columns(&self) -> Result<()> {
+        self.ensure_column("request_logs", "account_id", "TEXT")?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_logs_account_id_created_at ON request_logs(account_id, created_at DESC)",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_logs_created_at_id ON request_logs(created_at DESC, id DESC)",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn ensure_request_log_cached_reasoning_columns(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 fn map_request_log_row(row: &Row<'_>) -> Result<RequestLog> {
     Ok(RequestLog {
         key_id: row.get(0)?,
-        request_path: row.get(1)?,
-        method: row.get(2)?,
-        model: row.get(3)?,
-        reasoning_effort: row.get(4)?,
-        upstream_url: row.get(5)?,
-        status_code: row.get(6)?,
-        error: row.get(7)?,
-        created_at: row.get(8)?,
+        account_id: row.get(1)?,
+        request_path: row.get(2)?,
+        method: row.get(3)?,
+        model: row.get(4)?,
+        reasoning_effort: row.get(5)?,
+        upstream_url: row.get(6)?,
+        status_code: row.get(7)?,
+        input_tokens: row.get(8)?,
+        cached_input_tokens: row.get(9)?,
+        output_tokens: row.get(10)?,
+        reasoning_output_tokens: row.get(11)?,
+        estimated_cost_usd: row.get(12)?,
+        error: row.get(13)?,
+        created_at: row.get(14)?,
     })
 }
 
@@ -187,7 +260,7 @@ mod tests {
         let details = collect_query_plan_details(
             &storage,
             "EXPLAIN QUERY PLAN
-             SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
+             SELECT key_id, account_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
              FROM request_logs
              WHERE method = 'POST'
              ORDER BY created_at DESC, id DESC
@@ -205,7 +278,7 @@ mod tests {
         let details = collect_query_plan_details(
             &storage,
             "EXPLAIN QUERY PLAN
-             SELECT key_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
+             SELECT key_id, account_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at
              FROM request_logs
              WHERE key_id = 'gk_1'
              ORDER BY created_at DESC, id DESC

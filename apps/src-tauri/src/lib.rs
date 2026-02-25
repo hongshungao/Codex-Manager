@@ -151,6 +151,11 @@ async fn service_requestlog_clear(addr: Option<String>) -> Result<serde_json::Va
 }
 
 #[tauri::command]
+async fn service_requestlog_today_summary(addr: Option<String>) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("requestlog/today_summary", addr, None).await
+}
+
+#[tauri::command]
 async fn service_login_start(
   addr: Option<String>,
   login_type: String,
@@ -330,6 +335,7 @@ pub fn run() {
       service_usage_refresh,
       service_requestlog_list,
       service_requestlog_clear,
+      service_requestlog_today_summary,
       service_login_start,
       service_login_status,
       service_login_complete,

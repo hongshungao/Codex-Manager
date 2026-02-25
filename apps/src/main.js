@@ -24,6 +24,7 @@ import {
   refreshApiKeys,
   refreshApiModels,
   refreshRequestLogs,
+  refreshRequestLogTodaySummary,
   clearRequestLogs,
 } from "./services/data";
 import {
@@ -490,6 +491,7 @@ async function refreshAll() {
         { name: "api-models", run: refreshApiModels },
         { name: "api-keys", run: refreshApiKeys },
         { name: "request-logs", run: () => refreshRequestLogs(state.requestLogQuery) },
+        { name: "request-log-today-summary", run: refreshRequestLogTodaySummary },
       ],
       (taskName, err) => {
         console.error(`[refreshAll] ${taskName} failed`, err);

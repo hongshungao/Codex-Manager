@@ -2,6 +2,7 @@ use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
 use std::time::{Duration, Instant};
 use tiny_http::{Request, Response};
 
+use super::super::request_log::RequestLogUsage;
 use super::super::local_validation::LocalValidationResult;
 use super::candidate_flow::{process_candidate_upstream_flow, CandidateUpstreamDecision};
 use super::execution_context::GatewayUpstreamExecutionContext;
@@ -23,10 +24,17 @@ fn respond_total_timeout(
         None,
         None,
         504,
+        RequestLogUsage::default(),
         Some(message.as_str()),
         started_at.elapsed().as_millis(),
     );
     respond_terminal(request, 504, message)
+}
+
+fn is_inference_path(path: &str) -> bool {
+    path.starts_with("/v1/responses")
+        || path.starts_with("/v1/chat/completions")
+        || path.starts_with("/v1/messages")
 }
 
 pub(in super::super) fn proxy_validated_request(
@@ -280,6 +288,7 @@ pub(in super::super) fn proxy_validated_request(
                     Some(&account.id),
                     last_attempt_url.as_deref(),
                     status_code,
+                    RequestLogUsage::default(),
                     Some(message.as_str()),
                     elapsed_ms,
                 );
@@ -296,23 +305,55 @@ pub(in super::super) fn proxy_validated_request(
                     None
                 };
                 let elapsed_ms = started_at.elapsed().as_millis();
-                context.log_final_result(
-                    Some(&account.id),
-                    last_attempt_url.as_deref(),
-                    status_code,
-                    final_error,
-                    elapsed_ms,
-                );
-                if status_code >= 200 && status_code < 300 {
-                    context.remember_success_account(&account.id);
-                }
                 let request = request
                     .take()
                     .expect("request should be available before terminal response");
                 let guard = inflight_guard
                     .take()
                     .expect("inflight guard should be available before terminal response");
-                return super::super::respond_with_upstream(request, resp, guard, response_adapter);
+                let mut usage = super::super::respond_with_upstream(
+                    request,
+                    resp,
+                    guard,
+                    response_adapter,
+                )?;
+                if (200..300).contains(&status_code) && is_inference_path(path.as_str()) {
+                    if usage.input_tokens.unwrap_or(0) <= 0 {
+                        usage.input_tokens = super::super::estimate_input_tokens(
+                            path.as_str(),
+                            &body,
+                            model_for_log.as_deref(),
+                        );
+                    }
+                    if usage.output_tokens.unwrap_or(0) <= 0 {
+                        usage.output_tokens = usage
+                            .output_text
+                            .as_deref()
+                            .and_then(|text| {
+                                super::super::estimate_output_tokens(
+                                    text,
+                                    model_for_log.as_deref(),
+                                )
+                            });
+                    }
+                }
+                context.log_final_result(
+                    Some(&account.id),
+                    last_attempt_url.as_deref(),
+                    status_code,
+                    RequestLogUsage {
+                        input_tokens: usage.input_tokens,
+                        cached_input_tokens: usage.cached_input_tokens,
+                        output_tokens: usage.output_tokens,
+                        reasoning_output_tokens: usage.reasoning_output_tokens,
+                    },
+                    final_error,
+                    elapsed_ms,
+                );
+                if status_code >= 200 && status_code < 300 {
+                    context.remember_success_account(&account.id);
+                }
+                return Ok(());
             }
         }
     }
@@ -321,6 +362,7 @@ pub(in super::super) fn proxy_validated_request(
         None,
         Some(base),
         503,
+        RequestLogUsage::default(),
         Some("no available account"),
         started_at.elapsed().as_millis(),
     );

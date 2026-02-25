@@ -133,12 +133,18 @@ pub struct ApiKeyModelListResult {
 #[serde(rename_all = "camelCase")]
 pub struct RequestLogSummary {
     pub key_id: Option<String>,
+    pub account_id: Option<String>,
     pub request_path: String,
     pub method: String,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub upstream_url: Option<String>,
     pub status_code: Option<i64>,
+    pub input_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub reasoning_output_tokens: Option<i64>,
+    pub estimated_cost_usd: Option<f64>,
     pub error: Option<String>,
     pub created_at: i64,
 }
@@ -146,6 +152,17 @@ pub struct RequestLogSummary {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestLogListResult {
     pub items: Vec<RequestLogSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogTodaySummaryResult {
+    pub input_tokens: i64,
+    pub cached_input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub today_tokens: i64,
+    pub estimated_cost: f64,
 }
 
 #[cfg(test)]

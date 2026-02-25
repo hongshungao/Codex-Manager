@@ -8,6 +8,7 @@ const REQUEST_LOG_DOM_LIMIT = 240;
 const REQUEST_LOG_DOM_RECYCLE_TO = 180;
 const REQUEST_LOG_SCROLL_BUFFER = 180;
 const REQUEST_LOG_FALLBACK_ROW_HEIGHT = 54;
+const REQUEST_LOG_COLUMN_COUNT = 9;
 
 const requestLogWindowState = {
   filter: "all",
@@ -21,6 +22,27 @@ const requestLogWindowState = {
   boundScrollerEl: null,
   hasRendered: false,
 };
+
+function fallbackAccountNameFromId(accountId) {
+  const raw = String(accountId || "").trim();
+  if (!raw) return "";
+  const sep = raw.indexOf("::");
+  if (sep < 0) return "";
+  return raw.slice(sep + 2).trim();
+}
+
+function resolveAccountDisplayName(item) {
+  const accountId = item?.accountId || item?.account?.id || "";
+  const directLabel = item?.accountLabel || item?.account?.label || "";
+  if (directLabel) return directLabel;
+  if (accountId) {
+    const found = state.accountList.find((account) => account?.id === accountId);
+    if (found?.label) {
+      return found.label;
+    }
+  }
+  return fallbackAccountNameFromId(accountId);
+}
 
 function matchesStatusFilter(item, filter) {
   if (filter === "all") return true;
@@ -36,6 +58,8 @@ function buildRequestLogIdentity(item, fallbackIndex) {
   return [
     item?.id ?? "",
     item?.createdAt ?? "",
+    item?.accountLabel ?? "",
+    item?.accountId ?? "",
     item?.keyId ?? "",
     item?.method ?? "",
     item?.requestPath ?? "",
@@ -102,7 +126,7 @@ function createTopSpacerRow() {
   const row = document.createElement("tr");
   row.dataset.spacerTop = "1";
   const cell = document.createElement("td");
-  cell.colSpan = 8;
+  cell.colSpan = REQUEST_LOG_COLUMN_COUNT;
   cell.style.height = "0px";
   cell.style.padding = "0";
   cell.style.border = "0";
@@ -120,6 +144,19 @@ function createRequestLogRow(item, index) {
   const cellTime = document.createElement("td");
   cellTime.textContent = formatTs(item.createdAt, { emptyLabel: "-" });
   row.appendChild(cellTime);
+
+  const cellAccount = document.createElement("td");
+  const accountLabel = resolveAccountDisplayName(item);
+  const accountId = item?.accountId || item?.account?.id || "";
+  if (accountLabel) {
+    cellAccount.textContent = accountLabel;
+    cellAccount.title = accountId || accountLabel;
+  } else if (accountId) {
+    cellAccount.textContent = accountId;
+  } else {
+    cellAccount.textContent = "-";
+  }
+  row.appendChild(cellAccount);
 
   const cellKey = document.createElement("td");
   cellKey.textContent = item.keyId || "-";
@@ -184,7 +221,7 @@ function createRequestLogRow(item, index) {
 function renderEmptyRequestLogs() {
   const row = document.createElement("tr");
   const cell = document.createElement("td");
-  cell.colSpan = 8;
+  cell.colSpan = REQUEST_LOG_COLUMN_COUNT;
   cell.textContent = "暂无请求日志";
   row.appendChild(cell);
   dom.requestLogRows.appendChild(row);

@@ -30,8 +30,8 @@
   vertical-align: top;
 }
 
-.requestlog-table tbody td:nth-child(4),
-.requestlog-table tbody td:nth-child(8) {
+.requestlog-table tbody td:nth-child(5),
+.requestlog-table tbody td:nth-child(9) {
   max-width: 360px;
   word-break: break-word;
 }

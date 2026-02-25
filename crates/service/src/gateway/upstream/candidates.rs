@@ -18,7 +18,6 @@ pub(crate) fn prepare_gateway_candidates(
             super::super::account_inflight_count(&account.id),
         )
     });
-    super::super::rotate_candidates_for_fairness(&mut candidates);
     Ok(candidates)
 }
 

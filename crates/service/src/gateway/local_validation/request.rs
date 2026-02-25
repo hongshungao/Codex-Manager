@@ -5,10 +5,6 @@ use tiny_http::Request;
 use super::{LocalValidationError, LocalValidationResult};
 
 fn resolve_effective_request_overrides(api_key: &ApiKey) -> (Option<String>, Option<String>) {
-    if api_key.protocol_type == crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE {
-        return (None, None);
-    }
-
     let normalized_model = api_key
         .model_slug
         .as_deref()
@@ -85,7 +81,6 @@ pub(super) fn build_local_validation_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
 
     fn sample_api_key(protocol_type: &str, model_slug: Option<&str>, reasoning: Option<&str>) -> ApiKey {
         ApiKey {
@@ -106,19 +101,27 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_key_does_not_apply_key_level_overrides() {
-        let api_key = sample_api_key(PROTOCOL_ANTHROPIC_NATIVE, None, None);
+    fn anthropic_key_keeps_empty_overrides() {
+        let api_key = sample_api_key(
+            crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE,
+            None,
+            None,
+        );
         let (model, reasoning) = resolve_effective_request_overrides(&api_key);
         assert_eq!(model, None);
         assert_eq!(reasoning, None);
     }
 
     #[test]
-    fn anthropic_key_ignores_custom_model_and_reasoning() {
-        let api_key = sample_api_key(PROTOCOL_ANTHROPIC_NATIVE, Some("gpt-5.3-codex"), Some("extra_high"));
+    fn anthropic_key_applies_custom_model_and_reasoning() {
+        let api_key = sample_api_key(
+            crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE,
+            Some("gpt-5.3-codex"),
+            Some("extra_high"),
+        );
         let (model, reasoning) = resolve_effective_request_overrides(&api_key);
-        assert_eq!(model, None);
-        assert_eq!(reasoning, None);
+        assert_eq!(model.as_deref(), Some("gpt-5.3-codex"));
+        assert_eq!(reasoning.as_deref(), Some("xhigh"));
     }
 
     #[test]

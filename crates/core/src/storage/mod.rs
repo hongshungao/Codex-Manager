@@ -8,6 +8,7 @@ mod api_keys;
 mod events;
 mod request_log_query;
 mod request_logs;
+mod request_token_stats;
 mod tokens;
 mod usage;
 
@@ -73,14 +74,43 @@ pub struct Event {
 #[derive(Debug, Clone)]
 pub struct RequestLog {
     pub key_id: Option<String>,
+    pub account_id: Option<String>,
     pub request_path: String,
     pub method: String,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub upstream_url: Option<String>,
     pub status_code: Option<i64>,
+    pub input_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub reasoning_output_tokens: Option<i64>,
+    pub estimated_cost_usd: Option<f64>,
     pub error: Option<String>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestTokenStat {
+    pub request_log_id: i64,
+    pub key_id: Option<String>,
+    pub account_id: Option<String>,
+    pub model: Option<String>,
+    pub input_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub reasoning_output_tokens: Option<i64>,
+    pub estimated_cost_usd: Option<f64>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestLogTodaySummary {
+    pub input_tokens: i64,
+    pub cached_input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub estimated_cost_usd: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -211,7 +241,24 @@ impl Storage {
             "019_api_key_secrets",
             include_str!("../../migrations/019_api_key_secrets.sql"),
             |s| s.ensure_api_key_secrets_table(),
-        )
+        )?;
+        self.apply_sql_or_compat_migration(
+            "020_request_logs_account_tokens_cost",
+            include_str!("../../migrations/020_request_logs_account_tokens_cost.sql"),
+            |s| s.ensure_request_log_account_tokens_cost_columns(),
+        )?;
+        self.apply_sql_or_compat_migration(
+            "021_request_logs_cached_reasoning_tokens",
+            include_str!("../../migrations/021_request_logs_cached_reasoning_tokens.sql"),
+            |s| s.ensure_request_log_cached_reasoning_columns(),
+        )?;
+        self.apply_sql_or_compat_migration(
+            "022_request_token_stats",
+            include_str!("../../migrations/022_request_token_stats.sql"),
+            |s| s.ensure_request_token_stats_table(),
+        )?;
+        self.ensure_request_token_stats_table()?;
+        Ok(())
     }
 
     pub fn insert_login_session(&self, session: &LoginSession) -> Result<()> {

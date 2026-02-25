@@ -1,4 +1,6 @@
-use codexmanager_core::storage::{now_ts, Account, ApiKey, RequestLog, Storage, Token, UsageSnapshotRecord};
+use codexmanager_core::storage::{
+    now_ts, Account, ApiKey, RequestLog, RequestTokenStat, Storage, Token, UsageSnapshotRecord,
+};
 
 #[test]
 fn storage_can_insert_account_and_token() {
@@ -252,12 +254,18 @@ fn request_logs_support_prefixed_query_filters() {
     storage
         .insert_request_log(&RequestLog {
             key_id: Some("key-alpha-extra".to_string()),
+            account_id: Some("acc-1".to_string()),
             request_path: "/v1/responses".to_string(),
             method: "POST".to_string(),
             model: Some("gpt-5.1".to_string()),
             reasoning_effort: Some("low".to_string()),
             upstream_url: Some("https://chatgpt.com/backend-api/codex/v1/responses".to_string()),
             status_code: Some(201),
+            input_tokens: Some(11),
+            cached_input_tokens: Some(3),
+            output_tokens: Some(7),
+            reasoning_output_tokens: Some(2),
+            estimated_cost_usd: Some(0.0),
             error: None,
             created_at: now_ts() - 2,
         })
@@ -266,12 +274,18 @@ fn request_logs_support_prefixed_query_filters() {
     storage
         .insert_request_log(&RequestLog {
             key_id: Some("key-alpha".to_string()),
+            account_id: Some("acc-1".to_string()),
             request_path: "/v1/responses".to_string(),
             method: "POST".to_string(),
             model: Some("gpt-5.1".to_string()),
             reasoning_effort: Some("low".to_string()),
             upstream_url: Some("https://chatgpt.com/backend-api/codex/v1/responses".to_string()),
             status_code: Some(200),
+            input_tokens: Some(9),
+            cached_input_tokens: Some(1),
+            output_tokens: Some(5),
+            reasoning_output_tokens: Some(1),
+            estimated_cost_usd: Some(0.0),
             error: None,
             created_at: now_ts() - 1,
         })
@@ -280,12 +294,18 @@ fn request_logs_support_prefixed_query_filters() {
     storage
         .insert_request_log(&RequestLog {
             key_id: Some("key-beta".to_string()),
+            account_id: Some("acc-2".to_string()),
             request_path: "/v1/models".to_string(),
             method: "GET".to_string(),
             model: Some("gpt-4.1".to_string()),
             reasoning_effort: Some("xhigh".to_string()),
             upstream_url: Some("https://api.openai.com/v1/models".to_string()),
             status_code: Some(503),
+            input_tokens: None,
+            cached_input_tokens: None,
+            output_tokens: None,
+            reasoning_output_tokens: None,
+            estimated_cost_usd: Some(0.0),
             error: Some("upstream timeout".to_string()),
             created_at: now_ts(),
         })
@@ -319,6 +339,56 @@ fn request_logs_support_prefixed_query_filters() {
         .expect("fallback fuzzy query");
     assert_eq!(fallback_filtered.len(), 1);
     assert_eq!(fallback_filtered[0].error.as_deref(), Some("upstream timeout"));
+}
+
+#[test]
+fn request_log_today_summary_reads_from_token_stats_table() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let created_at = now_ts();
+    let request_log_id = storage
+        .insert_request_log(&RequestLog {
+            key_id: Some("key-summary".to_string()),
+            account_id: Some("acc-summary".to_string()),
+            request_path: "/v1/responses".to_string(),
+            method: "POST".to_string(),
+            model: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: Some("high".to_string()),
+            upstream_url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
+            status_code: Some(200),
+            input_tokens: None,
+            cached_input_tokens: None,
+            output_tokens: None,
+            reasoning_output_tokens: None,
+            estimated_cost_usd: None,
+            error: None,
+            created_at,
+        })
+        .expect("insert request log");
+
+    storage
+        .insert_request_token_stat(&RequestTokenStat {
+            request_log_id,
+            key_id: Some("key-summary".to_string()),
+            account_id: Some("acc-summary".to_string()),
+            model: Some("gpt-5.3-codex".to_string()),
+            input_tokens: Some(120),
+            cached_input_tokens: Some(80),
+            output_tokens: Some(22),
+            reasoning_output_tokens: Some(9),
+            estimated_cost_usd: Some(0.33),
+            created_at,
+        })
+        .expect("insert token stat");
+
+    let summary = storage
+        .summarize_request_logs_between(created_at - 1, created_at + 1)
+        .expect("summarize");
+    assert_eq!(summary.input_tokens, 120);
+    assert_eq!(summary.cached_input_tokens, 80);
+    assert_eq!(summary.output_tokens, 22);
+    assert_eq!(summary.reasoning_output_tokens, 9);
+    assert!(summary.estimated_cost_usd > 0.32);
 }
 
 #[test]

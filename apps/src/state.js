@@ -12,6 +12,12 @@ export const state = {
   apiKeyList: [],
   apiModelOptions: [],
   requestLogList: [],
+  requestLogTodaySummary: {
+    todayTokens: 0,
+    cachedInputTokens: 0,
+    reasoningOutputTokens: 0,
+    estimatedCost: 0,
+  },
   requestLogQuery: "",
   requestLogStatusFilter: "all",
   accountSearch: "",

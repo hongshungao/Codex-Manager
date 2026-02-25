@@ -103,6 +103,10 @@ export async function serviceRequestLogClear() {
   return invoke("service_requestlog_clear", withAddr());
 }
 
+export async function serviceRequestLogTodaySummary() {
+  return invoke("service_requestlog_today_summary", withAddr());
+}
+
 // 登录
 export async function serviceLoginStart(payload) {
   return invoke("service_login_start", withAddr(payload));

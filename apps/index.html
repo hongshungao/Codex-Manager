@@ -77,6 +77,38 @@
                                 <div class="metric-sub">额度不足</div>
                             </div>
                         </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"></div>
+                            <div class="stat-body">
+                                <h3>今日 Token</h3>
+                                <div id="metricTodayTokens" class="stat">0</div>
+                                <div class="metric-sub">非缓存输入 + 输出</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"></div>
+                            <div class="stat-body">
+                                <h3>缓存 Token</h3>
+                                <div id="metricCachedInputTokens" class="stat">0</div>
+                                <div class="metric-sub">输入缓存命中</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"></div>
+                            <div class="stat-body">
+                                <h3>推理 Token</h3>
+                                <div id="metricReasoningOutputTokens" class="stat">0</div>
+                                <div class="metric-sub">输出中推理部分</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"></div>
+                            <div class="stat-body">
+                                <h3>预计费用</h3>
+                                <div id="metricTodayCost" class="stat">$0.00</div>
+                                <div class="metric-sub">按今日请求估算</div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="dashboard-duo">
@@ -178,6 +210,7 @@
                                 <thead>
                                     <tr>
                                         <th>时间</th>
+                                        <th>账号</th>
                                         <th>Key ID</th>
                                         <th>方法</th>
                                         <th>路径</th>

@@ -75,12 +75,19 @@ pub(super) fn maybe_respond_local_count_tokens(
             super::write_request_log(
                 storage,
                 Some(key_id),
+                None,
                 path,
                 request_method,
                 model_for_log,
                 reasoning_for_log,
                 None,
                 Some(200),
+                super::request_log::RequestLogUsage {
+                    input_tokens: Some(input_tokens.min(i64::MAX as u64) as i64),
+                    cached_input_tokens: Some(0),
+                    output_tokens: Some(0),
+                    reasoning_output_tokens: Some(0),
+                },
                 None,
             );
             let response = Response::from_string(output)
@@ -102,12 +109,14 @@ pub(super) fn maybe_respond_local_count_tokens(
             super::write_request_log(
                 storage,
                 Some(key_id),
+                None,
                 path,
                 request_method,
                 model_for_log,
                 reasoning_for_log,
                 None,
                 Some(400),
+                super::request_log::RequestLogUsage::default(),
                 Some(err.as_str()),
             );
             let response = Response::from_string(err.clone()).with_status_code(400);

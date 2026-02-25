@@ -27,8 +27,6 @@ pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
             super::account_inflight_count(&account.id),
         )
     });
-    super::rotate_candidates_for_fairness(&mut candidates);
-
     let mut last_error = "models request failed".to_string();
     for (account, mut token) in candidates {
         match send_models_request(
