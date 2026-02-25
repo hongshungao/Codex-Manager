@@ -38,8 +38,9 @@ if (Test-Path $tauriConfig) {
 }
 
 $portableRoot = if ($PortableDir) { $PortableDir } else { Join-Path $root "portable" }
-$portableExe = Join-Path $portableRoot "$appName.exe"
-$portableMarker = Join-Path $portableRoot ".codexmanager-portable"
+$portableExe = Join-Path $portableRoot "$appName-portable.exe"
+$legacyPortableExe = Join-Path $portableRoot "$appName.exe"
+$legacyPortableMarker = Join-Path $portableRoot ".codexmanager-portable"
 $appExe = Join-Path $tauriDir "target\\release\\$appName.exe"
 $artifactsRoot = if ($ArtifactsDir) { $ArtifactsDir } else { Join-Path $root "artifacts" }
 
@@ -154,8 +155,9 @@ function Invoke-LocalWindowsBuild {
     if ($Portable) {
       if ($DryRun) {
         Write-Step "DRY RUN: stage portable -> $portableRoot"
+        Write-Step "DRY RUN: remove legacy portable exe -> $legacyPortableExe"
+        Write-Step "DRY RUN: remove legacy marker -> $legacyPortableMarker"
         Write-Step "DRY RUN: copy $appExe -> $portableExe"
-        Write-Step "DRY RUN: write marker -> $portableMarker"
       } else {
         if (-not (Test-Path $portableRoot)) {
           New-Item -ItemType Directory -Force $portableRoot | Out-Null
@@ -163,8 +165,13 @@ function Invoke-LocalWindowsBuild {
         if (-not (Test-Path $appExe)) {
           throw "missing app exe: $appExe"
         }
+        if ((Test-Path $legacyPortableExe) -and ($legacyPortableExe -ne $portableExe)) {
+          Remove-Item -Force $legacyPortableExe
+        }
+        if (Test-Path $legacyPortableMarker) {
+          Remove-Item -Force $legacyPortableMarker
+        }
         Copy-Item -Force $appExe $portableExe
-        Set-Content -Path $portableMarker -Value "" -NoNewline
       }
     }
   } finally {
