@@ -13,6 +13,7 @@
 A local desktop + service toolkit for managing a Codex-compatible ChatGPT account pool, usage, and platform keys, with a built-in local gateway.
 
 ## Recent Changes
+- UI previews refreshed: dashboard/accounts/platform key/request logs/settings screenshots in `assets/images` now match the latest interface.
 - Gateway protocol adapter was further modularized: request mapping and response conversion were split, and response conversion is now separated into JSON/SSE modules.
 - Backend routing boundaries were unified to reduce duplicated gateway/proxy dispatch logic.
 - Stability hardening: frontend refresh flow and request-log race handling were improved; clipboard fallback behavior was unified (clipboard API + execCommand fallback).
@@ -34,7 +35,7 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 ![Accounts](assets/images/accounts.png)
 ![Platform Key](assets/images/platform-key.png)
 ![Logs](assets/images/log.png)
-![Themes](assets/images/themes.png)
+![Settings](assets/images/themes.png)
 
 ## Tech Stack
 - Frontend: Vite + vanilla JavaScript

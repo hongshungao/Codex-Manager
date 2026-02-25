@@ -14,6 +14,7 @@
 
 ## 最近变更
 - `v0.1.x` 汇总（最近版本）
+- UI 预览图已更新：`assets/images` 下仪表盘、账号管理、平台 Key、请求日志、设置页截图已同步为最新界面。
 - 更新能力重构：更新按钮改为“两段式”（先检查、再执行更新），设置页新增“当前版本”展示，更新状态反馈更清晰。
 - GitHub 版本检查增强：当 Release API 限流或失败时，自动回退到 Release 页面解析最新版本，减少“检查失败”概率。
 - 发布流程拆分：原多平台 workflow 拆分为 `release-windows.yml`、`release-linux.yml`、`release-macos-beta.yml`，全部保持手动触发。
@@ -34,7 +35,7 @@
 ![账号管理](assets/images/accounts.png)
 ![平台 Key](assets/images/platform-key.png)
 ![日志视图](assets/images/log.png)
-![主题切换](assets/images/themes.png)
+![设置页](assets/images/themes.png)
 
 ## 技术栈
 - 前端：Vite + 原生 JavaScript
