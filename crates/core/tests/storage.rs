@@ -264,6 +264,7 @@ fn request_logs_support_prefixed_query_filters() {
             input_tokens: Some(11),
             cached_input_tokens: Some(3),
             output_tokens: Some(7),
+            total_tokens: Some(18),
             reasoning_output_tokens: Some(2),
             estimated_cost_usd: Some(0.0),
             error: None,
@@ -284,6 +285,7 @@ fn request_logs_support_prefixed_query_filters() {
             input_tokens: Some(9),
             cached_input_tokens: Some(1),
             output_tokens: Some(5),
+            total_tokens: Some(14),
             reasoning_output_tokens: Some(1),
             estimated_cost_usd: Some(0.0),
             error: None,
@@ -304,6 +306,7 @@ fn request_logs_support_prefixed_query_filters() {
             input_tokens: None,
             cached_input_tokens: None,
             output_tokens: None,
+            total_tokens: None,
             reasoning_output_tokens: None,
             estimated_cost_usd: Some(0.0),
             error: Some("upstream timeout".to_string()),
@@ -359,6 +362,7 @@ fn request_log_today_summary_reads_from_token_stats_table() {
             input_tokens: None,
             cached_input_tokens: None,
             output_tokens: None,
+            total_tokens: None,
             reasoning_output_tokens: None,
             estimated_cost_usd: None,
             error: None,
@@ -375,6 +379,7 @@ fn request_log_today_summary_reads_from_token_stats_table() {
             input_tokens: Some(120),
             cached_input_tokens: Some(80),
             output_tokens: Some(22),
+            total_tokens: Some(142),
             reasoning_output_tokens: Some(9),
             estimated_cost_usd: Some(0.33),
             created_at,
@@ -389,6 +394,62 @@ fn request_log_today_summary_reads_from_token_stats_table() {
     assert_eq!(summary.output_tokens, 22);
     assert_eq!(summary.reasoning_output_tokens, 9);
     assert!(summary.estimated_cost_usd > 0.32);
+}
+
+#[test]
+fn clear_request_logs_keeps_token_stats_for_usage_summary() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let created_at = now_ts();
+    let request_log_id = storage
+        .insert_request_log(&RequestLog {
+            key_id: Some("key-clear".to_string()),
+            account_id: Some("acc-clear".to_string()),
+            request_path: "/v1/responses".to_string(),
+            method: "POST".to_string(),
+            model: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: Some("high".to_string()),
+            upstream_url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
+            status_code: Some(200),
+            input_tokens: None,
+            cached_input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_output_tokens: None,
+            estimated_cost_usd: None,
+            error: None,
+            created_at,
+        })
+        .expect("insert request log");
+    storage
+        .insert_request_token_stat(&RequestTokenStat {
+            request_log_id,
+            key_id: Some("key-clear".to_string()),
+            account_id: Some("acc-clear".to_string()),
+            model: Some("gpt-5.3-codex".to_string()),
+            input_tokens: Some(100),
+            cached_input_tokens: Some(30),
+            output_tokens: Some(20),
+            total_tokens: Some(120),
+            reasoning_output_tokens: Some(5),
+            estimated_cost_usd: Some(0.12),
+            created_at,
+        })
+        .expect("insert token stat");
+
+    storage.clear_request_logs().expect("clear request logs");
+
+    let logs = storage.list_request_logs(None, 100).expect("list logs");
+    assert!(logs.is_empty(), "request logs should be cleared");
+
+    let summary = storage
+        .summarize_request_logs_between(created_at - 1, created_at + 1)
+        .expect("summarize");
+    assert_eq!(summary.input_tokens, 100);
+    assert_eq!(summary.cached_input_tokens, 30);
+    assert_eq!(summary.output_tokens, 20);
+    assert_eq!(summary.reasoning_output_tokens, 5);
+    assert!(summary.estimated_cost_usd > 0.11);
 }
 
 #[test]

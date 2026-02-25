@@ -24,6 +24,7 @@ pub(crate) fn read_request_logs(
             input_tokens: item.input_tokens,
             cached_input_tokens: item.cached_input_tokens,
             output_tokens: item.output_tokens,
+            total_tokens: item.total_tokens,
             reasoning_output_tokens: item.reasoning_output_tokens,
             estimated_cost_usd: item.estimated_cost_usd,
             error: item.error,

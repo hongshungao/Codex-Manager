@@ -11,8 +11,36 @@ const monthFormatterZh = new Intl.DateTimeFormat("zh-CN", {
   month: "numeric",
 });
 
+const COMPACT_NUMBER_UNITS = [
+  { value: 1e18, suffix: "E" },
+  { value: 1e15, suffix: "P" },
+  { value: 1e12, suffix: "T" },
+  { value: 1e9, suffix: "B" },
+  { value: 1e6, suffix: "M" },
+  { value: 1e3, suffix: "K" },
+];
+
 function formatDateTime(date) {
   return dateTimeFormatter.format(date);
+}
+
+function trimTrailingZeros(text) {
+  return String(text)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*[1-9])0+$/, "$1");
+}
+
+function parseFiniteNumber(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!normalized) return null;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 // 时间与用量展示相关工具函数
@@ -22,6 +50,31 @@ export function formatTs(ts, options = {}) {
   const date = new Date(ts * 1000);
   if (Number.isNaN(date.getTime())) return emptyLabel;
   return formatDateTime(date);
+}
+
+export function formatCompactNumber(value, options = {}) {
+  const fallback = options.fallback == null ? "-" : String(options.fallback);
+  const parsed = parseFiniteNumber(value);
+  if (parsed == null) return fallback;
+
+  const normalized = Math.max(0, parsed);
+  if (normalized < 1000) {
+    return `${Math.round(normalized)}`;
+  }
+
+  const maxFractionDigits = Number.isFinite(options.maxFractionDigits)
+    ? Math.max(0, Math.min(6, Math.floor(options.maxFractionDigits)))
+    : 1;
+
+  for (let i = 0; i < COMPACT_NUMBER_UNITS.length; i += 1) {
+    const unit = COMPACT_NUMBER_UNITS[i];
+    if (normalized < unit.value) continue;
+    const scaled = normalized / unit.value;
+    const fixed = trimTrailingZeros(scaled.toFixed(maxFractionDigits));
+    return `${fixed}${unit.suffix}`;
+  }
+
+  return `${Math.round(normalized)}`;
 }
 
 export function formatLimitLabel(windowMinutes, fallback) {

@@ -48,31 +48,35 @@
 .page.active {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 16px;
+}
+
+#pageDashboard.page.active {
+  gap: 12px;
 }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
 }
 
 .stat-card {
   background: linear-gradient(170deg, #ffffff, #f2f8ff);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 18px 18px;
+  padding: 14px;
   display: flex;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
   box-shadow: var(--shadow);
   transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
 .stat-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
   background: linear-gradient(135deg, #d1e7ff, #c2efff);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
@@ -88,32 +92,152 @@
 .stat-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .stat-body h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.25;
   color: var(--muted);
 }
 
 .stat {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--ink-strong);
   text-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .metric-sub {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .dashboard-duo {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.dashboard-compact .stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dashboard-compact .stat-card {
+  min-height: 72px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: var(--shadow-soft);
+}
+
+.dashboard-compact .stat-card:hover {
+  transform: none;
+}
+
+.dashboard-compact .stat-icon {
+  display: none;
+}
+
+.dashboard-compact .stat-body {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+  width: 100%;
+}
+
+.dashboard-compact .stat-body h3 {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.dashboard-compact .metric-sub {
+  grid-column: 1;
+  grid-row: 2;
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-compact .stat {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-size: 28px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: none;
+}
+
+.dashboard-compact .dashboard-duo {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.dashboard-compact .card {
+  padding: 12px;
+  border-radius: 12px;
+  gap: 8px;
+}
+
+.dashboard-compact .panel-header {
+  gap: 8px;
+}
+
+.dashboard-compact .panel-header h3 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.dashboard-compact .cell {
+  padding: 8px 10px;
+  border-radius: 10px;
+  gap: 4px;
+}
+
+.dashboard-compact .cell strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.dashboard-compact .cell small {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.dashboard-compact .mini-usage {
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.dashboard-compact .progress-line {
+  grid-template-columns: 56px 1fr;
+  gap: 6px;
+  font-size: 10px;
+}
+
+.dashboard-compact .progress-line .track {
+  height: 6px;
+}
+
+.dashboard-compact .status-tag {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.dashboard-compact .hint {
+  font-size: 11px;
 }
 
 .dashboard-actions {
@@ -126,11 +250,11 @@
   background: linear-gradient(165deg, #ffffff, #f1f8ff);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: 16px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
@@ -138,11 +262,11 @@
   background: linear-gradient(165deg, #ffffff, #f2f8ff);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: 16px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   transition: transform 0.2s ease, border-color 0.2s ease;
 }
 

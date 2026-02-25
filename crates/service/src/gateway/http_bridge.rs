@@ -10,6 +10,7 @@ pub(super) struct UpstreamResponseUsage {
     pub input_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub output_text: Option<String>,
 }
@@ -23,6 +24,9 @@ fn merge_usage(target: &mut UpstreamResponseUsage, source: UpstreamResponseUsage
     }
     if source.output_tokens.is_some() {
         target.output_tokens = source.output_tokens;
+    }
+    if source.total_tokens.is_some() {
+        target.total_tokens = source.total_tokens;
     }
     if source.reasoning_output_tokens.is_some() {
         target.reasoning_output_tokens = source.reasoning_output_tokens;
@@ -40,6 +44,7 @@ fn parse_usage_from_object(usage: Option<&Map<String, Value>>) -> UpstreamRespon
     let output_tokens = usage
         .and_then(|map| map.get("output_tokens").and_then(Value::as_i64))
         .or_else(|| usage.and_then(|map| map.get("completion_tokens").and_then(Value::as_i64)));
+    let total_tokens = usage.and_then(|map| map.get("total_tokens").and_then(Value::as_i64));
     let cached_input_tokens = usage
         .and_then(|map| map.get("input_tokens_details"))
         .and_then(Value::as_object)
@@ -66,6 +71,7 @@ fn parse_usage_from_object(usage: Option<&Map<String, Value>>) -> UpstreamRespon
         input_tokens,
         cached_input_tokens,
         output_tokens,
+        total_tokens,
         reasoning_output_tokens,
         output_text: None,
     }
@@ -102,8 +108,29 @@ fn collect_response_output_text(value: &Value, output: &mut String) {
             if let Some(message) = map.get("message") {
                 collect_response_output_text(message, output);
             }
+            if let Some(output_field) = map.get("output") {
+                collect_response_output_text(output_field, output);
+            }
+            if let Some(delta) = map.get("delta") {
+                collect_response_output_text(delta, output);
+            }
         }
         _ => {}
+    }
+}
+
+fn collect_output_text_from_event_fields(value: &Value, output: &mut String) {
+    if let Some(item) = value.get("item") {
+        collect_response_output_text(item, output);
+    }
+    if let Some(output_item) = value.get("output_item") {
+        collect_response_output_text(output_item, output);
+    }
+    if let Some(part) = value.get("part") {
+        collect_response_output_text(part, output);
+    }
+    if let Some(content_part) = value.get("content_part") {
+        collect_response_output_text(content_part, output);
     }
 }
 
@@ -115,8 +142,17 @@ fn extract_output_text_from_json(value: &Value) -> Option<String> {
     if let Some(response) = value.get("response") {
         collect_response_output_text(response, &mut output);
     }
+    if let Some(top_level_output) = value.get("output") {
+        collect_response_output_text(top_level_output, &mut output);
+    }
     if let Some(choices) = value.get("choices") {
         collect_response_output_text(choices, &mut output);
+    }
+    if let Some(item) = value.get("item") {
+        collect_response_output_text(item, &mut output);
+    }
+    if let Some(part) = value.get("part") {
+        collect_response_output_text(part, &mut output);
     }
     if output.trim().is_empty() {
         None
@@ -129,7 +165,6 @@ fn parse_usage_from_json(value: &Value) -> UpstreamResponseUsage {
     let mut usage = parse_usage_from_object(value.get("usage").and_then(Value::as_object));
     let response_usage = value
         .get("response")
-        .and_then(Value::as_object)
         .and_then(|response| response.get("usage"))
         .and_then(Value::as_object);
     merge_usage(&mut usage, parse_usage_from_object(response_usage));
@@ -153,6 +188,7 @@ fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage>
         return None;
     }
     let value = serde_json::from_str::<Value>(&data).ok()?;
+    let mut usage = parse_usage_from_json(&value);
     if let Some(choices) = value.get("choices").and_then(Value::as_array) {
         let mut text_out = String::new();
         for choice in choices {
@@ -164,7 +200,6 @@ fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage>
                 collect_response_output_text(delta, &mut text_out);
             }
         }
-        let mut usage = parse_usage_from_json(&value);
         if !text_out.trim().is_empty() {
             usage.output_text = Some(match usage.output_text {
                 Some(existing) if !existing.is_empty() => format!("{existing}\n{text_out}"),
@@ -174,7 +209,6 @@ fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage>
         return Some(usage);
     }
     if let Some(delta) = value.get("delta").and_then(Value::as_str) {
-        let mut usage = parse_usage_from_json(&value);
         if !delta.is_empty() {
             usage.output_text = Some(match usage.output_text {
                 Some(existing) if !existing.is_empty() => format!("{existing}\n{delta}"),
@@ -183,7 +217,7 @@ fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage>
         }
         return Some(usage);
     }
-    Some(parse_usage_from_json(&value))
+    Some(usage)
 }
 
 pub(super) fn respond_with_upstream(
@@ -191,6 +225,7 @@ pub(super) fn respond_with_upstream(
     upstream: reqwest::blocking::Response,
     _inflight_guard: AccountInFlightGuard,
     response_adapter: super::ResponseAdapter,
+    is_stream: bool,
 ) -> Result<UpstreamResponseUsage, String> {
     match response_adapter {
         super::ResponseAdapter::Passthrough => {
@@ -221,7 +256,7 @@ pub(super) fn respond_with_upstream(
                 .as_deref()
                 .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
                 .unwrap_or(false);
-            if is_json {
+            if is_json && !is_stream {
                 let upstream_body = upstream
                     .bytes()
                     .map_err(|err| format!("read upstream body failed: {err}"))?;
@@ -240,7 +275,7 @@ pub(super) fn respond_with_upstream(
                 let _ = request.respond(response);
                 return Ok(usage);
             }
-            if is_sse {
+            if is_sse || is_stream {
                 let usage_collector = Arc::new(Mutex::new(UpstreamResponseUsage::default()));
                 let response = Response::new(
                     status,
@@ -284,10 +319,11 @@ pub(super) fn respond_with_upstream(
                 .map(|v| v.to_string());
 
             if response_adapter == super::ResponseAdapter::AnthropicSse
-                && upstream_content_type
-                    .as_deref()
-                    .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
-                    .unwrap_or(false)
+                && (is_stream
+                    || upstream_content_type
+                        .as_deref()
+                        .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
+                        .unwrap_or(false))
             {
                 if let Ok(content_type_header) = Header::from_bytes(
                     b"Content-Type".as_slice(),
@@ -434,7 +470,9 @@ struct AnthropicSseState {
     input_tokens: i64,
     cached_input_tokens: i64,
     output_tokens: i64,
+    total_tokens: Option<i64>,
     reasoning_output_tokens: i64,
+    output_text: String,
     stop_reason: Option<&'static str>,
 }
 
@@ -507,6 +545,7 @@ impl AnthropicSseReader {
                 if fragment.is_empty() {
                     return Vec::new();
                 }
+                append_output_text(&mut self.state.output_text, fragment);
                 self.ensure_message_start(&mut out);
                 self.ensure_text_block_start(&mut out);
                 let text_index = self.state.text_block_index.unwrap_or(0);
@@ -525,7 +564,12 @@ impl AnthropicSseReader {
                 self.state.stop_reason.get_or_insert("end_turn");
             }
             "response.output_item.done" => {
-                let Some(item_obj) = value.get("item").and_then(Value::as_object) else {
+                collect_output_text_from_event_fields(value, &mut self.state.output_text);
+                let Some(item_obj) = value
+                    .get("item")
+                    .or_else(|| value.get("output_item"))
+                    .and_then(Value::as_object)
+                else {
                     return Vec::new();
                 };
                 if item_obj
@@ -588,27 +632,33 @@ impl AnthropicSseReader {
                 );
                 self.state.stop_reason = Some("tool_use");
             }
+            _ if event_type.starts_with("response.output_item.")
+                || event_type.starts_with("response.content_part.") =>
+            {
+                collect_output_text_from_event_fields(value, &mut self.state.output_text);
+            }
             "response.completed" => {
-                if let Some(response) = value.get("response").and_then(Value::as_object) {
-                    if let Some(output_text) = response.get("output_text").and_then(Value::as_str) {
-                        if !output_text.trim().is_empty() {
-                            self.ensure_message_start(&mut out);
-                            self.ensure_text_block_start(&mut out);
-                            let text_index = self.state.text_block_index.unwrap_or(0);
-                            append_sse_event(
-                                &mut out,
-                                "content_block_delta",
-                                &json!({
-                                    "type": "content_block_delta",
-                                    "index": text_index,
-                                    "delta": {
-                                        "type": "text_delta",
-                                        "text": output_text
-                                    }
-                                }),
-                            );
-                            self.state.stop_reason.get_or_insert("end_turn");
-                        }
+                if let Some(response) = value.get("response") {
+                    let mut extracted_output_text = String::new();
+                    collect_response_output_text(response, &mut extracted_output_text);
+                    if !extracted_output_text.trim().is_empty() {
+                        append_output_text(&mut self.state.output_text, extracted_output_text.as_str());
+                        self.ensure_message_start(&mut out);
+                        self.ensure_text_block_start(&mut out);
+                        let text_index = self.state.text_block_index.unwrap_or(0);
+                        append_sse_event(
+                            &mut out,
+                            "content_block_delta",
+                            &json!({
+                                "type": "content_block_delta",
+                                "index": text_index,
+                                "delta": {
+                                    "type": "text_delta",
+                                    "text": extracted_output_text
+                                }
+                            }),
+                        );
+                        self.state.stop_reason.get_or_insert("end_turn");
                     }
                 }
             }
@@ -654,6 +704,10 @@ impl AnthropicSseReader {
                     .and_then(Value::as_i64)
                     .or_else(|| usage.get("completion_tokens").and_then(Value::as_i64))
                     .unwrap_or(self.state.output_tokens);
+                self.state.total_tokens = usage
+                    .get("total_tokens")
+                    .and_then(Value::as_i64)
+                    .or(self.state.total_tokens);
                 self.state.reasoning_output_tokens = usage
                     .get("output_tokens_details")
                     .and_then(Value::as_object)
@@ -741,7 +795,11 @@ impl AnthropicSseReader {
             usage.input_tokens = Some(self.state.input_tokens.max(0));
             usage.cached_input_tokens = Some(self.state.cached_input_tokens.max(0));
             usage.output_tokens = Some(self.state.output_tokens.max(0));
+            usage.total_tokens = self.state.total_tokens.map(|value| value.max(0));
             usage.reasoning_output_tokens = Some(self.state.reasoning_output_tokens.max(0));
+            if !self.state.output_text.trim().is_empty() {
+                usage.output_text = Some(self.state.output_text.clone());
+            }
         }
         let mut out = String::new();
         self.ensure_message_start(&mut out);
@@ -836,6 +894,7 @@ mod tests {
                 "input_tokens": 321,
                 "input_tokens_details": { "cached_tokens": 280 },
                 "output_tokens": 55,
+                "total_tokens": 376,
                 "output_tokens_details": { "reasoning_tokens": 21 }
             }
         });
@@ -843,6 +902,7 @@ mod tests {
         assert_eq!(usage.input_tokens, Some(321));
         assert_eq!(usage.cached_input_tokens, Some(280));
         assert_eq!(usage.output_tokens, Some(55));
+        assert_eq!(usage.total_tokens, Some(376));
         assert_eq!(usage.reasoning_output_tokens, Some(21));
     }
 
@@ -855,6 +915,7 @@ mod tests {
                     "prompt_tokens": 100,
                     "prompt_tokens_details": { "cached_tokens": 75 },
                     "completion_tokens": 20,
+                    "total_tokens": 120,
                     "completion_tokens_details": { "reasoning_tokens": 9 }
                 }
             }
@@ -863,14 +924,40 @@ mod tests {
         assert_eq!(usage.input_tokens, Some(100));
         assert_eq!(usage.cached_input_tokens, Some(75));
         assert_eq!(usage.output_tokens, Some(20));
+        assert_eq!(usage.total_tokens, Some(120));
         assert_eq!(usage.reasoning_output_tokens, Some(9));
+    }
+
+    #[test]
+    fn parse_usage_from_json_merges_response_usage_over_top_level_usage() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "total_tokens": 18
+            },
+            "response": {
+                "usage": {
+                    "prompt_tokens": 13,
+                    "prompt_tokens_details": { "cached_tokens": 5 },
+                    "completion_tokens": 9,
+                    "total_tokens": 22
+                }
+            }
+        });
+        let usage = parse_usage_from_json(&payload);
+        assert_eq!(usage.input_tokens, Some(13));
+        assert_eq!(usage.cached_input_tokens, Some(5));
+        assert_eq!(usage.output_tokens, Some(9));
+        assert_eq!(usage.total_tokens, Some(22));
+        assert_eq!(usage.reasoning_output_tokens, None);
     }
 
     #[test]
     fn parse_usage_from_sse_frame_reads_response_completed_usage() {
         let frame_lines = vec![
             "event: message\n".to_string(),
-            r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":88,"input_tokens_details":{"cached_tokens":61},"output_tokens":17,"output_tokens_details":{"reasoning_tokens":6}}}}"#
+            r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":88,"input_tokens_details":{"cached_tokens":61},"output_tokens":17,"total_tokens":105,"output_tokens_details":{"reasoning_tokens":6}}}}"#
                 .to_string(),
             "\n".to_string(),
         ];
@@ -878,6 +965,23 @@ mod tests {
         assert_eq!(usage.input_tokens, Some(88));
         assert_eq!(usage.cached_input_tokens, Some(61));
         assert_eq!(usage.output_tokens, Some(17));
+        assert_eq!(usage.total_tokens, Some(105));
         assert_eq!(usage.reasoning_output_tokens, Some(6));
+    }
+
+    #[test]
+    fn parse_usage_from_sse_frame_reads_top_level_and_response_usage() {
+        let frame_lines = vec![
+            "event: message\n".to_string(),
+            r#"data: {"type":"response.completed","usage":{"input_tokens":22,"input_tokens_details":{"cached_tokens":10},"output_tokens":11,"total_tokens":33,"output_tokens_details":{"reasoning_tokens":3}},"response":{"usage":{"prompt_tokens":26,"prompt_tokens_details":{"cached_tokens":12},"completion_tokens":15,"total_tokens":41,"completion_tokens_details":{"reasoning_tokens":4}}}}"#
+                .to_string(),
+            "\n".to_string(),
+        ];
+        let usage = parse_usage_from_sse_frame(&frame_lines).expect("extract usage from sse frame");
+        assert_eq!(usage.input_tokens, Some(26));
+        assert_eq!(usage.cached_input_tokens, Some(12));
+        assert_eq!(usage.output_tokens, Some(15));
+        assert_eq!(usage.total_tokens, Some(41));
+        assert_eq!(usage.reasoning_output_tokens, Some(4));
     }
 }

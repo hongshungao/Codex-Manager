@@ -1,6 +1,11 @@
 import { state } from "../state";
 import { dom } from "../ui/dom";
-import { calcAvailability, computeUsageStats, formatTs } from "../utils/format";
+import {
+  calcAvailability,
+  computeUsageStats,
+  formatCompactNumber,
+  formatTs,
+} from "../utils/format";
 import { buildProgressLine } from "./dashboard-progress";
 import { renderRecommendations } from "./dashboard-recommendations";
 
@@ -17,7 +22,7 @@ function toSafeNumber(value, fallback = 0) {
 
 function formatTokenCount(value) {
   const num = Math.max(0, Math.round(toSafeNumber(value, 0)));
-  return num.toLocaleString("zh-CN");
+  return formatCompactNumber(num, { fallback: "0", maxFractionDigits: 1 });
 }
 
 function formatEstimatedCost(value) {

@@ -1,6 +1,6 @@
 @media (max-width: 1200px) {
   .stats-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .toolbar-actions input {
@@ -22,6 +22,10 @@
 }
 
 @media (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .top-nav {
     flex-wrap: wrap;
     justify-content: flex-start;
@@ -121,6 +125,24 @@
   .stats-grid,
   .dashboard-duo {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-compact .stat-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    row-gap: 2px;
+  }
+
+  .dashboard-compact .stat {
+    grid-column: 1;
+    grid-row: 2;
+    font-size: 24px;
+  }
+
+  .dashboard-compact .metric-sub {
+    grid-column: 1;
+    grid-row: 3;
+    white-space: normal;
   }
 
   .table.account-table,

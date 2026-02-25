@@ -143,6 +143,7 @@ pub struct RequestLogSummary {
     pub input_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub estimated_cost_usd: Option<f64>,
     pub error: Option<String>,

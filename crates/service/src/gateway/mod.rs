@@ -20,7 +20,6 @@ mod trace_log;
 mod incoming_headers;
 mod route_hint;
 mod local_count_tokens;
-mod token_estimator;
 mod route_quality;
 mod request_gate;
 
@@ -74,7 +73,6 @@ pub(crate) use request_entry::handle_gateway_request;
 pub(super) use incoming_headers::IncomingHeaderSnapshot;
 use route_hint::{preferred_route_account, remember_success_route_account};
 use local_count_tokens::maybe_respond_local_count_tokens;
-use token_estimator::{estimate_input_tokens, estimate_output_tokens};
 use route_quality::{record_route_quality, route_quality_penalty};
 use request_gate::{request_gate_lock, RequestGateAcquireError};
 use runtime_config::{

@@ -32,7 +32,7 @@ impl Storage {
                 let mut stmt = self.conn.prepare(
                     "SELECT
                         r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
-                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.total_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
                         r.error, r.created_at
                      FROM request_logs r
                      LEFT JOIN request_token_stats t ON t.request_log_id = r.id
@@ -48,7 +48,7 @@ impl Storage {
                 let sql = format!(
                     "SELECT
                         r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
-                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.total_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
                         r.error, r.created_at
                      FROM request_logs r
                      LEFT JOIN request_token_stats t ON t.request_log_id = r.id
@@ -66,7 +66,7 @@ impl Storage {
                 let sql = format!(
                     "SELECT
                         r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
-                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.total_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
                         r.error, r.created_at
                      FROM request_logs r
                      LEFT JOIN request_token_stats t ON t.request_log_id = r.id
@@ -84,7 +84,7 @@ impl Storage {
                 let mut stmt = self.conn.prepare(
                     "SELECT
                         r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
-                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.total_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
                         r.error, r.created_at
                      FROM request_logs r
                      LEFT JOIN request_token_stats t ON t.request_log_id = r.id
@@ -101,7 +101,7 @@ impl Storage {
                 let mut stmt = self.conn.prepare(
                     "SELECT
                         r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
-                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.total_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
                         r.error, r.created_at
                      FROM request_logs r
                      LEFT JOIN request_token_stats t ON t.request_log_id = r.id
@@ -118,7 +118,7 @@ impl Storage {
                 let mut stmt = self.conn.prepare(
                     "SELECT
                         r.key_id, r.account_id, r.request_path, r.method, r.model, r.reasoning_effort, r.upstream_url, r.status_code,
-                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
+                        t.input_tokens, t.cached_input_tokens, t.output_tokens, t.total_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
                         r.error, r.created_at
                      FROM request_logs r
                      LEFT JOIN request_token_stats t ON t.request_log_id = r.id
@@ -134,6 +134,7 @@ impl Storage {
                         OR IFNULL(CAST(t.input_tokens AS TEXT),'') LIKE ?1
                         OR IFNULL(CAST(t.cached_input_tokens AS TEXT),'') LIKE ?1
                         OR IFNULL(CAST(t.output_tokens AS TEXT),'') LIKE ?1
+                        OR IFNULL(CAST(t.total_tokens AS TEXT),'') LIKE ?1
                         OR IFNULL(CAST(t.reasoning_output_tokens AS TEXT),'') LIKE ?1
                         OR IFNULL(CAST(t.estimated_cost_usd AS TEXT),'') LIKE ?1
                      ORDER BY r.created_at DESC, r.id DESC
@@ -150,7 +151,7 @@ impl Storage {
     }
 
     pub fn clear_request_logs(&self) -> Result<()> {
-        self.conn.execute("DELETE FROM request_token_stats", [])?;
+        // 只清理请求明细日志，保留 token 统计用于仪表盘历史用量与费用汇总。
         self.conn.execute("DELETE FROM request_logs", [])?;
         Ok(())
     }
@@ -231,10 +232,11 @@ fn map_request_log_row(row: &Row<'_>) -> Result<RequestLog> {
         input_tokens: row.get(8)?,
         cached_input_tokens: row.get(9)?,
         output_tokens: row.get(10)?,
-        reasoning_output_tokens: row.get(11)?,
-        estimated_cost_usd: row.get(12)?,
-        error: row.get(13)?,
-        created_at: row.get(14)?,
+        total_tokens: row.get(11)?,
+        reasoning_output_tokens: row.get(12)?,
+        estimated_cost_usd: row.get(13)?,
+        error: row.get(14)?,
+        created_at: row.get(15)?,
     })
 }
 

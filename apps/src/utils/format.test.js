@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { calcAvailability, computeUsageStats, formatTs } from "./format.js";
+import {
+  calcAvailability,
+  computeUsageStats,
+  formatCompactNumber,
+  formatTs,
+} from "./format.js";
 
 test("calcAvailability treats missing primary fields as unavailable", () => {
   const usage = {
@@ -85,4 +90,18 @@ test("computeUsageStats returns total/ok/unavailable/lowCount in one pass", () =
 test("formatTs supports custom empty label", () => {
   assert.equal(formatTs(0, { emptyLabel: "-" }), "-");
   assert.equal(formatTs(null, { emptyLabel: "-" }), "-");
+});
+
+test("formatCompactNumber renders K/M suffixes for large values", () => {
+  assert.equal(formatCompactNumber(999), "999");
+  assert.equal(formatCompactNumber(1_165), "1.2K");
+  assert.equal(formatCompactNumber(22_929), "22.9K");
+  assert.equal(formatCompactNumber(439_808), "439.8K");
+  assert.equal(formatCompactNumber(7_200_000), "7.2M");
+});
+
+test("formatCompactNumber handles invalid values with fallback", () => {
+  assert.equal(formatCompactNumber(null), "-");
+  assert.equal(formatCompactNumber(""), "-");
+  assert.equal(formatCompactNumber("nope", { fallback: "0" }), "0");
 });

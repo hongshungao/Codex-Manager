@@ -84,6 +84,7 @@ pub struct RequestLog {
     pub input_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub estimated_cost_usd: Option<f64>,
     pub error: Option<String>,
@@ -99,6 +100,7 @@ pub struct RequestTokenStat {
     pub input_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub estimated_cost_usd: Option<f64>,
     pub created_at: i64,
@@ -255,6 +257,11 @@ impl Storage {
         self.apply_sql_or_compat_migration(
             "022_request_token_stats",
             include_str!("../../migrations/022_request_token_stats.sql"),
+            |s| s.ensure_request_token_stats_table(),
+        )?;
+        self.apply_sql_or_compat_migration(
+            "023_request_token_stats_total_tokens",
+            include_str!("../../migrations/023_request_token_stats_total_tokens.sql"),
             |s| s.ensure_request_token_stats_table(),
         )?;
         self.ensure_request_token_stats_table()?;
