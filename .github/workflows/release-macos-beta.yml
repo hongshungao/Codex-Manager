@@ -116,23 +116,34 @@ jobs:
         run: cargo tauri build --bundles app
 
       - name: Stage macOS beta package
-        shell: pwsh
+        shell: bash
         run: |
-          $bundleRoot = "apps/src-tauri/target/release/bundle/macos"
-          if (-not (Test-Path $bundleRoot -PathType Container)) {
-            throw "bundle root not found: $bundleRoot"
-          }
+          set -euo pipefail
 
-          $appBundle = Get-ChildItem -Path $bundleRoot -Filter "*.app" -Directory | Select-Object -First 1
-          if (-not $appBundle) {
-            throw "macOS .app bundle not found under $bundleRoot"
-          }
+          bundle_root="apps/src-tauri/target/release/bundle/macos"
+          if [[ ! -d "$bundle_root" ]]; then
+            echo "bundle root not found: $bundle_root"
+            exit 1
+          fi
 
-          $portableDir = "apps/src-tauri/target/release/portable"
-          New-Item -ItemType Directory -Force $portableDir | Out-Null
+          app_bundle="$(find "$bundle_root" -maxdepth 1 -type d -name '*.app' | head -n1)"
+          if [[ -z "${app_bundle:-}" || ! -d "$app_bundle" ]]; then
+            echo "macOS .app bundle not found under $bundle_root"
+            exit 1
+          fi
 
-          $readmePath = Join-Path $portableDir "MACOS-BETA-README.txt"
-          @"
+          app_exec="$app_bundle/Contents/MacOS/CodexManager"
+          if [[ ! -f "$app_exec" ]]; then
+            echo "app executable not found: $app_exec"
+            exit 1
+          fi
+          chmod +x "$app_exec"
+
+          portable_dir="apps/src-tauri/target/release/portable"
+          mkdir -p "$portable_dir"
+
+          readme_path="$portable_dir/MACOS-BETA-README.txt"
+          cat > "$readme_path" <<'EOF'
           CodexManager macOS 内测包（未签名/未公证）
 
           首次运行前，请在终端执行：
@@ -142,12 +153,13 @@ jobs:
           open /Applications/CodexManager.app
 
           若仍被拦截，请在“系统设置 -> 隐私与安全性”中点击“仍要打开”。
-          "@ | Set-Content -Path $readmePath -Encoding utf8
+          EOF
 
-          $zipPath = Join-Path $portableDir "CodexManager-macos-beta-unsigned.zip"
-          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-          Compress-Archive -Path $appBundle.FullName, $readmePath -DestinationPath $zipPath
-          Write-Host "beta package: $zipPath"
+          zip_path="$portable_dir/CodexManager-macos-beta-unsigned.zip"
+          rm -f "$zip_path"
+          # Preserve app bundle metadata/permissions; Compress-Archive can break macOS .app bundles.
+          ditto -c -k --sequesterRsrc --keepParent "$app_bundle" "$zip_path"
+          echo "beta package: $zip_path"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
