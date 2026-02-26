@@ -4,6 +4,7 @@ use codexmanager_core::auth::{
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -65,25 +66,9 @@ impl ExistingAccountIndex {
     fn find_existing_account_id(
         &self,
         logical_account_id: &str,
-        subject_account_id: Option<&str>,
-        chatgpt_account_id: Option<&str>,
     ) -> Option<String> {
         if self.by_id.contains_key(logical_account_id) {
             return Some(logical_account_id.to_string());
-        }
-        if let Some(subject) = subject_account_id {
-            let normalized = subject.trim();
-            if !normalized.is_empty() && self.by_id.contains_key(normalized) {
-                return Some(normalized.to_string());
-            }
-        }
-        if let Some(chatgpt_id) = chatgpt_account_id {
-            let normalized = chatgpt_id.trim();
-            if !normalized.is_empty() {
-                if let Some(found) = self.by_chatgpt_account_id.get(normalized) {
-                    return Some(found.clone());
-                }
-            }
         }
         None
     }
@@ -311,15 +296,14 @@ fn import_single_item(
         .as_ref()
         .map(|c| c.sub.trim().to_string())
         .filter(|v| !v.is_empty());
-    let logical_account_id = resolve_logical_account_id(&payload, subject_account_id.as_deref())?;
-
     let chatgpt_account_id = payload
         .account_id_hint
         .clone()
         .or_else(|| claims.as_ref().and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone()))
         .or_else(|| extract_chatgpt_account_id(&payload.id_token))
         .or_else(|| extract_chatgpt_account_id(&payload.access_token))
-        .unwrap_or_else(|| logical_account_id.clone());
+        .or_else(|| subject_account_id.clone())
+        .unwrap_or_else(|| format!("import-sub-{sequence}"));
 
     let workspace_id = claims
         .as_ref()
@@ -327,6 +311,14 @@ fn import_single_item(
         .or_else(|| extract_workspace_id(&payload.id_token))
         .or_else(|| extract_workspace_id(&payload.access_token))
         .or_else(|| Some(chatgpt_account_id.clone()));
+    let token_fingerprint = token_fingerprint(&payload.refresh_token);
+    let logical_account_id = resolve_logical_account_id(
+        &payload,
+        subject_account_id.as_deref(),
+        Some(chatgpt_account_id.as_str()),
+        workspace_id.as_deref(),
+        Some(token_fingerprint.as_str()),
+    )?;
 
     let label = claims
         .as_ref()
@@ -341,11 +333,7 @@ fn import_single_item(
         .unwrap_or_else(|| format!("导入账号{:04}", sequence));
 
     let now = now_ts();
-    let existing_id = index.find_existing_account_id(
-        &logical_account_id,
-        subject_account_id.as_deref(),
-        Some(chatgpt_account_id.as_str()),
-    );
+    let existing_id = index.find_existing_account_id(&logical_account_id);
     let (account_id, account, created) = if let Some(existing_id) = existing_id {
         let existing = index
             .by_id
@@ -428,6 +416,9 @@ fn extract_token_payload(item: &Value) -> Result<ImportTokenPayload, String> {
 fn resolve_logical_account_id(
     payload: &ImportTokenPayload,
     subject_account_id: Option<&str>,
+    chatgpt_account_id: Option<&str>,
+    workspace_id: Option<&str>,
+    token_fingerprint: Option<&str>,
 ) -> Result<String, String> {
     let account_id_hint = payload.account_id_hint.as_deref().map(str::trim).filter(|v| !v.is_empty());
     let hint_suffix = account_id_hint.and_then(|value| {
@@ -438,14 +429,32 @@ fn resolve_logical_account_id(
     });
 
     if let Some(sub) = subject_account_id.map(str::trim).filter(|v| !v.is_empty()) {
-        return Ok(account_key(sub, hint_suffix));
+        let mut identity_parts: Vec<String> = Vec::new();
+        if let Some(v) = chatgpt_account_id.map(str::trim).filter(|v| !v.is_empty()) {
+            identity_parts.push(v.to_string());
+        } else if let Some(v) = workspace_id.map(str::trim).filter(|v| !v.is_empty()) {
+            identity_parts.push(v.to_string());
+        } else if let Some(v) = hint_suffix {
+            identity_parts.push(v.to_string());
+        }
+        if let Some(fp) = token_fingerprint.map(str::trim).filter(|v| !v.is_empty()) {
+            identity_parts.push(format!("fp_{fp}"));
+        }
+        let identity_hint = if identity_parts.is_empty() {
+            None
+        } else {
+            Some(identity_parts.join("|"))
+        };
+        return Ok(account_key(sub, identity_hint.as_deref()));
     }
 
     if let Some(value) = account_id_hint {
         return Ok(value.to_string());
     }
 
-    if let Some(value) = extract_chatgpt_account_id(&payload.id_token)
+    if let Some(value) = chatgpt_account_id
+        .map(str::to_string)
+        .or_else(|| extract_chatgpt_account_id(&payload.id_token))
         .or_else(|| extract_chatgpt_account_id(&payload.access_token))
     {
         let normalized = value.trim().to_string();
@@ -454,7 +463,22 @@ fn resolve_logical_account_id(
         }
     }
 
+    if let Some(value) = workspace_id.map(str::trim).filter(|v| !v.is_empty()) {
+        return Ok(value.to_string());
+    }
+
     Err("unable to resolve account id from tokens.account_id / id_token / access_token".to_string())
+}
+
+fn token_fingerprint(refresh_token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(refresh_token.as_bytes());
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(12);
+    for b in digest.iter().take(6) {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
 }
 
 fn required_string(value: &Value, key: &str) -> Result<String, String> {

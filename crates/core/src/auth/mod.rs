@@ -108,6 +108,26 @@ pub fn extract_workspace_id(token: &str) -> Option<String> {
         .get("https://api.openai.com/auth")
         .and_then(|v| v.as_object())
     {
+        if let Some(orgs) = auth.get("organizations").and_then(|v| v.as_array()) {
+            if let Some(default_org) = orgs.iter().find(|item| {
+                item.get("is_default")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            }) {
+                if let Some(v) = default_org.get("id").and_then(|v| v.as_str()) {
+                    if !v.trim().is_empty() {
+                        return Some(v.to_string());
+                    }
+                }
+            }
+            if let Some(first_org) = orgs.first() {
+                if let Some(v) = first_org.get("id").and_then(|v| v.as_str()) {
+                    if !v.trim().is_empty() {
+                        return Some(v.to_string());
+                    }
+                }
+            }
+        }
         for key in keys {
             if let Some(v) = auth.get(key).and_then(|v| v.as_str()) {
                 if !v.trim().is_empty() {

@@ -66,12 +66,38 @@ fn normalize_key_part(value: Option<&str>) -> Option<String> {
     Some(value.replace("::", "_"))
 }
 
+fn compact_key_part(value: &str) -> String {
+    // 对过长/复杂后缀做短哈希，避免账号ID过长且保留稳定唯一性。
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let should_hash = trimmed.len() > 16
+        || trimmed.contains('|')
+        || trimmed.contains('-')
+        || trimmed.contains(' ');
+    if !should_hash {
+        return trimmed.to_string();
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(trimmed.as_bytes());
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(12);
+    for b in digest.iter().take(6) {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
+}
+
 pub(crate) fn account_key(account_id: &str, tags: Option<&str>) -> String {
     // 组合账号与标签，生成稳定的账户唯一标识
     let mut parts = Vec::new();
     parts.push(account_id.to_string());
     if let Some(value) = normalize_key_part(tags) {
-        parts.push(value);
+        let compact = compact_key_part(&value);
+        if !compact.is_empty() {
+            parts.push(compact);
+        }
     }
     parts.join("::")
 }

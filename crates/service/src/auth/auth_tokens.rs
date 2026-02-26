@@ -73,6 +73,82 @@ fn clean_value(value: Option<String>) -> Option<String> {
     }
 }
 
+fn normalize_id_part(value: Option<&str>) -> Option<String> {
+    let raw = value?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw.replace("::", "_"))
+}
+
+fn build_account_storage_id(
+    subject_account_id: &str,
+    identity_hint: Option<&str>,
+    tags: Option<&str>,
+) -> String {
+    let base = subject_account_id.trim();
+    let mut suffix_parts: Vec<String> = Vec::new();
+    let normalized_hint = normalize_id_part(identity_hint);
+    if let Some(hint) = normalized_hint {
+        if hint != base {
+            suffix_parts.push(hint);
+        }
+    }
+    if let Some(tag) = normalize_id_part(tags) {
+        suffix_parts.push(tag);
+    }
+    if suffix_parts.is_empty() {
+        return base.to_string();
+    }
+    format!("{base}::{}", suffix_parts.join("|"))
+}
+
+fn pick_existing_account_id_by_identity(
+    storage: &codexmanager_core::storage::Storage,
+    chatgpt_account_id: Option<&str>,
+    workspace_id: Option<&str>,
+    fallback_subject_key: &str,
+) -> Option<String> {
+    let preferred_chatgpt = chatgpt_account_id
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let preferred_workspace = workspace_id
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+
+    let accounts = storage.list_accounts().ok()?;
+    if let Some(chatgpt_id) = preferred_chatgpt.as_ref() {
+        if let Some(found) = accounts.iter().find(|acc| {
+            acc.chatgpt_account_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                == Some(chatgpt_id.as_str())
+        }) {
+            return Some(found.id.clone());
+        }
+        return None;
+    }
+    if let Some(workspace) = preferred_workspace.as_ref() {
+        if let Some(found) = accounts.iter().find(|acc| {
+            acc.workspace_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                == Some(workspace.as_str())
+        }) {
+            return Some(found.id.clone());
+        }
+        return None;
+    }
+    if accounts.iter().any(|acc| acc.id == fallback_subject_key) {
+        return Some(fallback_subject_key.to_string());
+    }
+    None
+}
+
 fn openai_auth_http_client() -> &'static Client {
     OPENAI_AUTH_HTTP_CLIENT.get_or_init(|| {
         Client::builder()
@@ -129,8 +205,8 @@ pub(crate) fn complete_login_with_redirect(
     })?;
 
     // 生成账户记录
-    let account_id = claims.sub.clone();
-    let label = claims.email.clone().unwrap_or_else(|| account_id.clone());
+    let subject_account_id = claims.sub.clone();
+    let label = claims.email.clone().unwrap_or_else(|| subject_account_id.clone());
     let chatgpt_account_id = clean_value(
         claims
             .auth
@@ -138,7 +214,7 @@ pub(crate) fn complete_login_with_redirect(
             .and_then(|auth| auth.chatgpt_account_id.clone())
             .or_else(|| extract_chatgpt_account_id(&tokens.id_token))
             .or_else(|| extract_chatgpt_account_id(&tokens.access_token))
-            .or_else(|| Some(account_id.clone())),
+            .or_else(|| Some(subject_account_id.clone())),
     );
     let workspace_id = clean_value(
         claims
@@ -148,7 +224,21 @@ pub(crate) fn complete_login_with_redirect(
             .or_else(|| extract_workspace_id(&tokens.access_token))
             .or_else(|| chatgpt_account_id.clone()),
     );
-    let account_key = account_key(&account_id, session.tags.as_deref());
+    let fallback_subject_key = account_key(&subject_account_id, session.tags.as_deref());
+    let account_storage_id = build_account_storage_id(
+        &subject_account_id,
+        chatgpt_account_id
+            .as_deref()
+            .or(workspace_id.as_deref()),
+        session.tags.as_deref(),
+    );
+    let account_key = pick_existing_account_id_by_identity(
+        &storage,
+        chatgpt_account_id.as_deref(),
+        workspace_id.as_deref(),
+        &fallback_subject_key,
+    )
+    .unwrap_or(account_storage_id);
     let account = Account {
         id: account_key.clone(),
         label,
