@@ -149,6 +149,18 @@ Parameters (with defaults):
 - `-TimeoutMin <n>`: timeout minutes, default `60`
 - `-DryRun`: print plan only
 
+### `scripts/bump-version.ps1` (Unified Version Bump)
+Use this to bump release version in one command instead of editing multiple files manually.
+
+```powershell
+pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
+```
+
+It updates:
+- root `Cargo.toml` workspace version
+- `apps/src-tauri/Cargo.toml`
+- `apps/src-tauri/tauri.conf.json`
+
 ## Environment Variables (Complete)
 ### Load Rules and Precedence
 - Desktop app loads env files from executable directory in this order:

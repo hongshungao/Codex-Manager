@@ -163,6 +163,18 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
 - `-TimeoutMin <n>`：超时分钟数，默认 `60`
 - `-DryRun`：仅打印执行计划
 
+### `scripts/bump-version.ps1`（统一版本号）
+用于一次性更新发版版本号，避免手改多个文件。
+
+```powershell
+pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
+```
+
+会同步更新：
+- 根 `Cargo.toml` 的 workspace 版本
+- `apps/src-tauri/Cargo.toml`
+- `apps/src-tauri/tauri.conf.json`
+
 ## 环境变量说明（完整）
 ### 加载与优先级
 - 桌面端会在可执行文件同目录按顺序查找环境文件：`codexmanager.env` -> `CodexManager.env` -> `.env`（命中第一个即停止）。
