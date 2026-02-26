@@ -13,7 +13,11 @@
 A local desktop + service toolkit for managing a Codex-compatible ChatGPT account pool, usage, and platform keys, with a built-in local gateway.
 
 ## Recent Changes
-- `v0.1.x` summary (latest release)
+- `v0.1.2` (latest)
+- Added Azure OpenAI protocol support: platform keys can now use `azure_openai` with dedicated endpoint configuration and Azure API key authentication flow.
+- Added an Azure-specific upstream module (separate files) to keep OpenAI/Anthropic paths stable while introducing protocol-based routing.
+- Improved Platform Key modal UX: Azure setup now uses direct `Endpoint + API Key` inputs.
+- Improved Request Logs UX: when account info is missing, the account column now falls back to a key-prefix label instead of showing blank.
 - Startup speed optimization: startup now uses a local-first load path (accounts/usage/models from local storage first), with model list local cache plus background on-demand refresh (immediate pull when cache is empty, then periodic refresh), significantly reducing first-screen wait time.
 - Gateway modular refactor: `gateway` is now organized into `auth/core/request/routing/observability/upstream`, improving maintainability and troubleshooting speed.
 - Frontend interaction improvements: noticeable lag reduction in Accounts and Request Logs; filtering and refresh pipelines now use more stable async batching.
