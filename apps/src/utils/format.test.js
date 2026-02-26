@@ -57,19 +57,6 @@ test("calcAvailability maps backend unavailable status to unified label", () => 
   assert.equal(result.text, "不可用");
 });
 
-test("calcAvailability treats free account with only 7-day window as single-window available", () => {
-  const usage = {
-    accountId: "google-oauth2|123456::free",
-    usedPercent: 100,
-    windowMinutes: 300,
-    secondaryUsedPercent: 41,
-    secondaryWindowMinutes: 10080,
-  };
-  const result = calcAvailability(usage);
-  assert.equal(result.level, "ok");
-  assert.equal(result.text, "单窗口可用");
-});
-
 test("calcAvailability treats partial secondary fields as unavailable", () => {
   const usage = {
     usedPercent: 10,

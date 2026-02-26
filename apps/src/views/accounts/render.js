@@ -1,6 +1,6 @@
 import { state } from "../../state.js";
 import { dom } from "../../ui/dom.js";
-import { formatLimitLabel, formatTs, resolveUsageWindows } from "../../utils/format.js";
+import { formatLimitLabel, formatTs } from "../../utils/format.js";
 import { getRefreshAllProgress } from "../../services/management/account-actions.js";
 import {
   buildAccountDerivedMap,
@@ -158,21 +158,21 @@ function createAccountCell(account, accountDerived) {
   const mini = document.createElement("div");
   mini.className = "mini-usage";
   const usage = accountDerived?.usage || null;
-  const windows = resolveUsageWindows(usage);
-  const hasPrimaryWindow = windows.hasPrimaryWindow;
-  const hasSecondaryWindow = windows.hasSecondaryWindow;
+  const hasPrimaryWindow = usage?.usedPercent != null && usage?.windowMinutes != null;
+  const hasSecondaryWindow =
+    usage?.secondaryUsedPercent != null
+    || usage?.secondaryWindowMinutes != null;
 
   if (hasPrimaryWindow) {
-    const primaryLabel = formatLimitLabel(windows.primaryWindow, "5小时");
+    const primaryLabel = formatLimitLabel(usage?.windowMinutes, "5小时");
     mini.appendChild(
       renderMiniUsageLine(primaryLabel, primaryRemain, false),
     );
   }
 
   if (hasSecondaryWindow) {
-    const secondaryAsPrimary = !hasPrimaryWindow;
     mini.appendChild(
-      renderMiniUsageLine("7天", secondaryRemain, !secondaryAsPrimary),
+      renderMiniUsageLine("7天", secondaryRemain, true),
     );
   }
   accountWrap.appendChild(mini);

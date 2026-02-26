@@ -6,7 +6,6 @@ import {
   computeUsageStats,
   formatCompactNumber,
   formatTs,
-  resolveUsageWindows,
 } from "../utils/format";
 import { buildProgressLine } from "./dashboard-progress";
 import { renderRecommendations } from "./dashboard-recommendations";
@@ -127,22 +126,19 @@ function renderCurrentAccount(accounts, usageMap, requestLogs) {
 
   const usageWrap = document.createElement("div");
   usageWrap.className = "mini-usage";
-  const windows = resolveUsageWindows(usage);
-  if (windows.hasPrimaryWindow) {
-    const primaryLabel = formatLimitLabel(windows.primaryWindow, "5小时");
-    usageWrap.appendChild(
-      buildProgressLine(primaryLabel, usage ? usage.usedPercent : null, usage?.resetsAt, false),
-    );
-  }
-  const hasSecondaryWindow = windows.hasSecondaryWindow;
+  const primaryLabel = formatLimitLabel(usage?.windowMinutes, "5小时");
+  usageWrap.appendChild(
+    buildProgressLine(primaryLabel, usage ? usage.usedPercent : null, usage?.resetsAt, false),
+  );
+  const hasSecondaryWindow = usage
+    && (usage.secondaryUsedPercent != null || usage.secondaryWindowMinutes != null);
   if (hasSecondaryWindow) {
-    const secondaryAsPrimary = !windows.hasPrimaryWindow;
     usageWrap.appendChild(
       buildProgressLine(
         "7天",
         usage ? usage.secondaryUsedPercent : null,
         usage?.secondaryResetsAt,
-        !secondaryAsPrimary,
+        true,
       ),
     );
   }
