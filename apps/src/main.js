@@ -621,7 +621,7 @@ async function refreshAll() {
     const results = await runRefreshTasks(
       [
         { name: "accounts", run: refreshAccounts },
-        { name: "usage", run: refreshUsageList },
+        { name: "usage", run: () => refreshUsageList({ refreshRemote: true }) },
         { name: "api-models", run: refreshApiModels },
         { name: "api-keys", run: refreshApiKeys },
         { name: "request-logs", run: () => refreshRequestLogs(state.requestLogQuery) },
@@ -717,6 +717,7 @@ const {
   handleClearRequestLogs,
   updateAccountSort,
   deleteAccount,
+  importAccountsFromFiles,
   handleOpenUsageModal,
   refreshUsageForAccount,
   createApiKey,
@@ -764,6 +765,7 @@ function bindEvents() {
     ensureConnected,
     refreshApiModels,
     populateApiKeyModelSelect,
+    importAccountsFromFiles,
     toggleThemePanel,
     closeThemePanel,
     setTheme,

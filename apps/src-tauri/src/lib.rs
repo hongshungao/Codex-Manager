@@ -96,6 +96,22 @@ async fn service_account_update(
 }
 
 #[tauri::command]
+async fn service_account_import(
+  addr: Option<String>,
+  contents: Option<Vec<String>>,
+  content: Option<String>,
+) -> Result<serde_json::Value, String> {
+  let mut payload_contents = contents.unwrap_or_default();
+  if let Some(single) = content {
+    if !single.trim().is_empty() {
+      payload_contents.push(single);
+    }
+  }
+  let params = serde_json::json!({ "contents": payload_contents });
+  rpc_call_in_background("account/import", addr, Some(params)).await
+}
+
+#[tauri::command]
 async fn local_account_delete(
   app: tauri::AppHandle,
   account_id: String,
@@ -345,6 +361,7 @@ pub fn run() {
       service_account_list,
       service_account_delete,
       service_account_update,
+      service_account_import,
       local_account_delete,
       service_usage_read,
       service_usage_list,

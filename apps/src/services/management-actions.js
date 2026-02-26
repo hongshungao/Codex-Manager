@@ -48,6 +48,7 @@ export function createManagementActions({
     ensureConnected,
     openUsageModal,
     renderUsageSnapshot,
+    renderAccountsView,
   });
 
   const apiKeyActions = createApiKeyActions({

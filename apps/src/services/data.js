@@ -75,7 +75,11 @@ export async function refreshAccounts() {
 }
 
 // 刷新用量列表
-export async function refreshUsageList() {
+export async function refreshUsageList(options = {}) {
+  const refreshRemote = options && options.refreshRemote === true;
+  if (refreshRemote) {
+    await ensureRpcSuccess(await api.serviceUsageRefresh(), "刷新用量失败");
+  }
   const res = ensureRpcSuccess(await api.serviceUsageList(), "读取用量列表失败");
   state.usageList = Array.isArray(res.items) ? res.items : [];
 }

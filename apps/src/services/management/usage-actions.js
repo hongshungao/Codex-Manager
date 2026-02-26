@@ -6,6 +6,7 @@ export function createUsageActions({
   ensureConnected,
   openUsageModal,
   renderUsageSnapshot,
+  renderAccountsView,
 }) {
   async function handleOpenUsageModal(account) {
     openUsageModal(account);
@@ -21,6 +22,19 @@ export function createUsageActions({
       await api.serviceUsageRefresh(state.currentUsageAccount.id);
       const res = await api.serviceUsageRead(state.currentUsageAccount.id);
       const snap = res ? res.snapshot : null;
+      if (snap) {
+        const accountId = state.currentUsageAccount.id;
+        const next = Array.isArray(state.usageList) ? [...state.usageList] : [];
+        const idx = next.findIndex((item) => item && item.accountId === accountId);
+        const normalized = { ...snap, accountId };
+        if (idx >= 0) {
+          next[idx] = normalized;
+        } else {
+          next.push(normalized);
+        }
+        state.usageList = next;
+        renderAccountsView?.();
+      }
       renderUsageSnapshot(snap);
     } catch (err) {
       dom.usageDetail.textContent = String(err);

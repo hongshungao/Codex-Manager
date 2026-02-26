@@ -20,6 +20,8 @@ mod account_list;
 mod account_delete;
 #[path = "account/account_update.rs"]
 mod account_update;
+#[path = "account/account_import.rs"]
+mod account_import;
 #[path = "apikey/apikey_list.rs"]
 mod apikey_list;
 #[path = "apikey/apikey_create.rs"]

@@ -78,6 +78,10 @@ export async function serviceAccountUpdate(accountId, sort) {
   return invoke("service_account_update", withAddr({ accountId, sort }));
 }
 
+export async function serviceAccountImport(contents) {
+  return invoke("service_account_import", withAddr({ contents }));
+}
+
 export async function localAccountDelete(accountId) {
   return invoke("local_account_delete", { accountId });
 }

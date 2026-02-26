@@ -19,6 +19,7 @@ export function bindModalActionEvents({
   ensureConnected,
   refreshApiModels,
   populateApiKeyModelSelect,
+  importAccountsFromFiles,
 }) {
   if (modalActionEventsBound) {
     return;
@@ -26,6 +27,16 @@ export function bindModalActionEvents({
   modalActionEventsBound = true;
 
   if (dom.addAccountBtn) dom.addAccountBtn.addEventListener("click", openAccountModal);
+  if (dom.importAccountsBtn && dom.importAccountsInput) {
+    dom.importAccountsBtn.addEventListener("click", () => {
+      dom.importAccountsInput.click();
+    });
+    dom.importAccountsInput.addEventListener("change", (event) => {
+      const files = event?.target?.files;
+      void importAccountsFromFiles?.(files);
+      event.target.value = "";
+    });
+  }
   if (dom.createApiKeyBtn) dom.createApiKeyBtn.addEventListener("click", async () => {
     openApiKeyModal();
     // 中文注释：先用本地缓存秒开；仅在模型列表为空时再后台懒加载，避免弹窗开关被网络拖慢。

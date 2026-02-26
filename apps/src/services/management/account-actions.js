@@ -59,5 +59,48 @@ export function createAccountActions({
     }
   }
 
-  return { updateAccountSort, deleteAccount };
+  async function importAccountsFromFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const ok = await ensureConnected();
+    if (!ok) return;
+
+    const contents = (await Promise.all(
+      files.map(async (file) => {
+        try {
+          return await file.text();
+        } catch {
+          return "";
+        }
+      }),
+    ))
+      .map((item) => String(item || "").trim())
+      .filter((item) => item.length > 0);
+
+    if (!contents.length) {
+      showToast("未读取到可导入内容", "error");
+      return;
+    }
+
+    const res = await api.serviceAccountImport(contents);
+    if (res && res.error) {
+      showToast(res.error || "导入失败", "error");
+      return;
+    }
+    const total = Number(res?.total || 0);
+    const created = Number(res?.created || 0);
+    const updated = Number(res?.updated || 0);
+    const failed = Number(res?.failed || 0);
+
+    await refreshAccountsSection();
+    showToast(`导入完成：共${total}，新增${created}，更新${updated}，失败${failed}`);
+    if (failed > 0 && Array.isArray(res?.errors) && res.errors.length > 0) {
+      const first = res.errors[0];
+      const index = Number(first?.index || 0);
+      const message = String(first?.message || "unknown error");
+      showToast(`首个失败项 #${index}: ${message}`, "error");
+    }
+  }
+
+  return { updateAccountSort, deleteAccount, importAccountsFromFiles };
 }

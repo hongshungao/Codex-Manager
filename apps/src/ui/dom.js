@@ -77,6 +77,8 @@ export const dom = {
   confirmOk: byId("confirmOk"),
   confirmCancel: byId("confirmCancel"),
   addAccountBtn: byId("addAccount"),
+  importAccountsBtn: byId("importAccounts"),
+  importAccountsInput: byId("importAccountsInput"),
   createApiKeyBtn: byId("createApiKey"),
   inputNote: byId("inputNote"),
   inputTags: byId("inputTags"),

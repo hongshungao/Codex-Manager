@@ -1,6 +1,6 @@
 use codexmanager_core::rpc::types::{AccountListResult, JsonRpcRequest, JsonRpcResponse};
 
-use crate::{account_delete, account_list, account_update, auth_login, auth_tokens};
+use crate::{account_delete, account_import, account_list, account_update, auth_login, auth_tokens};
 
 pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
     let result = match req.method.as_str() {
@@ -15,6 +15,27 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             let account_id = super::str_param(req, "accountId").unwrap_or("");
             let sort = super::i64_param(req, "sort").unwrap_or(0);
             super::ok_or_error(account_update::update_account_sort(account_id, sort))
+        }
+        "account/import" => {
+            let mut contents = req
+                .params
+                .as_ref()
+                .and_then(|params| params.get("contents"))
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if let Some(content) = super::string_param(req, "content") {
+                if !content.trim().is_empty() {
+                    contents.push(content);
+                }
+            }
+            super::value_or_error(account_import::import_account_auth_json(contents))
         }
         "account/login/start" => {
             let login_type = super::str_param(req, "type").unwrap_or("chatgpt");
