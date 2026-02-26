@@ -15,8 +15,10 @@ test("main refresh flow uses centralized refresh helpers", () => {
 });
 
 test("refreshAll renders current page only", () => {
-  const refreshAllStart = mainJs.indexOf("async function refreshAll()");
+  const refreshAllStart = mainJs.indexOf("async function refreshAll(");
   const refreshAllEnd = mainJs.indexOf("async function refreshAccountsAndUsage()", refreshAllStart);
+  assert.notEqual(refreshAllStart, -1, "refreshAll should exist");
+  assert.notEqual(refreshAllEnd, -1, "refreshAccountsAndUsage should exist");
   const refreshAllSource = mainJs.slice(refreshAllStart, refreshAllEnd);
 
   assert.ok(refreshAllSource.includes("renderCurrentPageView"), "refreshAll should render current page");
@@ -24,8 +26,10 @@ test("refreshAll renders current page only", () => {
 });
 
 test("refreshAll uses single-flight guard", () => {
-  const refreshAllStart = mainJs.indexOf("async function refreshAll()");
+  const refreshAllStart = mainJs.indexOf("async function refreshAll(");
   const refreshAllEnd = mainJs.indexOf("async function refreshAccountsAndUsage()", refreshAllStart);
+  assert.notEqual(refreshAllStart, -1, "refreshAll should exist");
+  assert.notEqual(refreshAllEnd, -1, "refreshAccountsAndUsage should exist");
   const refreshAllSource = mainJs.slice(refreshAllStart, refreshAllEnd);
 
   assert.ok(mainJs.includes("let refreshAllInFlight = null"), "main.js should define refreshAll single-flight state");

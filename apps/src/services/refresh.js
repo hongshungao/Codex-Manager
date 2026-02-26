@@ -1,4 +1,4 @@
-const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 30000;
+const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 60000;
 
 export async function runRefreshTasks(tasks, onTaskError) {
   const taskList = Array.isArray(tasks) ? tasks : [];
@@ -7,7 +7,10 @@ export async function runRefreshTasks(tasks, onTaskError) {
   );
 
   return settled.map((result, index) => {
-    const taskName = taskList[index] && taskList[index].name ? taskList[index].name : `task-${index}`;
+    const taskName =
+      taskList[index] && taskList[index].name
+        ? taskList[index].name
+        : `task-${index}`;
     if (result.status === "rejected" && typeof onTaskError === "function") {
       onTaskError(taskName, result.reason);
     }
@@ -18,7 +21,11 @@ export async function runRefreshTasks(tasks, onTaskError) {
   });
 }
 
-export function ensureAutoRefreshTimer(stateRef, onTick, intervalMs = DEFAULT_AUTO_REFRESH_INTERVAL_MS) {
+export function ensureAutoRefreshTimer(
+  stateRef,
+  onTick,
+  intervalMs = DEFAULT_AUTO_REFRESH_INTERVAL_MS,
+) {
   if (!stateRef || typeof onTick !== "function") {
     return false;
   }
@@ -46,4 +53,3 @@ export function stopAutoRefreshTimer(stateRef) {
   stateRef.autoRefreshTimer = null;
   return true;
 }
-

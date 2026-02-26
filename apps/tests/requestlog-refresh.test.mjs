@@ -37,8 +37,8 @@ async function importDataServiceModule() {
   const stateUrl = pathToFileURL(path.resolve(servicesDir, "../state.js")).href;
   const apiUrl = pathToFileURL(path.resolve(servicesDir, "../api.js")).href;
   let source = await readFile(dataPath, "utf8");
-  source = source.replace('from "../state";', `from "${stateUrl}";`);
-  source = source.replace('from "../api";', `from "${apiUrl}";`);
+  source = source.replace(/from\s+"..\/state(?:\.js)?";/g, `from "${stateUrl}";`);
+  source = source.replace(/from\s+"..\/api(?:\.js)?";/g, `from "${apiUrl}";`);
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
   return import(moduleUrl);
 }
