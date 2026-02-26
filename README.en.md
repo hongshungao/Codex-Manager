@@ -13,14 +13,16 @@
 A local desktop + service toolkit for managing a Codex-compatible ChatGPT account pool, usage, and platform keys, with a built-in local gateway.
 
 ## Recent Changes
-- UI previews refreshed: dashboard/accounts/platform key/request logs/settings screenshots in `assets/images` now match the latest interface.
-- Gateway protocol adapter was further modularized: request mapping and response conversion were split, and response conversion is now separated into JSON/SSE modules.
-- Backend routing boundaries were unified to reduce duplicated gateway/proxy dispatch logic.
-- Stability hardening: frontend refresh flow and request-log race handling were improved; clipboard fallback behavior was unified (clipboard API + execCommand fallback).
-- Security and runtime controls were strengthened: `/rpc` token auth is enforced; request-gate budget, upstream connect timeout, proxy body size, and account inflight limits are configurable.
-- Observability was expanded: route/status_class/protocol metrics were refined, and RPC + usage-refresh metrics were added.
-- Release engineering was hardened while staying manual-only: release workflow includes optional verify gate (`run_verify`), target SHA resolution, and release metadata output.
-- `scripts/rebuild.ps1` is aligned with workflow inputs (`tag/ref/run_verify`) and now matches runs by `head_sha`.
+- `v0.1.x` summary (latest release)
+- Startup speed optimization: startup now uses a local-first load path (accounts/usage/models from local storage first), with model list local cache plus background on-demand refresh (immediate pull when cache is empty, then periodic refresh), significantly reducing first-screen wait time.
+- Gateway modular refactor: `gateway` is now organized into `auth/core/request/routing/observability/upstream`, improving maintainability and troubleshooting speed.
+- Frontend interaction improvements: noticeable lag reduction in Accounts and Request Logs; filtering and refresh pipelines now use more stable async batching.
+- Refresh UX upgrade: “Refresh All” now shows progress (completed/remaining) with stable busy-state handling to avoid “clicked but no feedback” perception.
+- Account import enhancement: large-batch imports are processed in chunks; default import group is `IMPORT`; empty group values are auto-filled.
+- Usage status unification: backend now exposes a unified availability enum and frontend maps it to consistent labels (`Available / Single-window available / Unavailable / Unknown`).
+- Request logs responsive optimization: narrow screens hide secondary columns by priority while preserving core fields (account/path/model/status).
+- Button and layout consistency: unified sizing for page buttons, row action buttons, and modal buttons; Accounts and Dashboard content widths are aligned.
+- Release flow remains manual-only and further standardized: `release-windows.yml`, `release-linux.yml`, and `release-macos-beta.yml`; Linux cache strategy is additionally optimized.
 
 ## Features
 - Account pool management: group, tag, sort, note

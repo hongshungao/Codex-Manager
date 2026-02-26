@@ -80,6 +80,7 @@ export const dom = {
   importAccountsBtn: byId("importAccounts"),
   importAccountsInput: byId("importAccountsInput"),
   createApiKeyBtn: byId("createApiKey"),
+  refreshApiModelsBtn: byId("refreshApiModels"),
   inputNote: byId("inputNote"),
   inputTags: byId("inputTags"),
   inputGroup: byId("inputGroup"),

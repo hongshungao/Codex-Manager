@@ -26,7 +26,10 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             let key_id = super::str_param(req, "id").unwrap_or("");
             super::value_or_error(apikey_read_secret::read_api_key_secret(key_id))
         }
-        "apikey/models" => super::value_or_error(apikey_models::read_model_options()),
+        "apikey/models" => {
+            let refresh_remote = super::bool_param(req, "refreshRemote").unwrap_or(false);
+            super::value_or_error(apikey_models::read_model_options(refresh_remote))
+        }
         "apikey/updateModel" => {
             let key_id = super::str_param(req, "id").unwrap_or("");
             let model_slug = super::string_param(req, "modelSlug");

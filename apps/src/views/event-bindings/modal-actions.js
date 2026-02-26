@@ -18,6 +18,7 @@ export function bindModalActionEvents({
   createApiKey,
   ensureConnected,
   refreshApiModels,
+  refreshApiModelsNow,
   populateApiKeyModelSelect,
   importAccountsFromFiles,
 }) {
@@ -37,6 +38,12 @@ export function bindModalActionEvents({
       event.target.value = "";
     });
   }
+  if (dom.refreshApiModelsBtn) {
+    dom.refreshApiModelsBtn.addEventListener("click", () => {
+      void refreshApiModelsNow?.();
+    });
+  }
+
   if (dom.createApiKeyBtn) dom.createApiKeyBtn.addEventListener("click", async () => {
     openApiKeyModal();
     // 中文注释：先用本地缓存秒开；仅在模型列表为空时再后台懒加载，避免弹窗开关被网络拖慢。
@@ -47,7 +54,11 @@ export function bindModalActionEvents({
     const ok = await ensureConnected();
     if (!ok || currentSeq !== apiModelLoadSeq) return;
     try {
-      await refreshApiModels();
+      if (typeof refreshApiModelsNow === "function") {
+        await refreshApiModelsNow({ silent: true, button: null });
+      } else {
+        await refreshApiModels({ refreshRemote: true });
+      }
     } catch (err) {
       showToast(`模型列表刷新失败：${err instanceof Error ? err.message : String(err)}`, "error");
       return;

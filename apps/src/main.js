@@ -6,6 +6,7 @@ import "./styles/responsive.css";
 import {
   serviceGatewayRouteStrategyGet,
   serviceGatewayRouteStrategySet,
+  serviceUsageRefresh,
   updateCheck,
   updateDownload,
   updateInstall,
@@ -82,6 +83,8 @@ const UPDATE_AUTO_CHECK_STORAGE_KEY = "codexmanager.update.auto_check";
 const ROUTE_STRATEGY_STORAGE_KEY = "codexmanager.gateway.route_strategy";
 const ROUTE_STRATEGY_ORDERED = "ordered";
 const ROUTE_STRATEGY_BALANCED = "balanced";
+const API_MODELS_REMOTE_REFRESH_STORAGE_KEY = "codexmanager.apikey.models.last_remote_refresh_at";
+const API_MODELS_REMOTE_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_DELAY_MS = 1200;
 let refreshAllInFlight = null;
 let refreshAllProgressClearTimer = null;
@@ -89,14 +92,19 @@ let updateCheckInFlight = null;
 let pendingUpdateCandidate = null;
 let routeStrategySyncInFlight = null;
 let routeStrategySyncedProbeId = -1;
-const REFRESH_ALL_TASKS = [
-  { name: "accounts", label: "账号列表", run: refreshAccounts },
-  { name: "usage", label: "账号用量", run: () => refreshUsageList({ refreshRemote: true }) },
-  { name: "api-models", label: "模型列表", run: refreshApiModels },
-  { name: "api-keys", label: "平台 Key", run: refreshApiKeys },
-  { name: "request-logs", label: "请求日志", run: () => refreshRequestLogs(state.requestLogQuery) },
-  { name: "request-log-today-summary", label: "今日摘要", run: refreshRequestLogTodaySummary },
-];
+let apiModelsRemoteRefreshInFlight = null;
+function buildRefreshAllTasks(options = {}) {
+  const refreshRemoteUsage = options.refreshRemoteUsage === true;
+  const refreshRemoteModels = options.refreshRemoteModels === true;
+  return [
+    { name: "accounts", label: "账号列表", run: refreshAccounts },
+    { name: "usage", label: "账号用量", run: () => refreshUsageList({ refreshRemote: refreshRemoteUsage }) },
+    { name: "api-models", label: "模型列表", run: () => refreshApiModels({ refreshRemote: refreshRemoteModels }) },
+    { name: "api-keys", label: "平台 Key", run: refreshApiKeys },
+    { name: "request-logs", label: "请求日志", run: () => refreshRequestLogs(state.requestLogQuery) },
+    { name: "request-log-today-summary", label: "今日摘要", run: refreshRequestLogTodaySummary },
+  ];
+}
 
 function isTauriRuntime() {
   return Boolean(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
@@ -621,12 +629,76 @@ function nextPaintTick() {
   });
 }
 
-async function refreshAll() {
+function readLastApiModelsRemoteRefreshAt() {
+  if (typeof localStorage === "undefined") {
+    return 0;
+  }
+  const raw = localStorage.getItem(API_MODELS_REMOTE_REFRESH_STORAGE_KEY);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function writeLastApiModelsRemoteRefreshAt(ts = Date.now()) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  localStorage.setItem(API_MODELS_REMOTE_REFRESH_STORAGE_KEY, String(Math.max(0, Math.floor(ts))));
+}
+
+function shouldRefreshApiModelsRemote(force = false) {
+  if (force) {
+    return true;
+  }
+  const hasLocalCache = Array.isArray(state.apiModelOptions) && state.apiModelOptions.length > 0;
+  if (!hasLocalCache) {
+    return true;
+  }
+  const lastRefreshAt = readLastApiModelsRemoteRefreshAt();
+  if (lastRefreshAt <= 0) {
+    return true;
+  }
+  return (Date.now() - lastRefreshAt) >= API_MODELS_REMOTE_REFRESH_INTERVAL_MS;
+}
+
+async function maybeRefreshApiModelsCache(options = {}) {
+  const force = options && options.force === true;
+  if (!shouldRefreshApiModelsRemote(force)) {
+    return false;
+  }
+  if (apiModelsRemoteRefreshInFlight) {
+    return apiModelsRemoteRefreshInFlight;
+  }
+  apiModelsRemoteRefreshInFlight = (async () => {
+    const connected = await ensureConnected();
+    if (!connected) {
+      return false;
+    }
+    await refreshApiModels({ refreshRemote: true });
+    writeLastApiModelsRemoteRefreshAt(Date.now());
+    if (dom.modalApiKey && dom.modalApiKey.classList.contains("active")) {
+      populateApiKeyModelSelect();
+    }
+    if (state.currentPage === "apikeys") {
+      renderCurrentPageView("apikeys");
+    }
+    return true;
+  })();
+  try {
+    return await apiModelsRemoteRefreshInFlight;
+  } catch (err) {
+    console.error("[api-models] remote refresh failed", err);
+    return false;
+  } finally {
+    apiModelsRemoteRefreshInFlight = null;
+  }
+}
+
+async function refreshAll(options = {}) {
   if (refreshAllInFlight) {
     return refreshAllInFlight;
   }
   refreshAllInFlight = (async () => {
-    const tasks = REFRESH_ALL_TASKS;
+    const tasks = buildRefreshAllTasks(options);
     const total = tasks.length;
     let completed = 0;
     const setProgress = (next) => {
@@ -664,6 +736,12 @@ async function refreshAll() {
         ...result,
       };
     });
+    if (options.refreshRemoteModels === true) {
+      const modelTask = results.find((item) => item.name === "api-models");
+      if (modelTask && modelTask.status === "fulfilled") {
+        writeLastApiModelsRemoteRefreshAt(Date.now());
+      }
+    }
     // 中文注释：并行刷新时允许“部分失败部分成功”，否则某个慢/失败接口会拖垮整页刷新体验。
     const hasFailedTask = results.some((item) => item.status === "rejected");
     if (hasFailedTask) {
@@ -694,13 +772,83 @@ async function handleRefreshAllClick() {
     }
     renderAccountsRefreshProgress(setRefreshAllProgress({
       active: true,
-      total: REFRESH_ALL_TASKS.length,
+      total: 1,
       completed: 0,
-      remaining: REFRESH_ALL_TASKS.length,
+      remaining: 1,
       lastTaskLabel: "",
     }));
     await nextPaintTick();
-    await refreshAll();
+    const ok = await ensureConnected();
+    serviceLifecycle.updateServiceToggle();
+    if (!ok) {
+      return;
+    }
+    let accounts = Array.isArray(state.accountList) ? state.accountList.filter((item) => item && item.id) : [];
+    if (accounts.length === 0) {
+      try {
+        await refreshAccounts();
+      } catch (err) {
+        console.error("[refreshUsageOnly] load accounts failed", err);
+      }
+      accounts = Array.isArray(state.accountList) ? state.accountList.filter((item) => item && item.id) : [];
+    }
+    const total = accounts.length;
+    if (total <= 0) {
+      renderAccountsRefreshProgress(setRefreshAllProgress({
+        active: true,
+        total: 1,
+        completed: 1,
+        remaining: 0,
+        lastTaskLabel: "无可刷新账号",
+      }));
+      return;
+    }
+    renderAccountsRefreshProgress(setRefreshAllProgress({
+      active: true,
+      total,
+      completed: 0,
+      remaining: total,
+      lastTaskLabel: "",
+    }));
+
+    let completed = 0;
+    let failed = 0;
+    try {
+      for (const account of accounts) {
+        const label = String(account.label || account.id || "").trim() || "未知账号";
+        try {
+          await serviceUsageRefresh(account.id);
+        } catch (err) {
+          failed += 1;
+          console.error(`[refreshUsageOnly] account refresh failed: ${account.id}`, err);
+        } finally {
+          completed += 1;
+          renderAccountsRefreshProgress(setRefreshAllProgress({
+            active: true,
+            total,
+            completed,
+            remaining: Math.max(0, total - completed),
+            lastTaskLabel: label,
+          }));
+        }
+      }
+      await refreshUsageList({ refreshRemote: false });
+      renderCurrentPageView("accounts");
+      if (failed > 0) {
+        showToast(`用量刷新完成，失败 ${failed}/${total}`, "error");
+      }
+    } catch (err) {
+      console.error("[refreshUsageOnly] failed", err);
+      showToast("账号用量刷新失败，请稍后重试", "error");
+    } finally {
+      if (refreshAllProgressClearTimer) {
+        clearTimeout(refreshAllProgressClearTimer);
+      }
+      refreshAllProgressClearTimer = setTimeout(() => {
+        renderAccountsRefreshProgress(clearRefreshAllProgress());
+        refreshAllProgressClearTimer = null;
+      }, 450);
+    }
   });
 }
 
@@ -733,6 +881,7 @@ const serviceLifecycle = createServiceLifecycle({
   stopService,
   waitForConnection,
   refreshAll,
+  maybeRefreshApiModelsCache,
   ensureAutoRefreshTimer,
   stopAutoRefreshTimer,
   onStartupState: (loading, message) => setStartupMask(loading, message),
@@ -779,6 +928,7 @@ const {
   toggleApiKeyStatus,
   updateApiKeyModel,
   copyApiKey,
+  refreshApiModelsNow,
 } = managementActions;
 
 function buildMainRenderActions() {
@@ -818,6 +968,7 @@ function bindEvents() {
     refreshAll: handleRefreshAllClick,
     ensureConnected,
     refreshApiModels,
+    refreshApiModelsNow,
     populateApiKeyModelSelect,
     importAccountsFromFiles,
     toggleThemePanel,

@@ -232,8 +232,9 @@ export async function serviceApiKeyCreate(name, modelSlug, reasoningEffort, prof
   }));
 }
 
-export async function serviceApiKeyModels() {
-  return invoke("service_apikey_models", withAddr());
+export async function serviceApiKeyModels(options = {}) {
+  const refreshRemote = options && options.refreshRemote === true;
+  return invoke("service_apikey_models", withAddr({ refreshRemote }));
 }
 
 export async function serviceApiKeyUpdateModel(keyId, modelSlug, reasoningEffort, profile = {}) {

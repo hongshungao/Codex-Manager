@@ -370,7 +370,7 @@ fn import_single_item(
                 .group_name
                 .clone()
                 .filter(|value| !value.trim().is_empty())
-                .or_else(|| Some("import".to_string())),
+                .or_else(|| Some("IMPORT".to_string())),
             sort: existing.sort,
             status: "active".to_string(),
             created_at: existing.created_at,
@@ -386,7 +386,7 @@ fn import_single_item(
             issuer: DEFAULT_ISSUER.to_string(),
             chatgpt_account_id: Some(chatgpt_account_id),
             workspace_id,
-            group_name: Some("import".to_string()),
+            group_name: Some("IMPORT".to_string()),
             sort: next_sort,
             status: "active".to_string(),
             created_at: now,

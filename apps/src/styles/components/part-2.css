@@ -345,13 +345,17 @@
 }
 
 /* 各页面主操作按钮统一为紧凑尺寸，避免视觉不一致。 */
-#pageApiKeys .panel-header > button,
+#pageApiKeys .api-keys-toolbar > button,
 #pageRequestLogs .toolbar-actions > button,
 #pageSettings .settings-row > button,
 #pageDashboard .dashboard-actions > button {
   padding: var(--btn-pad-y) var(--btn-pad-x);
   font-size: var(--btn-font-size);
   line-height: var(--btn-line-height);
+}
+
+#pageApiKeys .api-keys-toolbar {
+  justify-content: flex-end;
 }
 
 .table-wrap {

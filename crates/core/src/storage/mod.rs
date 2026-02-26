@@ -11,6 +11,7 @@ mod request_logs;
 mod request_token_stats;
 mod tokens;
 mod usage;
+mod model_options;
 
 #[derive(Debug, Clone)]
 pub struct Account {
@@ -130,6 +131,13 @@ pub struct ApiKey {
     pub status: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelOptionsCacheRecord {
+    pub scope: String,
+    pub items_json: String,
+    pub updated_at: i64,
 }
 
 #[derive(Debug)]
@@ -263,6 +271,10 @@ impl Storage {
             "023_request_token_stats_total_tokens",
             include_str!("../../migrations/023_request_token_stats_total_tokens.sql"),
             |s| s.ensure_request_token_stats_table(),
+        )?;
+        self.apply_sql_migration(
+            "024_model_options_cache",
+            include_str!("../../migrations/024_model_options_cache.sql"),
         )?;
         self.ensure_request_token_stats_table()?;
         Ok(())

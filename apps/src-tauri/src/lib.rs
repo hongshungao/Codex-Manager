@@ -268,8 +268,12 @@ async fn service_apikey_create(
 }
 
 #[tauri::command]
-async fn service_apikey_models(addr: Option<String>) -> Result<serde_json::Value, String> {
-  rpc_call_in_background("apikey/models", addr, None).await
+async fn service_apikey_models(
+  addr: Option<String>,
+  refresh_remote: Option<bool>,
+) -> Result<serde_json::Value, String> {
+  let params = refresh_remote.map(|value| serde_json::json!({ "refreshRemote": value }));
+  rpc_call_in_background("apikey/models", addr, params).await
 }
 
 #[tauri::command]

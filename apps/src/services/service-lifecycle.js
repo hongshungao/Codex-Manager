@@ -7,6 +7,7 @@ export function createServiceLifecycle({
   stopService,
   waitForConnection,
   refreshAll,
+  maybeRefreshApiModelsCache,
   ensureAutoRefreshTimer,
   stopAutoRefreshTimer,
   onStartupState,
@@ -101,8 +102,12 @@ export function createServiceLifecycle({
     if (fromBootstrap) {
       notifyStartupState(true, "正在加载账号与用量数据...");
     }
-    await refreshAll();
-    ensureAutoRefreshTimer(state, refreshAll);
+    await refreshAll({ refreshRemoteUsage: false, refreshRemoteModels: false });
+    void maybeRefreshApiModelsCache?.();
+    ensureAutoRefreshTimer(state, async () => {
+      await refreshAll({ refreshRemoteUsage: true, refreshRemoteModels: false });
+      void maybeRefreshApiModelsCache?.();
+    });
     if (fromBootstrap) notifyStartupState(false);
     return true;
   }
@@ -143,9 +148,13 @@ export function createServiceLifecycle({
     if (ok) {
       updateServiceToggle();
       notifyStartupState(true, "正在加载账号与用量数据...");
-      await refreshAll();
+      await refreshAll({ refreshRemoteUsage: false, refreshRemoteModels: false });
+      void maybeRefreshApiModelsCache?.();
       // 中文注释：探活成功后立即复用统一定时器入口，避免“已连通但未启动自动刷新”的状态分叉。
-      ensureAutoRefreshTimer(state, refreshAll);
+      ensureAutoRefreshTimer(state, async () => {
+        await refreshAll({ refreshRemoteUsage: true, refreshRemoteModels: false });
+        void maybeRefreshApiModelsCache?.();
+      });
       notifyStartupState(false);
       return true;
     }

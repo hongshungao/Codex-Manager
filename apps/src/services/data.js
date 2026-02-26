@@ -96,8 +96,12 @@ export async function refreshApiKeys() {
 }
 
 // 刷新模型下拉选项（来自平台上游 /v1/models）
-export async function refreshApiModels() {
-  const res = ensureRpcSuccess(await api.serviceApiKeyModels(), "读取模型列表失败");
+export async function refreshApiModels(options = {}) {
+  const refreshRemote = options && options.refreshRemote === true;
+  const res = ensureRpcSuccess(
+    await api.serviceApiKeyModels({ refreshRemote }),
+    "读取模型列表失败",
+  );
   state.apiModelOptions = Array.isArray(res.items) ? res.items : [];
 }
 

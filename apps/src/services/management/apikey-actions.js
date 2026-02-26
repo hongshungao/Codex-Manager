@@ -33,6 +33,28 @@ export function createApiKeyActions({
     }
   };
 
+  async function refreshApiModelsNow(options = {}) {
+    const silent = options && options.silent === true;
+    const hasButtonOption = options && Object.prototype.hasOwnProperty.call(options, "button");
+    const busyTarget = hasButtonOption ? options.button : dom.refreshApiModelsBtn;
+    const runner = async () => {
+      const ok = await ensureConnected();
+      if (!ok) return false;
+      await refreshApiModels({ refreshRemote: true });
+      populateApiKeyModelSelect();
+      renderApiKeyList();
+      if (!silent) {
+        showToast("模型列表已刷新");
+      }
+      return true;
+    };
+
+    if (busyTarget) {
+      return withButtonBusy(busyTarget, "刷新中...", runner);
+    }
+    return runner();
+  }
+
   async function createApiKey() {
     await withButtonBusy(dom.submitApiKey, "创建中...", async () => {
       const ok = await ensureConnected();
@@ -54,8 +76,7 @@ export function createApiKeyActions({
       }
       dom.apiKeyValue.value = res && res.key ? res.key : "";
       try {
-        await refreshApiModels();
-        populateApiKeyModelSelect();
+        await refreshApiModelsNow({ silent: true, button: null });
       } catch (err) {
         showToast(`模型列表刷新失败：${err instanceof Error ? err.message : String(err)}`, "error");
       }
@@ -142,7 +163,14 @@ export function createApiKeyActions({
     });
   }
 
-  actions = { createApiKey, deleteApiKey, toggleApiKeyStatus, updateApiKeyModel, copyApiKey };
+  actions = {
+    createApiKey,
+    deleteApiKey,
+    toggleApiKeyStatus,
+    updateApiKeyModel,
+    copyApiKey,
+    refreshApiModelsNow,
+  };
   return actions;
 }
 
