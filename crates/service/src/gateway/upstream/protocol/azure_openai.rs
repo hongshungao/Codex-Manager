@@ -30,6 +30,12 @@ fn parse_static_headers_json(raw: Option<&str>) -> Result<Vec<(HeaderName, Heade
     Ok(out)
 }
 
+fn has_api_key_header(headers: &[(HeaderName, HeaderValue)]) -> bool {
+    headers
+        .iter()
+        .any(|(name, _)| name.as_str().eq_ignore_ascii_case("api-key"))
+}
+
 fn respond_error(request: Request, status: u16, message: &str) {
     let response = Response::from_string(message.to_string()).with_status_code(status);
     let _ = request.respond(response);
@@ -85,73 +91,7 @@ pub(in super::super) fn proxy_azure_request(
         return Ok(());
     };
 
-    let api_key = match storage.find_api_key_secret_by_id(key_id) {
-        Ok(Some(value)) if !value.trim().is_empty() => value,
-        Ok(_) => {
-            let message = "azure api key missing for current platform key";
-            super::super::super::record_gateway_request_outcome(
-                path,
-                403,
-                Some(PROTOCOL_AZURE_OPENAI),
-            );
-            super::super::super::trace_log::log_request_final(
-                trace_id,
-                403,
-                Some(key_id),
-                None,
-                Some(message),
-                started_at.elapsed().as_millis(),
-            );
-            super::super::super::write_request_log(
-                storage,
-                Some(key_id),
-                None,
-                path,
-                request_method,
-                model_for_log,
-                reasoning_for_log,
-                None,
-                Some(403),
-                super::super::super::request_log::RequestLogUsage::default(),
-                Some(message),
-            );
-            respond_error(request, 403, message);
-            return Ok(());
-        }
-        Err(err) => {
-            let message = format!("storage read failed: {err}");
-            super::super::super::record_gateway_request_outcome(
-                path,
-                500,
-                Some(PROTOCOL_AZURE_OPENAI),
-            );
-            super::super::super::trace_log::log_request_final(
-                trace_id,
-                500,
-                Some(key_id),
-                None,
-                Some(message.as_str()),
-                started_at.elapsed().as_millis(),
-            );
-            super::super::super::write_request_log(
-                storage,
-                Some(key_id),
-                None,
-                path,
-                request_method,
-                model_for_log,
-                reasoning_for_log,
-                None,
-                Some(500),
-                super::super::super::request_log::RequestLogUsage::default(),
-                Some(message.as_str()),
-            );
-            respond_error(request, 500, message.as_str());
-            return Ok(());
-        }
-    };
-
-    let static_headers = match parse_static_headers_json(static_headers_json) {
+    let mut static_headers = match parse_static_headers_json(static_headers_json) {
         Ok(value) => value,
         Err(err) => {
             super::super::super::record_gateway_request_outcome(
@@ -185,6 +125,80 @@ pub(in super::super) fn proxy_azure_request(
         }
     };
 
+    // 优先使用配置里显式填写的 api-key；仅在缺失时回退到旧逻辑（平台 Key 明文）。
+    if !has_api_key_header(&static_headers) {
+        let api_key = match storage.find_api_key_secret_by_id(key_id) {
+            Ok(Some(value)) if !value.trim().is_empty() => value,
+            Ok(_) => {
+                let message = "azure api key missing: please set API Key in Azure fields";
+                super::super::super::record_gateway_request_outcome(
+                    path,
+                    403,
+                    Some(PROTOCOL_AZURE_OPENAI),
+                );
+                super::super::super::trace_log::log_request_final(
+                    trace_id,
+                    403,
+                    Some(key_id),
+                    None,
+                    Some(message),
+                    started_at.elapsed().as_millis(),
+                );
+                super::super::super::write_request_log(
+                    storage,
+                    Some(key_id),
+                    None,
+                    path,
+                    request_method,
+                    model_for_log,
+                    reasoning_for_log,
+                    None,
+                    Some(403),
+                    super::super::super::request_log::RequestLogUsage::default(),
+                    Some(message),
+                );
+                respond_error(request, 403, message);
+                return Ok(());
+            }
+            Err(err) => {
+                let message = format!("storage read failed: {err}");
+                super::super::super::record_gateway_request_outcome(
+                    path,
+                    500,
+                    Some(PROTOCOL_AZURE_OPENAI),
+                );
+                super::super::super::trace_log::log_request_final(
+                    trace_id,
+                    500,
+                    Some(key_id),
+                    None,
+                    Some(message.as_str()),
+                    started_at.elapsed().as_millis(),
+                );
+                super::super::super::write_request_log(
+                    storage,
+                    Some(key_id),
+                    None,
+                    path,
+                    request_method,
+                    model_for_log,
+                    reasoning_for_log,
+                    None,
+                    Some(500),
+                    super::super::super::request_log::RequestLogUsage::default(),
+                    Some(message.as_str()),
+                );
+                respond_error(request, 500, message.as_str());
+                return Ok(());
+            }
+        };
+        static_headers.push((
+            HeaderName::from_static("api-key"),
+            HeaderValue::from_str(api_key.trim())
+                .map_err(|_| "invalid azure api key".to_string())?,
+        ));
+    }
+
     let (url, _) = super::super::super::compute_upstream_url(base, path);
     let client = super::super::super::upstream_client();
     let mut builder = client.request(method.clone(), &url);
@@ -195,7 +209,6 @@ pub(in super::super) fn proxy_azure_request(
     for (name, value) in static_headers {
         builder = builder.header(name, value);
     }
-    builder = builder.header("api-key", api_key.trim());
     builder = builder.header(
         "Accept",
         if is_stream {
@@ -288,4 +301,32 @@ pub(in super::super) fn proxy_azure_request(
         error_text,
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_api_key_header, parse_static_headers_json};
+
+    #[test]
+    fn static_headers_parse_ok_and_detect_api_key() {
+        let headers = parse_static_headers_json(Some(
+            r#"{"api-key":"k123","x-extra":"v","Content-Type":"application/json"}"#,
+        ))
+        .expect("parse headers");
+        assert!(has_api_key_header(&headers));
+    }
+
+    #[test]
+    fn static_headers_without_api_key_returns_false() {
+        let headers = parse_static_headers_json(Some(r#"{"authorization":"Bearer x"}"#))
+            .expect("parse headers");
+        assert!(!has_api_key_header(&headers));
+    }
+
+    #[test]
+    fn static_headers_invalid_value_rejected() {
+        let err = parse_static_headers_json(Some(r#"{"api-key":123}"#))
+            .expect_err("should reject non-string header value");
+        assert!(err.contains("value must be string"));
+    }
 }
