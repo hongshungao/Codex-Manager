@@ -165,9 +165,26 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      - name: Build Tauri bundle
+      - name: Build Tauri bundle (with retry)
         working-directory: apps
-        run: pnpm dlx @tauri-apps/cli@2.9.6 build --bundles appimage,deb
+        shell: bash
+        run: |
+          max_attempts=3
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Build attempt $attempt/$max_attempts ..."
+            if pnpm dlx @tauri-apps/cli@2.9.6 build --bundles appimage,deb; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              delay=$((20 * attempt))
+              echo "Build failed on attempt $attempt, retry in ${delay}s..."
+              sleep "$delay"
+            fi
+            attempt=$((attempt + 1))
+          done
+          echo "Build failed after $max_attempts attempts."
+          exit 1
 
       - name: Stage portable package
         shell: bash
