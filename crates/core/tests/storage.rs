@@ -88,6 +88,58 @@ fn storage_can_find_token_and_account_by_account_id() {
 }
 
 #[test]
+fn token_upsert_keeps_refresh_schedule_columns() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let account = Account {
+        id: "acc-schedule-1".to_string(),
+        label: "main".to_string(),
+        issuer: "https://auth.openai.com".to_string(),
+        chatgpt_account_id: None,
+        workspace_id: None,
+        group_name: None,
+        sort: 0,
+        status: "active".to_string(),
+        created_at: now_ts(),
+        updated_at: now_ts(),
+    };
+    storage.insert_account(&account).expect("insert account");
+
+    let token = Token {
+        account_id: "acc-schedule-1".to_string(),
+        id_token: "id-1".to_string(),
+        access_token: "access-1".to_string(),
+        refresh_token: "refresh-1".to_string(),
+        api_key_access_token: None,
+        last_refresh: now_ts(),
+    };
+    storage.insert_token(&token).expect("insert token");
+    storage
+        .update_token_refresh_schedule("acc-schedule-1", Some(4_102_444_800), Some(4_102_444_200))
+        .expect("set schedule");
+
+    let token2 = Token {
+        account_id: "acc-schedule-1".to_string(),
+        id_token: "id-2".to_string(),
+        access_token: "access-2".to_string(),
+        refresh_token: "refresh-2".to_string(),
+        api_key_access_token: Some("api-key".to_string()),
+        last_refresh: now_ts(),
+    };
+    storage.insert_token(&token2).expect("upsert token");
+
+    let due = storage
+        .list_tokens_due_for_refresh(4_102_444_100, 10)
+        .expect("list due");
+    assert!(due.is_empty());
+    let due2 = storage
+        .list_tokens_due_for_refresh(4_102_444_300, 10)
+        .expect("list due2");
+    assert_eq!(due2.len(), 1);
+    assert_eq!(due2[0].account_id, "acc-schedule-1");
+}
+
+#[test]
 fn storage_login_session_roundtrip() {
     let storage = Storage::open_in_memory().expect("open in memory");
     storage.init().expect("init schema");

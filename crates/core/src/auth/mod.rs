@@ -65,6 +65,18 @@ pub fn parse_id_token_claims(token: &str) -> Result<IdTokenClaims, String> {
     serde_json::from_str(json).map_err(|e| e.to_string())
 }
 
+pub fn extract_token_exp(token: &str) -> Option<i64> {
+    let mut parts = token.split('.');
+    let _header = parts.next()?;
+    let payload = parts.next()?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()?;
+    let json = std::str::from_utf8(&decoded).ok()?;
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    value.get("exp").and_then(|v| v.as_i64())
+}
+
 pub fn extract_chatgpt_account_id(token: &str) -> Option<String> {
     let mut parts = token.split('.');
     let _header = parts.next()?;

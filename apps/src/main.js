@@ -4,6 +4,7 @@ import "./styles/components.css";
 import "./styles/responsive.css";
 
 import {
+  serviceTokenRefreshProbe,
   serviceGatewayRouteStrategyGet,
   serviceGatewayRouteStrategySet,
   serviceUsageRefresh,
@@ -704,7 +705,7 @@ async function refreshAll(options = {}) {
     const setProgress = (next) => {
       renderAccountsRefreshProgress(setRefreshAllProgress(next));
     };
-    setProgress({ active: true, total, completed: 0, remaining: total, lastTaskLabel: "" });
+    setProgress({ active: true, manual: false, total, completed: 0, remaining: total, lastTaskLabel: "" });
 
     const ok = await ensureConnected();
     serviceLifecycle.updateServiceToggle();
@@ -719,6 +720,7 @@ async function refreshAll(options = {}) {
           completed += 1;
           setProgress({
             active: true,
+            manual: false,
             total,
             completed,
             remaining: total - completed,
@@ -772,6 +774,7 @@ async function handleRefreshAllClick() {
     }
     renderAccountsRefreshProgress(setRefreshAllProgress({
       active: true,
+      manual: true,
       total: 1,
       completed: 0,
       remaining: 1,
@@ -796,6 +799,7 @@ async function handleRefreshAllClick() {
     if (total <= 0) {
       renderAccountsRefreshProgress(setRefreshAllProgress({
         active: true,
+        manual: true,
         total: 1,
         completed: 1,
         remaining: 0,
@@ -805,6 +809,7 @@ async function handleRefreshAllClick() {
     }
     renderAccountsRefreshProgress(setRefreshAllProgress({
       active: true,
+      manual: true,
       total,
       completed: 0,
       remaining: total,
@@ -825,6 +830,7 @@ async function handleRefreshAllClick() {
           completed += 1;
           renderAccountsRefreshProgress(setRefreshAllProgress({
             active: true,
+            manual: true,
             total,
             completed,
             remaining: Math.max(0, total - completed),
@@ -849,6 +855,26 @@ async function handleRefreshAllClick() {
         refreshAllProgressClearTimer = null;
       }, 450);
     }
+  });
+}
+
+async function handleTestTokenRefreshClick() {
+  await withButtonBusy(dom.testTokenRefreshBtn, "测试中...", async () => {
+    const ok = await ensureConnected();
+    serviceLifecycle.updateServiceToggle();
+    if (!ok) {
+      return;
+    }
+    const accounts = Array.isArray(state.accountList) ? state.accountList : [];
+    const accountId = accounts.length > 0 ? accounts[0].id : null;
+    const result = await serviceTokenRefreshProbe(accountId);
+    const payload = result && typeof result === "object" && result.result ? result.result : result;
+    const targetAccount = payload?.accountId || accountId || "-";
+    const rotatedRefreshToken = payload?.rotatedRefreshToken === true;
+    const rotatedIdToken = payload?.rotatedIdToken === true;
+    showToast(
+      `测试完成：账号 ${targetAccount}，refresh_token更新=${rotatedRefreshToken ? "是" : "否"}，id_token更新=${rotatedIdToken ? "是" : "否"}`,
+    );
   });
 }
 
@@ -999,6 +1025,12 @@ function bindEvents() {
       saveRouteStrategySetting(selected);
       setRouteStrategySelect(selected);
       void applyRouteStrategyToService(selected, { silent: false });
+    });
+  }
+  if (dom.testTokenRefreshBtn && dom.testTokenRefreshBtn.dataset.bound !== "1") {
+    dom.testTokenRefreshBtn.dataset.bound = "1";
+    dom.testTokenRefreshBtn.addEventListener("click", () => {
+      void handleTestTokenRefreshClick();
     });
   }
 }

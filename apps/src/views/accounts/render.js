@@ -47,7 +47,7 @@ export function renderAccountsRefreshProgress(progress = getRefreshAllProgress()
   const total = Math.max(0, Number(progress?.total || 0));
   const completed = Math.min(total, Math.max(0, Number(progress?.completed || 0)));
   const remaining = Math.max(0, Number(progress?.remaining ?? total - completed));
-  const active = Boolean(progress?.active) && total > 0;
+  const active = Boolean(progress?.active) && Boolean(progress?.manual) && total > 0;
   if (!active) {
     node.hidden = true;
     node.textContent = "";

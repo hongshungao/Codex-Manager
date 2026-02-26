@@ -5,7 +5,14 @@ use super::{Storage, Token};
 impl Storage {
     pub fn insert_token(&self, token: &Token) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO tokens (account_id, id_token, access_token, refresh_token, api_key_access_token, last_refresh) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO tokens (account_id, id_token, access_token, refresh_token, api_key_access_token, last_refresh)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(account_id) DO UPDATE SET
+                id_token = excluded.id_token,
+                access_token = excluded.access_token,
+                refresh_token = excluded.refresh_token,
+                api_key_access_token = excluded.api_key_access_token,
+                last_refresh = excluded.last_refresh",
             (
                 &token.account_id,
                 &token.id_token,
@@ -14,6 +21,53 @@ impl Storage {
                 &token.api_key_access_token,
                 token.last_refresh,
             ),
+        )?;
+        Ok(())
+    }
+
+    pub fn list_tokens_due_for_refresh(&self, now_ts: i64, limit: usize) -> Result<Vec<Token>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT account_id, id_token, access_token, refresh_token, api_key_access_token, last_refresh
+             FROM tokens
+             WHERE TRIM(COALESCE(refresh_token, '')) <> ''
+               AND (next_refresh_at IS NULL OR next_refresh_at <= ?1)
+             ORDER BY COALESCE(next_refresh_at, 0) ASC, account_id ASC
+             LIMIT ?2",
+        )?;
+        let mut rows = stmt.query((now_ts, limit as i64))?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            out.push(map_token_row(row)?);
+        }
+        Ok(out)
+    }
+
+    pub fn update_token_refresh_schedule(
+        &self,
+        account_id: &str,
+        access_token_exp: Option<i64>,
+        next_refresh_at: Option<i64>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tokens
+             SET access_token_exp = ?1,
+                 next_refresh_at = ?2
+             WHERE account_id = ?3",
+            (access_token_exp, next_refresh_at, account_id),
+        )?;
+        Ok(())
+    }
+
+    pub fn touch_token_refresh_attempt(
+        &self,
+        account_id: &str,
+        attempt_ts: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tokens
+             SET last_refresh_attempt_at = ?1
+             WHERE account_id = ?2",
+            (attempt_ts, account_id),
         )?;
         Ok(())
     }
@@ -56,6 +110,17 @@ impl Storage {
         }
         self.conn.execute(
             "ALTER TABLE tokens ADD COLUMN api_key_access_token TEXT",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn ensure_token_refresh_schedule_columns(&self) -> Result<()> {
+        self.ensure_column("tokens", "access_token_exp", "INTEGER")?;
+        self.ensure_column("tokens", "next_refresh_at", "INTEGER")?;
+        self.ensure_column("tokens", "last_refresh_attempt_at", "INTEGER")?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tokens_next_refresh_at ON tokens(next_refresh_at)",
             [],
         )?;
         Ok(())

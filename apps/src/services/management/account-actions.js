@@ -2,6 +2,7 @@ import * as api from "../../api.js";
 
 const EMPTY_REFRESH_PROGRESS = Object.freeze({
   active: false,
+  manual: false,
   completed: 0,
   total: 0,
   remaining: 0,
@@ -15,6 +16,7 @@ function normalizeProgress(next) {
   const completed = Math.min(total, Math.max(0, Number(next?.completed || 0)));
   return {
     active: Boolean(next?.active) && total > 0,
+    manual: Boolean(next?.manual),
     total,
     completed,
     remaining: Math.max(0, total - completed),

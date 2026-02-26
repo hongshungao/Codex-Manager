@@ -276,6 +276,11 @@ impl Storage {
             "024_model_options_cache",
             include_str!("../../migrations/024_model_options_cache.sql"),
         )?;
+        self.apply_sql_or_compat_migration(
+            "025_tokens_refresh_schedule",
+            include_str!("../../migrations/025_tokens_refresh_schedule.sql"),
+            |s| s.ensure_token_refresh_schedule_columns(),
+        )?;
         self.ensure_request_token_stats_table()?;
         Ok(())
     }

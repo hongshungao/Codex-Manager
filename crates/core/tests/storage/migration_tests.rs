@@ -120,6 +120,15 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
         )
         .expect("count 023 migration");
     assert_eq!(applied_023, 1);
+    let applied_025: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '025_tokens_refresh_schedule'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 025 migration");
+    assert_eq!(applied_025, 1);
 
     assert!(!storage.has_column("accounts", "note").expect("check accounts.note"));
     assert!(!storage.has_column("accounts", "tags").expect("check accounts.tags"));
@@ -127,6 +136,9 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
     assert!(storage
         .has_column("request_token_stats", "total_tokens")
         .expect("check request_token_stats.total_tokens"));
+    assert!(storage
+        .has_column("tokens", "next_refresh_at")
+        .expect("check tokens.next_refresh_at"));
 }
 
 #[test]

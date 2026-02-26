@@ -1,5 +1,5 @@
-use codexmanager_core::auth::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
-use codexmanager_core::storage::{Account, Storage, Token};
+use codexmanager_core::auth::{extract_token_exp, DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
+use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use codexmanager_core::usage::parse_usage_snapshot;
 use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc, Mutex};
@@ -28,6 +28,7 @@ mod usage_refresh_errors;
 
 static USAGE_POLLING_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 static GATEWAY_KEEPALIVE_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+static TOKEN_REFRESH_POLLING_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 static PENDING_USAGE_REFRESH_TASKS: std::sync::OnceLock<Mutex<HashSet<String>>> =
     std::sync::OnceLock::new();
 static USAGE_REFRESH_EXECUTOR: std::sync::OnceLock<UsageRefreshExecutor> = std::sync::OnceLock::new();
@@ -40,6 +41,11 @@ const DEFAULT_USAGE_REFRESH_WORKERS: usize = 4;
 const GATEWAY_KEEPALIVE_JITTER_ENV: &str = "CODEXMANAGER_GATEWAY_KEEPALIVE_JITTER_SECS";
 const GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_ENV: &str =
     "CODEXMANAGER_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS";
+const TOKEN_REFRESH_POLL_INTERVAL_SECS: u64 = 60;
+const TOKEN_REFRESH_FAILURE_BACKOFF_MAX_SECS: u64 = 300;
+const TOKEN_REFRESH_AHEAD_SECS: i64 = 600;
+const TOKEN_REFRESH_FALLBACK_AGE_SECS: i64 = 2700;
+const TOKEN_REFRESH_BATCH_LIMIT: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UsageAvailabilityStatus {
@@ -82,6 +88,12 @@ pub(crate) fn ensure_usage_polling() {
 pub(crate) fn ensure_gateway_keepalive() {
     GATEWAY_KEEPALIVE_STARTED.get_or_init(|| {
         let _ = thread::spawn(gateway_keepalive_loop);
+    });
+}
+
+pub(crate) fn ensure_token_refresh_polling() {
+    TOKEN_REFRESH_POLLING_STARTED.get_or_init(|| {
+        let _ = thread::spawn(token_refresh_polling_loop);
     });
 }
 
@@ -155,6 +167,17 @@ fn gateway_keepalive_loop() {
         Duration::from_secs(failure_backoff_cap_secs),
         run_gateway_keepalive_once,
         |err| !is_keepalive_error_ignorable(err),
+    );
+}
+
+fn token_refresh_polling_loop() {
+    run_blocking_poll_loop(
+        "token refresh polling",
+        Duration::from_secs(TOKEN_REFRESH_POLL_INTERVAL_SECS),
+        Duration::ZERO,
+        Duration::from_secs(TOKEN_REFRESH_FAILURE_BACKOFF_MAX_SECS),
+        refresh_tokens_before_expiry_for_all_accounts,
+        |_| true,
     );
 }
 
@@ -308,6 +331,61 @@ pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn refresh_tokens_before_expiry_for_all_accounts() -> Result<(), String> {
+    let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let now = now_ts();
+    let mut tokens = storage
+        .list_tokens_due_for_refresh(now, TOKEN_REFRESH_BATCH_LIMIT)
+        .map_err(|e| e.to_string())?;
+    if tokens.is_empty() {
+        return Ok(());
+    }
+
+    let issuer = std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
+    let client_id =
+        std::env::var("CODEXMANAGER_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string());
+    let mut refreshed = 0usize;
+    let mut skipped = 0usize;
+
+    for token in tokens.iter_mut() {
+        let _ = storage.touch_token_refresh_attempt(&token.account_id, now);
+        let (exp_opt, scheduled_at) = token_refresh_schedule(
+            token,
+            now,
+            TOKEN_REFRESH_AHEAD_SECS,
+            TOKEN_REFRESH_FALLBACK_AGE_SECS,
+        );
+        let _ = storage.update_token_refresh_schedule(
+            &token.account_id,
+            exp_opt,
+            Some(scheduled_at),
+        );
+        if scheduled_at > now {
+            skipped = skipped.saturating_add(1);
+            continue;
+        }
+        match refresh_and_persist_access_token(&storage, token, &issuer, &client_id) {
+            Ok(_) => {
+                refreshed = refreshed.saturating_add(1);
+            }
+            Err(err) => {
+                log::warn!(
+                    "token refresh polling failed: account_id={} err={}",
+                    token.account_id,
+                    err
+                );
+            }
+        }
+    }
+
+    log::debug!(
+        "token refresh polling complete: refreshed={} skipped={}",
+        refreshed,
+        skipped
+    );
+    Ok(())
+}
+
 pub(crate) fn refresh_usage_for_account(account_id: &str) -> Result<(), String> {
     // 刷新单个账号用量
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
@@ -360,6 +438,40 @@ pub(crate) fn refresh_usage_for_account(account_id: &str) -> Result<(), String> 
     }
     record_usage_refresh_metrics(true, started_at);
     Ok(())
+}
+
+pub(crate) fn refresh_token_probe(account_id: Option<&str>) -> Result<serde_json::Value, String> {
+    let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let issuer = std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
+    let client_id =
+        std::env::var("CODEXMANAGER_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string());
+
+    let picked_account_id = account_id
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            storage
+                .list_tokens()
+                .ok()?
+                .into_iter()
+                .find(|token| !token.account_id.trim().is_empty())
+                .map(|token| token.account_id)
+        })
+        .ok_or_else(|| "no account token available for refresh probe".to_string())?;
+
+    let mut token = storage
+        .find_token_by_account_id(&picked_account_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("token not found for account: {picked_account_id}"))?;
+
+    let result = refresh_and_persist_access_token(&storage, &mut token, &issuer, &client_id)?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "accountId": picked_account_id,
+        "rotatedRefreshToken": result.rotated_refresh_token,
+        "rotatedIdToken": result.rotated_id_token,
+    }))
 }
 
 fn record_usage_refresh_metrics(success: bool, started_at: Instant) {
@@ -422,7 +534,7 @@ fn refresh_usage_for_token(
         Err(err) if should_retry_with_refresh(&err) => {
             // 中文注释：token 刷新与持久化独立封装，避免轮询流程继续膨胀；
             // 不下沉会让后续 async 迁移时刷新链路与业务编排强耦合，回归范围扩大。
-            refresh_and_persist_access_token(storage, &mut current, &issuer, &client_id)?;
+            let _ = refresh_and_persist_access_token(storage, &mut current, &issuer, &client_id)?;
             let bearer = current.access_token.clone();
             match fetch_usage_snapshot(&base_url, &bearer, resolved_workspace_id.as_deref()) {
                 Ok(value) => {
@@ -567,5 +679,64 @@ fn classify_usage_status_from_error(err: &str) -> UsageAvailabilityStatus {
         return UsageAvailabilityStatus::Unavailable;
     }
     UsageAvailabilityStatus::Unknown
+}
+
+fn token_refresh_schedule(
+    token: &Token,
+    now_ts_secs: i64,
+    ahead_secs: i64,
+    fallback_age_secs: i64,
+) -> (Option<i64>, i64) {
+    if token.refresh_token.trim().is_empty() {
+        return (None, i64::MAX);
+    }
+    if let Some(exp) = extract_token_exp(&token.access_token) {
+        return (Some(exp), exp.saturating_sub(ahead_secs));
+    }
+    (
+        None,
+        token
+            .last_refresh
+            .saturating_add(fallback_age_secs)
+            .max(now_ts_secs),
+    )
+}
+
+#[cfg(test)]
+mod proactive_token_tests {
+    use super::token_refresh_schedule;
+    use codexmanager_core::storage::{now_ts, Token};
+
+    #[test]
+    fn schedule_prefers_exp_minus_ahead() {
+        let now = now_ts();
+        let token = Token {
+            account_id: "acc-1".to_string(),
+            id_token: "id".to_string(),
+            access_token: "a.eyJleHAiOjQxMDI0NDQ4MDB9.s".to_string(),
+            refresh_token: "refresh".to_string(),
+            api_key_access_token: None,
+            last_refresh: now - 10,
+        };
+        let (exp, scheduled_at) = token_refresh_schedule(&token, now, 600, 2700);
+        assert_eq!(exp, Some(4_102_444_800));
+        assert_eq!(scheduled_at, 4_102_444_200);
+    }
+
+    #[test]
+    fn schedule_falls_back_to_last_refresh_when_exp_missing() {
+        let now = now_ts();
+        let token = Token {
+            account_id: "acc-2".to_string(),
+            id_token: "id".to_string(),
+            access_token: "no-jwt".to_string(),
+            refresh_token: "refresh".to_string(),
+            api_key_access_token: None,
+            last_refresh: now - 5000,
+        };
+        let (exp, scheduled_at) = token_refresh_schedule(&token, now, 300, 2700);
+        assert_eq!(exp, None);
+        assert_eq!(scheduled_at, now);
+    }
 }
 

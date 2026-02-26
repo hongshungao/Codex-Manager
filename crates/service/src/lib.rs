@@ -119,6 +119,7 @@ pub fn start_server(addr: &str) -> std::io::Result<()> {
     }
     usage_refresh::ensure_usage_polling();
     usage_refresh::ensure_gateway_keepalive();
+    usage_refresh::ensure_token_refresh_polling();
     http::server::start_http(addr)
 }
 
