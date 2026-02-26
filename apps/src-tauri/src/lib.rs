@@ -625,14 +625,6 @@ fn legacy_db_candidates(current_db: &Path) -> Vec<PathBuf> {
   dedup
 }
 
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-#[cfg(target_os = "windows")]
-fn windows_creation_flags() -> u32 {
-  CREATE_NO_WINDOW
-}
-
 fn normalize_addr(raw: &str) -> Result<String, String> {
   let trimmed = raw.trim();
   if trimmed.is_empty() {
@@ -737,7 +729,6 @@ fn rpc_call(
   params: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
   let addr = resolve_service_addr(addr)?;
-  log::debug!("rpc {} -> {}", method, addr);
   for attempt in 0..=1 {
     let mut stream = connect_with_timeout(&addr, Duration::from_millis(400)).map_err(|e| {
       log::warn!("rpc connect failed ({} -> {}): {}", method, addr, e);
@@ -810,10 +801,6 @@ fn normalize_host(value: &str) -> String {
   }
 }
 
-fn redirect_uri_for_addr(addr: &str) -> String {
-  let normalized = normalize_host(addr);
-  format!("http://{normalized}/auth/callback")
-}
 struct ServiceRuntime {
   addr: String,
   join: thread::JoinHandle<()>,
@@ -873,30 +860,12 @@ mod tests {
   use std::net::TcpListener;
   use std::time::Duration;
 
-  #[cfg(target_os = "windows")]
-  #[test]
-  fn windows_creation_flags_hide_console() {
-    assert_eq!(windows_creation_flags(), 0x08000000);
-  }
-
   #[test]
   fn normalize_addr_defaults_to_localhost() {
     assert_eq!(normalize_addr("5050").unwrap(), "localhost:5050");
     assert_eq!(
       normalize_addr("localhost:5050").unwrap(),
       "localhost:5050"
-    );
-  }
-
-  #[test]
-  fn redirect_uri_uses_localhost_for_loopback() {
-    assert_eq!(
-      redirect_uri_for_addr("127.0.0.1:5050"),
-      "http://localhost:5050/auth/callback"
-    );
-    assert_eq!(
-      redirect_uri_for_addr("0.0.0.0:5050"),
-      "http://localhost:5050/auth/callback"
     );
   }
 

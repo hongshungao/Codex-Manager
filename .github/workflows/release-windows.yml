@@ -115,9 +115,30 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked
 
-      - name: Build Tauri bundle
+      - name: Build Tauri bundle (with retry)
         working-directory: apps/src-tauri
-        run: cargo tauri build --bundles nsis
+        shell: pwsh
+        run: |
+          $maxAttempts = 3
+          $attempt = 0
+          $succeeded = $false
+          while ($attempt -lt $maxAttempts -and -not $succeeded) {
+            $attempt++
+            Write-Host "Build attempt $attempt/$maxAttempts ..."
+            cargo tauri build --bundles nsis
+            if ($LASTEXITCODE -eq 0) {
+              $succeeded = $true
+              break
+            }
+            if ($attempt -lt $maxAttempts) {
+              $delay = 20 * $attempt
+              Write-Warning "Build failed on attempt $attempt, retrying in $delay seconds..."
+              Start-Sleep -Seconds $delay
+            }
+          }
+          if (-not $succeeded) {
+            throw "Build failed after $maxAttempts attempts."
+          }
 
       - name: Stage portable package
         shell: pwsh

@@ -68,7 +68,7 @@ impl UsageAvailabilityStatus {
 
 #[derive(Debug, Clone, Copy)]
 struct UsageRefreshResult {
-    status: UsageAvailabilityStatus,
+    _status: UsageAvailabilityStatus,
 }
 
 use self::usage_refresh_errors::{
@@ -309,20 +309,9 @@ pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
         match refresh_usage_for_token(&storage, &token, workspace_id, Some(&mut account_map)) {
             Ok(result) => {
                 record_usage_refresh_metrics(true, started_at);
-                log::debug!(
-                    "usage refresh status: account_id={} status={}",
-                    token.account_id,
-                    result.status.as_code()
-                );
+                let _ = result;
             }
             Err(err) => {
-                let status = classify_usage_status_from_error(&err);
-                log::debug!(
-                    "usage refresh status: account_id={} status={} err={}",
-                    token.account_id,
-                    status.as_code(),
-                    err
-                );
                 record_usage_refresh_metrics(false, started_at);
                 record_usage_refresh_failure(&storage, &token.account_id, &err);
             }
@@ -378,11 +367,7 @@ pub(crate) fn refresh_tokens_before_expiry_for_all_accounts() -> Result<(), Stri
         }
     }
 
-    log::debug!(
-        "token refresh polling complete: refreshed={} skipped={}",
-        refreshed,
-        skipped
-    );
+    let _ = (refreshed, skipped);
     Ok(())
 }
 
@@ -416,21 +401,8 @@ pub(crate) fn refresh_usage_for_account(account_id: &str) -> Result<(), String> 
         Some(&mut account_map)
     };
     match refresh_usage_for_token(&storage, &token, workspace_id.as_deref(), account_cache) {
-        Ok(result) => {
-            log::debug!(
-                "usage refresh status: account_id={} status={}",
-                token.account_id,
-                result.status.as_code()
-            );
-        }
+        Ok(_) => {}
         Err(err) => {
-            let status = classify_usage_status_from_error(&err);
-            log::debug!(
-                "usage refresh status: account_id={} status={} err={}",
-                token.account_id,
-                status.as_code(),
-                err
-            );
             record_usage_refresh_metrics(false, started_at);
             record_usage_refresh_failure(&storage, &token.account_id, &err);
             return Err(err);
@@ -495,7 +467,7 @@ fn refresh_usage_for_token(
         Ok(value) => {
             let status = classify_usage_status_from_snapshot_value(&value);
             store_usage_snapshot(storage, &current.account_id, value)?;
-            Ok(UsageRefreshResult { status })
+            Ok(UsageRefreshResult { _status: status })
         }
         Err(err) if should_retry_with_refresh(&err) => {
             // 中文注释：token 刷新与持久化独立封装，避免轮询流程继续膨胀；
@@ -506,7 +478,7 @@ fn refresh_usage_for_token(
                 Ok(value) => {
                     let status = classify_usage_status_from_snapshot_value(&value);
                     store_usage_snapshot(storage, &current.account_id, value)?;
-                    Ok(UsageRefreshResult { status })
+                    Ok(UsageRefreshResult { _status: status })
                 }
                 Err(err) => {
                     mark_usage_unreachable_if_needed(storage, &current.account_id, &err);
