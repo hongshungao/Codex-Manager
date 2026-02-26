@@ -9,6 +9,7 @@ const REQUEST_LOG_DOM_RECYCLE_TO = 180;
 const REQUEST_LOG_SCROLL_BUFFER = 180;
 const REQUEST_LOG_FALLBACK_ROW_HEIGHT = 54;
 const REQUEST_LOG_COLUMN_COUNT = 9;
+const REQUEST_LOG_NEAR_BOTTOM_MAX_BATCHES = 4;
 
 const requestLogWindowState = {
   filter: "all",
@@ -16,10 +17,15 @@ const requestLogWindowState = {
   filteredKeys: [],
   nextIndex: 0,
   topSpacerHeight: 0,
+  recycledRowHeight: REQUEST_LOG_FALLBACK_ROW_HEIGHT,
+  accountListRef: null,
+  accountLabelById: new Map(),
   topSpacerRow: null,
   topSpacerCell: null,
   boundRowsEl: null,
   boundScrollerEl: null,
+  scrollTickHandle: null,
+  scrollTickMode: "",
   hasRendered: false,
 };
 
@@ -31,14 +37,33 @@ function fallbackAccountNameFromId(accountId) {
   return raw.slice(sep + 2).trim();
 }
 
+function ensureAccountLabelMap() {
+  const list = Array.isArray(state.accountList) ? state.accountList : [];
+  if (requestLogWindowState.accountListRef === list) {
+    return requestLogWindowState.accountLabelById;
+  }
+  const map = new Map();
+  for (let i = 0; i < list.length; i += 1) {
+    const account = list[i];
+    const id = account?.id;
+    const label = account?.label;
+    if (id && label) {
+      map.set(id, label);
+    }
+  }
+  requestLogWindowState.accountListRef = list;
+  requestLogWindowState.accountLabelById = map;
+  return map;
+}
+
 function resolveAccountDisplayName(item) {
   const accountId = item?.accountId || item?.account?.id || "";
   const directLabel = item?.accountLabel || item?.account?.label || "";
   if (directLabel) return directLabel;
   if (accountId) {
-    const found = state.accountList.find((account) => account?.id === accountId);
-    if (found?.label) {
-      return found.label;
+    const label = requestLogWindowState.accountLabelById.get(accountId);
+    if (label) {
+      return label;
     }
   }
   return fallbackAccountNameFromId(accountId);
@@ -141,11 +166,14 @@ function createRequestLogRow(item, index) {
   const row = document.createElement("tr");
   row.dataset.logRow = "1";
   row.dataset.logIndex = String(index);
+  row.className = "requestlog-row";
   const cellTime = document.createElement("td");
+  cellTime.className = "requestlog-col requestlog-col-time";
   cellTime.textContent = formatTs(item.createdAt, { emptyLabel: "-" });
   row.appendChild(cellTime);
 
   const cellAccount = document.createElement("td");
+  cellAccount.className = "requestlog-col requestlog-col-account";
   const accountLabel = resolveAccountDisplayName(item);
   const accountId = item?.accountId || item?.account?.id || "";
   const accountWrap = document.createElement("div");
@@ -172,14 +200,17 @@ function createRequestLogRow(item, index) {
   row.appendChild(cellAccount);
 
   const cellKey = document.createElement("td");
+  cellKey.className = "requestlog-col requestlog-col-key";
   cellKey.textContent = item.keyId || "-";
   row.appendChild(cellKey);
 
   const cellMethod = document.createElement("td");
+  cellMethod.className = "requestlog-col requestlog-col-method";
   cellMethod.textContent = item.method || "-";
   row.appendChild(cellMethod);
 
   const cellPath = document.createElement("td");
+  cellPath.className = "requestlog-col requestlog-col-path";
   const pathWrap = document.createElement("div");
   pathWrap.className = "request-path-wrap";
   const pathText = document.createElement("span");
@@ -197,14 +228,17 @@ function createRequestLogRow(item, index) {
   row.appendChild(cellPath);
 
   const cellModel = document.createElement("td");
+  cellModel.className = "requestlog-col requestlog-col-model";
   cellModel.textContent = item.model || "-";
   row.appendChild(cellModel);
 
   const cellEffort = document.createElement("td");
+  cellEffort.className = "requestlog-col requestlog-col-effort";
   cellEffort.textContent = item.reasoningEffort || "-";
   row.appendChild(cellEffort);
 
   const cellStatus = document.createElement("td");
+  cellStatus.className = "requestlog-col requestlog-col-status";
   const statusTag = document.createElement("span");
   statusTag.className = "status-tag";
   const code = item.statusCode == null ? null : Number(item.statusCode);
@@ -226,6 +260,7 @@ function createRequestLogRow(item, index) {
   row.appendChild(cellStatus);
 
   const cellError = document.createElement("td");
+  cellError.className = "requestlog-col requestlog-col-error";
   cellError.textContent = item.error || "-";
   row.appendChild(cellError);
   return row;
@@ -258,6 +293,29 @@ function appendRequestLogBatch() {
   return true;
 }
 
+function appendNearBottomBatches(scroller, maxBatches = REQUEST_LOG_NEAR_BOTTOM_MAX_BATCHES) {
+  let appended = false;
+  let rounds = 0;
+  while (
+    rounds < maxBatches &&
+    isNearBottom(scroller) &&
+    appendRequestLogBatch()
+  ) {
+    appended = true;
+    rounds += 1;
+  }
+  return appended;
+}
+
+function appendAtLeastOneBatch(scroller, extraMaxBatches = REQUEST_LOG_NEAR_BOTTOM_MAX_BATCHES - 1) {
+  const appended = appendRequestLogBatch();
+  if (!appended) return false;
+  if (extraMaxBatches > 0) {
+    appendNearBottomBatches(scroller, extraMaxBatches);
+  }
+  return true;
+}
+
 function recycleLogRowsIfNeeded() {
   if (!dom.requestLogRows) return;
   const rows = [];
@@ -270,11 +328,18 @@ function recycleLogRowsIfNeeded() {
     return;
   }
   const removeCount = rows.length - REQUEST_LOG_DOM_RECYCLE_TO;
-  let removedHeight = 0;
+  let measuredHeight = 0;
   for (let i = 0; i < removeCount; i += 1) {
-    const row = rows[i];
-    removedHeight += getRowHeight(row);
-    row.remove();
+    measuredHeight += getRowHeight(rows[i]);
+  }
+  if (measuredHeight > 0) {
+    requestLogWindowState.recycledRowHeight = measuredHeight / removeCount;
+  }
+  const removedHeight = measuredHeight > 0
+    ? measuredHeight
+    : requestLogWindowState.recycledRowHeight * removeCount;
+  for (let i = 0; i < removeCount; i += 1) {
+    rows[i].remove();
   }
   requestLogWindowState.topSpacerHeight += removedHeight;
   updateTopSpacer();
@@ -326,10 +391,40 @@ async function onRequestLogRowsClick(event) {
 }
 
 function onRequestLogScroll() {
-  if (!isNearBottom(requestLogWindowState.boundScrollerEl)) {
+  if (requestLogWindowState.scrollTickHandle != null) {
     return;
   }
-  appendRequestLogBatch();
+  const flush = () => {
+    requestLogWindowState.scrollTickHandle = null;
+    requestLogWindowState.scrollTickMode = "";
+    if (!isNearBottom(requestLogWindowState.boundScrollerEl)) {
+      return;
+    }
+    appendNearBottomBatches(requestLogWindowState.boundScrollerEl);
+  };
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    requestLogWindowState.scrollTickMode = "raf";
+    requestLogWindowState.scrollTickHandle = window.requestAnimationFrame(flush);
+    return;
+  }
+  flush();
+}
+
+function cancelPendingScrollTick() {
+  if (requestLogWindowState.scrollTickHandle == null) {
+    return;
+  }
+  if (
+    requestLogWindowState.scrollTickMode === "raf"
+    && typeof window !== "undefined"
+    && typeof window.cancelAnimationFrame === "function"
+  ) {
+    window.cancelAnimationFrame(requestLogWindowState.scrollTickHandle);
+  } else {
+    clearTimeout(requestLogWindowState.scrollTickHandle);
+  }
+  requestLogWindowState.scrollTickHandle = null;
+  requestLogWindowState.scrollTickMode = "";
 }
 
 function ensureRequestLogBindings() {
@@ -350,11 +445,13 @@ function ensureRequestLogBindings() {
     requestLogWindowState.boundScrollerEl !== scroller
   ) {
     requestLogWindowState.boundScrollerEl.removeEventListener("scroll", onRequestLogScroll);
+    cancelPendingScrollTick();
   }
   if (scroller && requestLogWindowState.boundScrollerEl !== scroller) {
-    scroller.addEventListener("scroll", onRequestLogScroll);
+    scroller.addEventListener("scroll", onRequestLogScroll, { passive: true });
     requestLogWindowState.boundScrollerEl = scroller;
   } else if (!scroller) {
+    cancelPendingScrollTick();
     requestLogWindowState.boundScrollerEl = null;
   }
 }
@@ -364,6 +461,7 @@ export function renderRequestLogs() {
     return;
   }
   ensureRequestLogBindings();
+  ensureAccountLabelMap();
   const { filter, filtered, filteredKeys } = collectFilteredRequestLogs();
   const sameFilter = filter === requestLogWindowState.filter;
   const appendOnly = sameFilter && isAppendOnlyResult(
@@ -398,7 +496,7 @@ export function renderRequestLogs() {
       requestLogWindowState.nextIndex >= previousLength ||
       isNearBottom(requestLogWindowState.boundScrollerEl)
     ) {
-      appendRequestLogBatch();
+      appendAtLeastOneBatch(requestLogWindowState.boundScrollerEl);
     }
     return;
   }
@@ -409,6 +507,7 @@ export function renderRequestLogs() {
   requestLogWindowState.filter = filter;
   requestLogWindowState.nextIndex = 0;
   requestLogWindowState.topSpacerHeight = 0;
+  requestLogWindowState.recycledRowHeight = REQUEST_LOG_FALLBACK_ROW_HEIGHT;
   requestLogWindowState.topSpacerRow = null;
   requestLogWindowState.topSpacerCell = null;
   requestLogWindowState.hasRendered = true;
@@ -417,5 +516,5 @@ export function renderRequestLogs() {
     return;
   }
   dom.requestLogRows.appendChild(createTopSpacerRow());
-  appendRequestLogBatch();
+  appendAtLeastOneBatch(requestLogWindowState.boundScrollerEl, 1);
 }

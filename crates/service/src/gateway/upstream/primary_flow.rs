@@ -57,8 +57,10 @@ where
         }
     };
     if debug {
-        eprintln!(
-            "gateway upstream: base={}, token_source=openai_bearer",
+        log::debug!(
+            "event=gateway_upstream_token_source path={} account_id={} token_source=openai_bearer upstream_base={}",
+            path,
+            account.id,
             base,
         );
     }

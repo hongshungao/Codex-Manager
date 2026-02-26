@@ -46,9 +46,13 @@ where
 
     if let Some(fallback_base) = fallback_base {
         if debug {
-            eprintln!(
-                "gateway upstream fallback: from={} to={}",
-                upstream_base, fallback_base
+            log::warn!(
+                "event=gateway_upstream_fallback path={} status={} account_id={} from={} to={}",
+                path,
+                status.as_u16(),
+                account.id,
+                upstream_base,
+                fallback_base
             );
         }
         match super::super::try_openai_fallback(

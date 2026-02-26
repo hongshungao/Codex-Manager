@@ -43,6 +43,31 @@ function parseFiniteNumber(value) {
   return null;
 }
 
+export function resolveUsageWindows(usage) {
+  const primaryUsed = parseFiniteNumber(usage?.usedPercent);
+  const primaryWindow = parseFiniteNumber(usage?.windowMinutes);
+  const secondaryUsed = parseFiniteNumber(usage?.secondaryUsedPercent);
+  const secondaryWindow = parseFiniteNumber(usage?.secondaryWindowMinutes);
+  const normalizedStatus = String(usage?.availabilityStatus || "").trim().toLowerCase();
+  const accountId = String(usage?.accountId || "").toLowerCase();
+  const forceSingleWindow = normalizedStatus === "primary_window_available_only"
+    || accountId.includes("::free");
+
+  const hasPrimaryWindow = !forceSingleWindow && primaryUsed != null && primaryWindow != null;
+  const hasSecondaryWindow = secondaryUsed != null || secondaryWindow != null;
+
+  return {
+    normalizedStatus,
+    forceSingleWindow,
+    hasPrimaryWindow,
+    hasSecondaryWindow,
+    primaryUsed,
+    primaryWindow,
+    secondaryUsed,
+    secondaryWindow,
+  };
+}
+
 // 时间与用量展示相关工具函数
 export function formatTs(ts, options = {}) {
   const emptyLabel = options.emptyLabel || "未知";
@@ -118,12 +143,34 @@ export function formatResetLabel(ts) {
 
 export function calcAvailability(usage) {
   if (!usage) return { text: "未知", level: "unknown" };
-  const secondary = usage.secondaryUsedPercent;
-  const secondaryWindow = usage.secondaryWindowMinutes;
-  const primary = usage.usedPercent;
-  const primaryMissing = primary == null || usage.windowMinutes == null;
-  const secondaryPresent = secondary != null || secondaryWindow != null;
+  const windows = resolveUsageWindows(usage);
+  const normalizedStatus = windows.normalizedStatus;
+  if (normalizedStatus) {
+    if (normalizedStatus === "available") {
+      return { text: "可用", level: "ok" };
+    }
+    if (normalizedStatus === "primary_window_available_only") {
+      return { text: "单窗口可用", level: "ok" };
+    }
+    if (normalizedStatus === "unavailable") {
+      return { text: "不可用", level: "bad" };
+    }
+    if (normalizedStatus === "unknown") {
+      return { text: "未知", level: "unknown" };
+    }
+  }
+  const primary = windows.primaryUsed;
+  const secondary = windows.secondaryUsed;
+  const secondaryWindow = windows.secondaryWindow;
+  const primaryMissing = !windows.hasPrimaryWindow;
+  const secondaryPresent = windows.hasSecondaryWindow;
   const secondaryMissing = secondary == null || secondaryWindow == null;
+  if (primaryMissing && windows.forceSingleWindow && !secondaryMissing) {
+    if (secondary >= 100) {
+      return { text: "7日已用尽", level: "bad" };
+    }
+    return { text: "单窗口可用", level: "ok" };
+  }
   if (primaryMissing) {
     return { text: "用量缺失", level: "bad" };
   }

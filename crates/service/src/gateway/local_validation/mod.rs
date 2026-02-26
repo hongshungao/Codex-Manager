@@ -42,7 +42,7 @@ pub(super) fn prepare_local_request(
     trace_id: String,
     debug: bool,
 ) -> Result<LocalValidationResult, LocalValidationError> {
-    let body = io::read_request_body(request);
+    let body = io::read_request_body(request)?;
     let incoming_headers = super::IncomingHeaderSnapshot::from_request(request);
     let platform_key = io::extract_platform_key_or_error(request, &incoming_headers, debug)?;
 

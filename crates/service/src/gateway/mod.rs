@@ -2,25 +2,43 @@ use crate::storage_helpers::open_storage;
 
 mod local_validation;
 mod upstream;
+#[path = "request/request_helpers.rs"]
 mod request_helpers;
+#[path = "request/request_rewrite.rs"]
 mod request_rewrite;
 mod protocol_adapter;
+#[path = "observability/metrics.rs"]
 mod metrics;
+#[path = "routing/selection.rs"]
 mod selection;
+#[path = "routing/failover.rs"]
 mod failover;
 mod model_picker;
+#[path = "core/runtime_config.rs"]
 mod runtime_config;
+#[path = "observability/http_bridge.rs"]
 mod http_bridge;
+#[path = "routing/cooldown.rs"]
 mod cooldown;
+#[path = "auth/token_exchange.rs"]
 mod token_exchange;
+#[path = "auth/openai_fallback.rs"]
 mod openai_fallback;
+#[path = "observability/request_log.rs"]
 mod request_log;
+#[path = "request/request_entry.rs"]
 mod request_entry;
+#[path = "observability/trace_log.rs"]
 mod trace_log;
+#[path = "request/incoming_headers.rs"]
 mod incoming_headers;
+#[path = "routing/route_hint.rs"]
 mod route_hint;
+#[path = "request/local_count_tokens.rs"]
 mod local_count_tokens;
+#[path = "routing/route_quality.rs"]
 mod route_quality;
+#[path = "routing/request_gate.rs"]
 mod request_gate;
 
 pub(super) use request_helpers::{

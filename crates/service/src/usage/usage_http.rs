@@ -1,8 +1,33 @@
 use codexmanager_core::usage::usage_endpoint;
 use reqwest::blocking::Client;
+use serde::de::DeserializeOwned;
+use std::sync::mpsc;
 use std::time::Duration;
 
 static USAGE_HTTP_CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
+const USAGE_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const USAGE_HTTP_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const USAGE_HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn read_json_with_timeout<T>(resp: reqwest::blocking::Response, read_timeout: Duration) -> Result<T, String>
+where
+    T: DeserializeOwned + Send + 'static,
+{
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(resp.json::<T>().map_err(|e| e.to_string()));
+    });
+    match rx.recv_timeout(read_timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "response read timed out after {}ms",
+            read_timeout.as_millis()
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("response read failed: worker disconnected".to_string())
+        }
+    }
+}
 
 #[derive(serde::Deserialize)]
 pub(crate) struct RefreshTokenResponse {
@@ -17,7 +42,8 @@ pub(crate) fn usage_http_client() -> &'static Client {
     USAGE_HTTP_CLIENT.get_or_init(|| {
         Client::builder()
             // 中文注释：轮询链路复用连接池可降低握手开销；不复用会在多账号刷新时放大短连接抖动。
-            .connect_timeout(Duration::from_secs(15))
+            .connect_timeout(USAGE_HTTP_CONNECT_TIMEOUT)
+            .timeout(USAGE_HTTP_TOTAL_TIMEOUT)
             .pool_max_idle_per_host(8)
             .pool_idle_timeout(Some(Duration::from_secs(60)))
             .build()
@@ -43,7 +69,7 @@ pub(crate) fn fetch_usage_snapshot(
     if !resp.status().is_success() {
         return Err(format!("usage endpoint status {}", resp.status()));
     }
-    resp.json().map_err(|e| e.to_string())
+    read_json_with_timeout(resp, USAGE_HTTP_READ_TIMEOUT)
 }
 
 pub(crate) fn refresh_access_token(
@@ -69,7 +95,7 @@ pub(crate) fn refresh_access_token(
             resp.status()
         ));
     }
-    resp.json().map_err(|e| e.to_string())
+    read_json_with_timeout(resp, USAGE_HTTP_READ_TIMEOUT)
 }
 
 #[cfg(test)]

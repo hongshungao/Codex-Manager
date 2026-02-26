@@ -1,7 +1,8 @@
 use codexmanager_core::auth::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
 use codexmanager_core::storage::{Account, Storage, Token};
+use codexmanager_core::usage::parse_usage_snapshot;
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -29,13 +30,40 @@ static USAGE_POLLING_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new
 static GATEWAY_KEEPALIVE_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 static PENDING_USAGE_REFRESH_TASKS: std::sync::OnceLock<Mutex<HashSet<String>>> =
     std::sync::OnceLock::new();
+static USAGE_REFRESH_EXECUTOR: std::sync::OnceLock<UsageRefreshExecutor> = std::sync::OnceLock::new();
 const COMMON_POLL_JITTER_ENV: &str = "CODEXMANAGER_POLL_JITTER_SECS";
 const COMMON_POLL_FAILURE_BACKOFF_MAX_ENV: &str = "CODEXMANAGER_POLL_FAILURE_BACKOFF_MAX_SECS";
 const USAGE_POLL_JITTER_ENV: &str = "CODEXMANAGER_USAGE_POLL_JITTER_SECS";
 const USAGE_POLL_FAILURE_BACKOFF_MAX_ENV: &str = "CODEXMANAGER_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS";
+const USAGE_REFRESH_WORKERS_ENV: &str = "CODEXMANAGER_USAGE_REFRESH_WORKERS";
+const DEFAULT_USAGE_REFRESH_WORKERS: usize = 4;
 const GATEWAY_KEEPALIVE_JITTER_ENV: &str = "CODEXMANAGER_GATEWAY_KEEPALIVE_JITTER_SECS";
 const GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_ENV: &str =
     "CODEXMANAGER_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UsageAvailabilityStatus {
+    Available,
+    PrimaryWindowAvailableOnly,
+    Unavailable,
+    Unknown,
+}
+
+impl UsageAvailabilityStatus {
+    fn as_code(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::PrimaryWindowAvailableOnly => "primary_window_available_only",
+            Self::Unavailable => "unavailable",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UsageRefreshResult {
+    status: UsageAvailabilityStatus,
+}
 
 use self::usage_refresh_errors::{
     mark_usage_unreachable_if_needed, record_usage_refresh_failure, should_retry_with_refresh,
@@ -60,7 +88,13 @@ pub(crate) fn ensure_gateway_keepalive() {
 pub(crate) fn enqueue_usage_refresh_for_account(account_id: &str) -> bool {
     enqueue_usage_refresh_with_worker(account_id, |id| {
         if let Err(err) = refresh_usage_for_account(&id) {
-            log::warn!("async usage refresh failed: account_id={}, err={}", id, err);
+            let status = classify_usage_status_from_error(&err);
+            log::warn!(
+                "async usage refresh failed: account_id={} status={} err={}",
+                id,
+                status.as_code(),
+                err
+            );
         }
     })
 }
@@ -147,13 +181,67 @@ where
     if !mark_usage_refresh_task_pending(id) {
         return false;
     }
-    let account_id = id.to_string();
-    let account_id_for_worker = account_id.clone();
-    let _ = thread::spawn(move || {
-        worker(account_id_for_worker);
-        clear_usage_refresh_task_pending(&account_id);
-    });
+    let task = UsageRefreshTask {
+        account_id: id.to_string(),
+        worker: Box::new(worker),
+    };
+    if usage_refresh_executor().sender.send(task).is_err() {
+        clear_usage_refresh_task_pending(id);
+        return false;
+    }
     true
+}
+
+struct UsageRefreshTask {
+    account_id: String,
+    worker: Box<dyn FnOnce(String) + Send + 'static>,
+}
+
+struct UsageRefreshExecutor {
+    sender: mpsc::Sender<UsageRefreshTask>,
+}
+
+impl UsageRefreshExecutor {
+    fn new() -> Self {
+        let worker_count = usage_refresh_worker_count();
+        let (sender, receiver) = mpsc::channel::<UsageRefreshTask>();
+        let receiver = Arc::new(Mutex::new(receiver));
+        for index in 0..worker_count {
+            let receiver = Arc::clone(&receiver);
+            let _ = thread::Builder::new()
+                .name(format!("usage-refresh-worker-{index}"))
+                .spawn(move || usage_refresh_worker_loop(receiver));
+        }
+        Self { sender }
+    }
+}
+
+fn usage_refresh_executor() -> &'static UsageRefreshExecutor {
+    USAGE_REFRESH_EXECUTOR.get_or_init(UsageRefreshExecutor::new)
+}
+
+fn usage_refresh_worker_loop(receiver: Arc<Mutex<mpsc::Receiver<UsageRefreshTask>>>) {
+    loop {
+        let task = {
+            let receiver = receiver.lock().expect("usage refresh worker queue poisoned");
+            receiver.recv()
+        };
+        let Ok(task) = task else {
+            break;
+        };
+        let UsageRefreshTask { account_id, worker } = task;
+        let account_id_for_clear = account_id.clone();
+        worker(account_id);
+        clear_usage_refresh_task_pending(&account_id_for_clear);
+    }
+}
+
+fn usage_refresh_worker_count() -> usize {
+    std::env::var(USAGE_REFRESH_WORKERS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_USAGE_REFRESH_WORKERS)
 }
 
 fn mark_usage_refresh_task_pending(account_id: &str) -> bool {
@@ -195,13 +283,26 @@ pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
             .get(&token.account_id)
             .and_then(|value| value.as_deref());
         let started_at = Instant::now();
-        if let Err(err) =
-            refresh_usage_for_token(&storage, &token, workspace_id, Some(&mut account_map))
-        {
-            record_usage_refresh_metrics(false, started_at);
-            record_usage_refresh_failure(&storage, &token.account_id, &err);
-        } else {
-            record_usage_refresh_metrics(true, started_at);
+        match refresh_usage_for_token(&storage, &token, workspace_id, Some(&mut account_map)) {
+            Ok(result) => {
+                record_usage_refresh_metrics(true, started_at);
+                log::debug!(
+                    "usage refresh status: account_id={} status={}",
+                    token.account_id,
+                    result.status.as_code()
+                );
+            }
+            Err(err) => {
+                let status = classify_usage_status_from_error(&err);
+                log::debug!(
+                    "usage refresh status: account_id={} status={} err={}",
+                    token.account_id,
+                    status.as_code(),
+                    err
+                );
+                record_usage_refresh_metrics(false, started_at);
+                record_usage_refresh_failure(&storage, &token.account_id, &err);
+            }
         }
     }
     Ok(())
@@ -236,10 +337,26 @@ pub(crate) fn refresh_usage_for_account(account_id: &str) -> Result<(), String> 
     } else {
         Some(&mut account_map)
     };
-    if let Err(err) = refresh_usage_for_token(&storage, &token, workspace_id.as_deref(), account_cache) {
-        record_usage_refresh_metrics(false, started_at);
-        record_usage_refresh_failure(&storage, &token.account_id, &err);
-        return Err(err);
+    match refresh_usage_for_token(&storage, &token, workspace_id.as_deref(), account_cache) {
+        Ok(result) => {
+            log::debug!(
+                "usage refresh status: account_id={} status={}",
+                token.account_id,
+                result.status.as_code()
+            );
+        }
+        Err(err) => {
+            let status = classify_usage_status_from_error(&err);
+            log::debug!(
+                "usage refresh status: account_id={} status={} err={}",
+                token.account_id,
+                status.as_code(),
+                err
+            );
+            record_usage_refresh_metrics(false, started_at);
+            record_usage_refresh_failure(&storage, &token.account_id, &err);
+            return Err(err);
+        }
     }
     record_usage_refresh_metrics(true, started_at);
     Ok(())
@@ -257,7 +374,7 @@ fn refresh_usage_for_token(
     token: &Token,
     workspace_id: Option<&str>,
     account_cache: Option<&mut HashMap<String, Account>>,
-) -> Result<(), String> {
+) -> Result<UsageRefreshResult, String> {
     // 读取用量接口所需的基础配置
     let issuer = std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
     let client_id =
@@ -297,14 +414,22 @@ fn refresh_usage_for_token(
     let bearer = current.access_token.clone();
 
     match fetch_usage_snapshot(&base_url, &bearer, resolved_workspace_id.as_deref()) {
-        Ok(value) => store_usage_snapshot(storage, &current.account_id, value),
+        Ok(value) => {
+            let status = classify_usage_status_from_snapshot_value(&value);
+            store_usage_snapshot(storage, &current.account_id, value)?;
+            Ok(UsageRefreshResult { status })
+        }
         Err(err) if should_retry_with_refresh(&err) => {
             // 中文注释：token 刷新与持久化独立封装，避免轮询流程继续膨胀；
             // 不下沉会让后续 async 迁移时刷新链路与业务编排强耦合，回归范围扩大。
             refresh_and_persist_access_token(storage, &mut current, &issuer, &client_id)?;
             let bearer = current.access_token.clone();
             match fetch_usage_snapshot(&base_url, &bearer, resolved_workspace_id.as_deref()) {
-                Ok(value) => store_usage_snapshot(storage, &current.account_id, value),
+                Ok(value) => {
+                    let status = classify_usage_status_from_snapshot_value(&value);
+                    store_usage_snapshot(storage, &current.account_id, value)?;
+                    Ok(UsageRefreshResult { status })
+                }
                 Err(err) => {
                     mark_usage_unreachable_if_needed(storage, &current.account_id, &err);
                     Err(err)
@@ -335,6 +460,7 @@ mod async_tests {
     use super::{
         clear_pending_usage_refresh_tasks_for_tests, enqueue_usage_refresh_with_worker,
     };
+    use std::collections::HashSet;
     use std::sync::mpsc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -368,5 +494,78 @@ mod async_tests {
         std::thread::sleep(Duration::from_millis(20));
         clear_pending_usage_refresh_tasks_for_tests();
     }
+
+    #[test]
+    fn enqueue_usage_refresh_for_different_accounts_keeps_queue_progress() {
+        let _guard = USAGE_ASYNC_TEST_LOCK.lock().expect("lock");
+        clear_pending_usage_refresh_tasks_for_tests();
+        let (started_tx, started_rx) = mpsc::channel::<String>();
+        let (release_tx, release_rx) = mpsc::channel();
+        let started_tx_first = started_tx.clone();
+
+        let first = enqueue_usage_refresh_with_worker("acc-a", move |_| {
+            let _ = started_tx_first.send("acc-a".to_string());
+            let _ = release_rx.recv_timeout(Duration::from_secs(1));
+        });
+        assert!(first);
+
+        let started_tx = started_tx.clone();
+        let second = enqueue_usage_refresh_with_worker("acc-b", move |_| {
+            let _ = started_tx.send("acc-b".to_string());
+        });
+        assert!(second);
+
+        let first_started = started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first task should start");
+        let _ = release_tx.send(());
+        let second_started = started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("second task should start");
+
+        let seen: HashSet<String> = [first_started, second_started].into_iter().collect();
+        assert_eq!(seen.len(), 2);
+        assert!(seen.contains("acc-a"));
+        assert!(seen.contains("acc-b"));
+
+        std::thread::sleep(Duration::from_millis(20));
+        clear_pending_usage_refresh_tasks_for_tests();
+    }
+}
+
+fn classify_usage_status_from_snapshot_value(value: &serde_json::Value) -> UsageAvailabilityStatus {
+    let parsed = parse_usage_snapshot(value);
+
+    let primary_present = parsed.used_percent.is_some() && parsed.window_minutes.is_some();
+    if !primary_present {
+        return UsageAvailabilityStatus::Unknown;
+    }
+
+    if parsed.used_percent.map(|v| v >= 100.0).unwrap_or(false) {
+        return UsageAvailabilityStatus::Unavailable;
+    }
+
+    let secondary_used = parsed.secondary_used_percent;
+    let secondary_window = parsed.secondary_window_minutes;
+    let secondary_present = secondary_used.is_some() || secondary_window.is_some();
+    let secondary_complete = secondary_used.is_some() && secondary_window.is_some();
+
+    if !secondary_present {
+        return UsageAvailabilityStatus::PrimaryWindowAvailableOnly;
+    }
+    if !secondary_complete {
+        return UsageAvailabilityStatus::Unknown;
+    }
+    if secondary_used.map(|v| v >= 100.0).unwrap_or(false) {
+        return UsageAvailabilityStatus::Unavailable;
+    }
+    UsageAvailabilityStatus::Available
+}
+
+fn classify_usage_status_from_error(err: &str) -> UsageAvailabilityStatus {
+    if err.starts_with("usage endpoint status ") {
+        return UsageAvailabilityStatus::Unavailable;
+    }
+    UsageAvailabilityStatus::Unknown
 }
 

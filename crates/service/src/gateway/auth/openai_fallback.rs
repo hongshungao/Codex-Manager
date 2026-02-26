@@ -44,8 +44,10 @@ pub(super) fn try_openai_fallback(
         builder = builder.header(name, value);
     }
     if debug {
-        eprintln!(
-            "gateway upstream: base={}, token_source=api_key_access_token",
+        log::debug!(
+            "event=gateway_upstream_token_source path={} account_id={} token_source=api_key_access_token upstream_base={}",
+            request_path,
+            account_id.unwrap_or("-"),
             upstream_base
         );
     }

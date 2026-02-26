@@ -4,9 +4,60 @@ use codexmanager_core::auth::{
 };
 use codexmanager_core::storage::{now_ts, Account, Token};
 use reqwest::blocking::Client;
+use serde::de::DeserializeOwned;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::auth_callback::resolve_redirect_uri;
 use crate::storage_helpers::{account_key, open_storage};
+
+static OPENAI_AUTH_HTTP_CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
+const OPENAI_AUTH_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const OPENAI_AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const OPENAI_AUTH_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn read_json_with_timeout<T>(
+    resp: reqwest::blocking::Response,
+    read_timeout: Duration,
+) -> Result<T, String>
+where
+    T: DeserializeOwned + Send + 'static,
+{
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(resp.json::<T>().map_err(|e| e.to_string()));
+    });
+    match rx.recv_timeout(read_timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "response read timed out after {}ms",
+            read_timeout.as_millis()
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("response read failed: worker disconnected".to_string())
+        }
+    }
+}
+
+fn read_text_with_timeout(
+    resp: reqwest::blocking::Response,
+    read_timeout: Duration,
+) -> Result<String, String> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(resp.text().map_err(|e| e.to_string()));
+    });
+    match rx.recv_timeout(read_timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "response read timed out after {}ms",
+            read_timeout.as_millis()
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("response read failed: worker disconnected".to_string())
+        }
+    }
+}
 
 fn clean_value(value: Option<String>) -> Option<String> {
     match value {
@@ -20,6 +71,16 @@ fn clean_value(value: Option<String>) -> Option<String> {
         }
         None => None,
     }
+}
+
+fn openai_auth_http_client() -> &'static Client {
+    OPENAI_AUTH_HTTP_CLIENT.get_or_init(|| {
+        Client::builder()
+            .connect_timeout(OPENAI_AUTH_CONNECT_TIMEOUT)
+            .timeout(OPENAI_AUTH_TOTAL_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| Client::new())
+    })
 }
 
 pub(crate) fn complete_login(state: &str, code: &str) -> Result<(), String> {
@@ -134,7 +195,7 @@ fn exchange_code_for_tokens(
     code: &str,
 ) -> Result<TokenResponse, String> {
     // 请求 token 接口
-    let client = Client::new();
+    let client = openai_auth_http_client();
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -150,7 +211,7 @@ fn exchange_code_for_tokens(
     if !resp.status().is_success() {
         return Err(format!("token endpoint returned status {}", resp.status()));
     }
-    resp.json().map_err(|e| e.to_string())
+    read_json_with_timeout(resp, OPENAI_AUTH_READ_TIMEOUT)
 }
 
 pub(crate) fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> Result<String, String> {
@@ -160,7 +221,7 @@ pub(crate) fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> R
     }
 
     // 兑换平台 API Key
-    let client = Client::new();
+    let client = openai_auth_http_client();
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -176,13 +237,13 @@ pub(crate) fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> R
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().unwrap_or_default();
+        let body = read_text_with_timeout(resp, OPENAI_AUTH_READ_TIMEOUT).unwrap_or_default();
         return Err(format!(
             "api key exchange failed with status {} body {}",
             status, body
         ));
     }
-    let body: ExchangeResp = resp.json().map_err(|e| e.to_string())?;
+    let body: ExchangeResp = read_json_with_timeout(resp, OPENAI_AUTH_READ_TIMEOUT)?;
     Ok(body.access_token)
 }
 

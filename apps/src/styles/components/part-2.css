@@ -51,6 +51,15 @@
   gap: 16px;
 }
 
+/* 仪表盘与账号页统一内容版心，避免视觉错位。 */
+#pageDashboard .stats-grid,
+#pageDashboard .dashboard-duo,
+#pageAccounts .accounts-toolbar,
+#pageAccounts .panel {
+  width: min(100%, 1480px);
+  margin-inline: auto;
+}
+
 #pageDashboard.page.active {
   gap: 12px;
 }
@@ -304,15 +313,45 @@
 }
 
 .accounts-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   padding: 14px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-strong);
   background: linear-gradient(170deg, #ffffff, #edf6ff);
   box-shadow: var(--shadow-soft);
+}
+
+.accounts-refresh-progress {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--text) 82%, #1d4ed8);
+  background: color-mix(in srgb, #e0ecff 72%, #ffffff);
+  border: 1px solid color-mix(in srgb, #c8ddff 82%, #ffffff);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+#pageAccounts .actions {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+#refreshAll {
+  min-width: 104px;
+}
+
+/* 各页面主操作按钮统一为紧凑尺寸，避免视觉不一致。 */
+#pageApiKeys .panel-header > button,
+#pageRequestLogs .toolbar-actions > button,
+#pageSettings .settings-row > button,
+#pageDashboard .dashboard-actions > button {
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
 }
 
 .table-wrap {

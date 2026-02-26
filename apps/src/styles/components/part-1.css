@@ -33,12 +33,14 @@
 }
 
 button {
-  padding: 10px 16px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
   border-radius: var(--radius-sm);
   border: 1px solid var(--accent);
   background: var(--btn-primary-bg);
   color: #fff;
   font-weight: 700;
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
   cursor: pointer;
   transition:
     transform 0.16s ease,
@@ -141,7 +143,7 @@ button.secondary.is-loading::after {
 }
 
 .pill-nav button {
-  padding: 8px 14px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
   border-radius: 999px;
   border: none;
   background: transparent;
@@ -205,9 +207,9 @@ button.secondary.is-loading::after {
 
 .theme-panel button {
   min-width: 70px;
-  padding: 7px 10px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
   border-radius: 999px;
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
   box-shadow: none;
 }

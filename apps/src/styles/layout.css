@@ -234,7 +234,9 @@
 
 .update-actions button {
   border-radius: 999px;
-  padding: 8px 12px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
   white-space: nowrap;
 }
 
@@ -314,6 +316,7 @@
 
 .settings-theme .theme-panel button {
   min-width: 84px;
-  padding: 10px 15px;
-  font-size: 14px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
 }

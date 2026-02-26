@@ -1,7 +1,8 @@
-import { state } from "../state";
-import * as api from "../api";
+import { state } from "../state.js";
+import * as api from "../api.js";
 
 let requestLogRefreshSeq = 0;
+let requestLogInFlight = null;
 const DEFAULT_REQUEST_LOG_TODAY_SUMMARY = {
   todayTokens: 0,
   cachedInputTokens: 0,
@@ -68,6 +69,10 @@ function pickNumber(source, paths, fallback = 0) {
   return fallback;
 }
 
+function isAbortError(err) {
+  return Boolean(err && typeof err === "object" && err.name === "AbortError");
+}
+
 // 刷新账号列表
 export async function refreshAccounts() {
   const res = ensureRpcSuccess(await api.serviceAccountList(), "读取账号列表失败");
@@ -99,11 +104,41 @@ export async function refreshApiModels() {
 // 刷新请求日志（按关键字过滤）
 export async function refreshRequestLogs(query, options = {}) {
   const latestOnly = options.latestOnly !== false;
+  const normalizedQuery = query || null;
+  const requestKey = `${normalizedQuery ?? ""}::300`;
   const seq = ++requestLogRefreshSeq;
-  const res = ensureRpcSuccess(
-    await api.serviceRequestLogList(query || null, 300),
-    "读取请求日志失败",
-  );
+
+  if (requestLogInFlight && requestLogInFlight.key !== requestKey) {
+    requestLogInFlight.controller.abort();
+    requestLogInFlight = null;
+  }
+
+  if (!requestLogInFlight || requestLogInFlight.key !== requestKey) {
+    const controller = new AbortController();
+    requestLogInFlight = {
+      key: requestKey,
+      controller,
+      promise: (async () => ensureRpcSuccess(
+        await api.serviceRequestLogList(normalizedQuery, 300, { signal: controller.signal }),
+        "读取请求日志失败",
+      ))(),
+    };
+  }
+
+  const inFlight = requestLogInFlight;
+  let res = null;
+  try {
+    res = await inFlight.promise;
+  } catch (err) {
+    if (isAbortError(err)) {
+      return false;
+    }
+    throw err;
+  } finally {
+    if (requestLogInFlight === inFlight) {
+      requestLogInFlight = null;
+    }
+  }
   if (latestOnly && seq !== requestLogRefreshSeq) {
     return false;
   }

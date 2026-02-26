@@ -25,6 +25,10 @@
   --btn-primary-bg: linear-gradient(135deg, #2d8fff, #176ce8);
   --btn-primary-shadow: 0 10px 24px rgba(29, 125, 242, 0.32);
   --btn-secondary-bg: linear-gradient(180deg, #fff, #eef6ff);
+  --btn-pad-y: 8px;
+  --btn-pad-x: 12px;
+  --btn-font-size: 13px;
+  --btn-line-height: 1.25;
   --pill-nav-bg: linear-gradient(180deg, #ffffff, #edf6ff);
   --pill-active-bg: linear-gradient(135deg, #1571ef, #1a4fc9);
   --pill-active-shadow: 0 10px 20px rgba(21, 113, 239, 0.32);

@@ -61,6 +61,7 @@ pub struct LoginStartResult {
 #[serde(rename_all = "camelCase")]
 pub struct UsageSnapshotResult {
     pub account_id: Option<String>,
+    pub availability_status: Option<String>,
     pub used_percent: Option<f64>,
     pub window_minutes: Option<i64>,
     pub resets_at: Option<i64>,

@@ -21,6 +21,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/tags/') && format('tag-{0}', github.ref_name) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     if: ${{ github.event.inputs.run_verify != 'false' }}
@@ -45,11 +49,33 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/pnpm-lock.yaml
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          # 键 = OS + Node主版本 + 锁文件哈希；锁文件不变时可稳定命中依赖缓存
+          key: ${{ runner.os }}-pnpm-store-node20-v1-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: |
+            # 当前锁文件未命中时，回退到同平台同Node版本历史缓存，尽量减少冷启动
+            ${{ runner.os }}-pnpm-store-node20-v1-
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # shared-key 保证 verify/build 两个 job 复用同一批 Rust 缓存命名空间
+          shared-key: release-linux-rust-stable-v1
+          # 显式声明 workspace -> target，提升 Tauri 目标产物缓存命中率
+          workspaces: |
+            . -> target
+            apps/src-tauri -> target
 
       - name: Install frontend dependencies
         working-directory: apps
@@ -94,15 +120,31 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/pnpm-lock.yaml
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          # 与 verify job 使用同一键策略，便于跨 job / 跨次运行复用
+          key: ${{ runner.os }}-pnpm-store-node20-v1-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-node20-v1-
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
+          # shared-key 与 verify 对齐，提升同 workflow 内和后续运行的缓存命中率
+          shared-key: release-linux-rust-stable-v1
           workspaces: |
-            .
-            apps/src-tauri
+            . -> target
+            apps/src-tauri -> target
 
       - name: Cache apt packages
         uses: actions/cache@v4

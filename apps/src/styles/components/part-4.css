@@ -123,6 +123,21 @@
   gap: 10px;
 }
 
+/* 弹窗内按钮统一为紧凑尺寸，保持与页面主按钮一致。 */
+.modal-footer button {
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
+  min-width: 92px;
+}
+
+.modal-body .login-url button {
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
+  min-width: 88px;
+}
+
 .confirm-card {
   width: min(460px, 100%);
 }

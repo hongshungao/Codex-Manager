@@ -28,6 +28,7 @@ function createSortChangeTarget(accountId, value) {
   };
   const input = {
     value,
+    dataset: { originSort: String(value) },
     closest(selector) {
       if (selector === "tr[data-account-id]") return row;
       return null;
@@ -77,11 +78,24 @@ test("handleAccountRowsClick delegates delete action by account id", () => {
 
 test("handleAccountRowsChange delegates sort change with numeric value", () => {
   let payload = null;
-  const handled = handleAccountRowsChange(createSortChangeTarget("acc-3", "42"), {
+  const target = createSortChangeTarget("acc-3", "42");
+  target.closest("input[data-field='sort']").dataset.originSort = "7";
+  const handled = handleAccountRowsChange(target, {
     onUpdateSort: (accountId, sort) => {
       payload = { accountId, sort };
     },
   });
   assert.equal(handled, true);
   assert.deepEqual(payload, { accountId: "acc-3", sort: 42 });
+});
+
+test("handleAccountRowsChange skips unchanged sort value", () => {
+  let called = false;
+  const handled = handleAccountRowsChange(createSortChangeTarget("acc-4", "5"), {
+    onUpdateSort: () => {
+      called = true;
+    },
+  });
+  assert.equal(handled, false);
+  assert.equal(called, false);
 });

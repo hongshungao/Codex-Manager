@@ -27,6 +27,77 @@ function isCommandMissingError(err) {
   return msg.includes("invalid args") && msg.includes("for command");
 }
 
+let rpcRequestId = 1;
+let rpcTokenCache = "";
+
+function resolveRpcAddr() {
+  const raw = String(state.serviceAddr || "").trim();
+  if (raw) {
+    return raw;
+  }
+  return "localhost:48760";
+}
+
+function isAbortError(err) {
+  return Boolean(err && typeof err === "object" && err.name === "AbortError");
+}
+
+function unwrapRpcError(payload) {
+  const err = payload && typeof payload === "object" ? payload.error : null;
+  if (!err) return "";
+  if (typeof err === "string") return err;
+  if (typeof err.message === "string" && err.message.trim()) {
+    return err.message;
+  }
+  return JSON.stringify(err);
+}
+
+async function getRpcToken() {
+  if (rpcTokenCache) {
+    return rpcTokenCache;
+  }
+  const token = await invoke("service_rpc_token", {});
+  const normalized = String(token || "").trim();
+  if (!normalized) {
+    throw new Error("RPC token unavailable");
+  }
+  rpcTokenCache = normalized;
+  return rpcTokenCache;
+}
+
+async function requestlogListViaHttpRpc(query, limit, options = {}) {
+  const signal = options && options.signal ? options.signal : undefined;
+  const addr = resolveRpcAddr();
+  const token = await getRpcToken();
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: rpcRequestId++,
+    method: "requestlog/list",
+    params: { query, limit },
+  });
+  const response = await fetch(`http://${addr}/rpc`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CodexManager-Rpc-Token": token,
+    },
+    body,
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`RPC HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const rpcError = unwrapRpcError(payload);
+  if (rpcError) {
+    throw new Error(rpcError);
+  }
+  if (payload && Object.prototype.hasOwnProperty.call(payload, "result")) {
+    return payload.result;
+  }
+  return payload;
+}
+
 async function invokeFirst(methods, params) {
   let lastErr = null;
   for (const method of methods) {
@@ -99,7 +170,18 @@ export async function serviceUsageRefresh(accountId) {
   return invoke("service_usage_refresh", withAddr({ accountId }));
 }
 
-export async function serviceRequestLogList(query, limit) {
+export async function serviceRequestLogList(query, limit, options = {}) {
+  const signal = options && options.signal ? options.signal : undefined;
+  if (signal) {
+    try {
+      return await requestlogListViaHttpRpc(query, limit, { signal });
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw err;
+      }
+      rpcTokenCache = "";
+    }
+  }
   return invoke("service_requestlog_list", withAddr({ query, limit }));
 }
 

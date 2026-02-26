@@ -105,15 +105,17 @@ pub(super) fn write_request_log(
         && total_zero_or_missing
         && reasoning_zero_or_missing
     {
-        eprintln!(
-            "gateway token usage missing: path={request_path}, key_id={}, account_id={}, model={}",
-            key_id.unwrap_or("-"),
+        log::warn!(
+            "event=gateway_token_usage_missing path={} status={} account_id={} key_id={} model={}",
+            request_path,
+            status_code.unwrap_or(0),
             account_id.unwrap_or("-"),
+            key_id.unwrap_or("-"),
             model.unwrap_or("-"),
         );
     }
     // 记录请求最终结果（而非内部重试明细），保证 UI 一次请求只展示一条记录。
-    let request_log_id = storage.insert_request_log(&RequestLog {
+    let request_log_id = match storage.insert_request_log(&RequestLog {
         key_id: key_id.map(|v| v.to_string()),
         account_id: account_id.map(|v| v.to_string()),
         request_path: request_path.to_string(),
@@ -130,9 +132,19 @@ pub(super) fn write_request_log(
         estimated_cost_usd: None,
         error: error.map(|v| v.to_string()),
         created_at,
-    });
-    let Ok(request_log_id) = request_log_id else {
-        return;
+    }) {
+        Ok(request_log_id) => request_log_id,
+        Err(err) => {
+            log::error!(
+                "event=gateway_request_log_insert_failed path={} status={} account_id={} key_id={} err={}",
+                request_path,
+                status_code.unwrap_or(0),
+                account_id.unwrap_or("-"),
+                key_id.unwrap_or("-"),
+                err
+            );
+            return;
+        }
     };
 
     if let Err(err) = storage.insert_request_token_stat(&RequestTokenStat {
@@ -148,7 +160,14 @@ pub(super) fn write_request_log(
         estimated_cost_usd: Some(estimated_cost_usd),
         created_at,
     }) {
-        eprintln!("insert request_token_stats failed: {err}");
+        log::error!(
+            "event=gateway_request_token_stat_insert_failed path={} status={} account_id={} key_id={} err={}",
+            request_path,
+            status_code.unwrap_or(0),
+            account_id.unwrap_or("-"),
+            key_id.unwrap_or("-"),
+            err
+        );
     }
 }
 

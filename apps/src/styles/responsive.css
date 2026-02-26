@@ -57,6 +57,30 @@
   .table-wrap {
     overflow-x: auto;
   }
+
+  .requestlog-table thead th,
+  .requestlog-table tbody td {
+    padding: 10px 10px;
+    font-size: 12px;
+  }
+
+  .requestlog-table .request-path-wrap {
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .requestlog-table .path-copy {
+    padding: 3px 6px;
+  }
+
+  .requestlog-table thead th:nth-child(3),
+  .requestlog-table thead th:nth-child(7),
+  .requestlog-table thead th:nth-child(9),
+  .requestlog-table tbody td.requestlog-col-key,
+  .requestlog-table tbody td.requestlog-col-effort,
+  .requestlog-table tbody td.requestlog-col-error {
+    display: none;
+  }
 }
 
 @media (max-width: 960px) {
@@ -76,8 +100,13 @@
     align-items: flex-start;
   }
 
+  #pageAccounts .actions {
+    flex-wrap: wrap;
+  }
+
   .toolbar-left {
     width: 100%;
+    flex-wrap: wrap;
   }
 
   .search-field input,
@@ -149,6 +178,27 @@
   .table.api-table,
   .table.requestlog-table {
     grid-template-columns: 1fr;
+  }
+
+  .requestlog-table thead th:nth-child(1),
+  .requestlog-table thead th:nth-child(4),
+  .requestlog-table tbody td.requestlog-col-time,
+  .requestlog-table tbody td.requestlog-col-method {
+    display: none;
+  }
+
+  .requestlog-table .requestlog-col-account .cell-stack {
+    min-width: 120px;
+    gap: 4px;
+  }
+
+  .requestlog-table .requestlog-col-path,
+  .requestlog-table .request-path {
+    min-width: 200px;
+  }
+
+  .requestlog-table .requestlog-col-model {
+    min-width: 150px;
   }
 
   .table-header {

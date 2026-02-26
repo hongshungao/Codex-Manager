@@ -41,7 +41,13 @@ where
         return AltPathRetryResult::NotTriggered;
     }
     if debug {
-        eprintln!("gateway upstream retry: url={alt_url}");
+        log::warn!(
+            "event=gateway_upstream_alt_retry path={} status={} account_id={} upstream_url={}",
+            request.url(),
+            status.as_u16(),
+            account.id,
+            alt_url
+        );
     }
     if super::deadline::is_expired(request_deadline) {
         return AltPathRetryResult::Terminal {

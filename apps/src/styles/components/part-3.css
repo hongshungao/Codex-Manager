@@ -36,6 +36,26 @@
   word-break: break-word;
 }
 
+.requestlog-col-account .cell-stack {
+  min-width: 180px;
+}
+
+.requestlog-col-model,
+.requestlog-col-path {
+  min-width: 140px;
+}
+
+.requestlog-col-key,
+.requestlog-col-method,
+.requestlog-col-effort,
+.requestlog-col-status {
+  white-space: nowrap;
+}
+
+.requestlog-col-error {
+  max-width: 360px;
+}
+
 .request-path-wrap {
   display: flex;
   align-items: center;
@@ -80,28 +100,36 @@
   white-space: nowrap;
 }
 
+.account-table .cell-actions button {
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
+  min-width: 72px;
+}
+
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .search-field input {
-  width: 220px;
+  width: 180px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  padding: 9px 12px;
-  font-size: 13px;
+  padding: 8px 10px;
+  font-size: 12px;
   background: #fff;
 }
 
 .search-field select {
-  width: 190px;
+  width: 160px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  padding: 9px 12px;
-  font-size: 13px;
+  padding: 8px 10px;
+  font-size: 12px;
   background: #fff;
 }
 .segmented {
@@ -118,9 +146,10 @@
   border: none;
   background: transparent;
   color: color-mix(in srgb, var(--accent) 65%, #4c6582);
-  padding: 6px 12px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
   border-radius: 999px;
   font-weight: 600;
+  font-size: var(--btn-font-size);
   box-shadow: none;
 }
 
@@ -132,6 +161,11 @@
 
 .log-segmented button {
   min-width: 52px;
+}
+
+#pageAccounts .actions button {
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font-size);
 }
 
 .table {
@@ -182,6 +216,17 @@
   padding: 6px 8px;
   font-size: 13px;
   background: #fff;
+}
+
+/* 账号表列宽微调：顺序更窄，可用状态更宽。 */
+.account-table thead th:nth-child(3),
+.account-table tbody td:nth-child(3) {
+  width: 120px;
+}
+
+.account-table thead th:nth-child(4),
+.account-table tbody td:nth-child(4) {
+  width: 160px;
 }
 
 .status-tag {

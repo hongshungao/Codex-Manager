@@ -5,10 +5,13 @@ use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::storage_helpers::{account_key, open_storage};
 
 const MAX_ERROR_ITEMS: usize = 50;
+const DEFAULT_IMPORT_BATCH_SIZE: usize = 200;
+const IMPORT_BATCH_SIZE_ENV: &str = "CODEXMANAGER_ACCOUNT_IMPORT_BATCH_SIZE";
 
 #[derive(Debug, Serialize)]
 pub(crate) struct AccountImportResult {
@@ -107,22 +110,62 @@ pub(crate) fn import_account_auth_json(contents: Vec<String>) -> Result<AccountI
         failed: 0,
         errors: Vec::new(),
     };
+    let mut progress = AccountImportProgress::new();
+    let batch_size = import_batch_size();
 
     for content in contents {
         let items = parse_items_from_content(&content)?;
-        for item in items {
+        import_items_in_batches(
+            &storage,
+            &mut index,
+            &mut result,
+            &mut progress,
+            items,
+            batch_size,
+        );
+    }
+
+    progress.finish();
+    Ok(result)
+}
+
+fn import_batch_size() -> usize {
+    std::env::var(IMPORT_BATCH_SIZE_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_IMPORT_BATCH_SIZE)
+}
+
+fn import_items_in_batches(
+    storage: &Storage,
+    index: &mut ExistingAccountIndex,
+    result: &mut AccountImportResult,
+    progress: &mut AccountImportProgress,
+    items: Vec<Value>,
+    batch_size: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let total_batches = items.len().div_ceil(batch_size);
+    for (batch_index, batch) in items.chunks(batch_size).enumerate() {
+        progress.begin_batch(batch_index + 1, total_batches, batch.len());
+        for item in batch {
             result.total += 1;
             let current_index = result.total;
-            match import_single_item(&storage, &mut index, item, current_index) {
+            match import_single_item(storage, index, item, current_index) {
                 Ok(created) => {
                     if created {
                         result.created += 1;
                     } else {
                         result.updated += 1;
                     }
+                    progress.on_item_success(created);
                 }
                 Err(err) => {
                     result.failed += 1;
+                    progress.on_item_failure();
                     if result.errors.len() < MAX_ERROR_ITEMS {
                         result.errors.push(AccountImportError {
                             index: current_index,
@@ -132,9 +175,108 @@ pub(crate) fn import_account_auth_json(contents: Vec<String>) -> Result<AccountI
                 }
             }
         }
+        progress.finish_batch();
+    }
+}
+
+#[derive(Debug)]
+struct AccountImportProgress {
+    started_at: Instant,
+    processed: usize,
+    created: usize,
+    updated: usize,
+    failed: usize,
+    active_batch: Option<AccountImportBatchProgress>,
+}
+
+#[derive(Debug)]
+struct AccountImportBatchProgress {
+    index: usize,
+    total: usize,
+    size: usize,
+    processed: usize,
+    created: usize,
+    updated: usize,
+    failed: usize,
+}
+
+impl AccountImportProgress {
+    fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+            processed: 0,
+            created: 0,
+            updated: 0,
+            failed: 0,
+            active_batch: None,
+        }
     }
 
-    Ok(result)
+    fn begin_batch(&mut self, index: usize, total: usize, size: usize) {
+        self.active_batch = Some(AccountImportBatchProgress {
+            index,
+            total,
+            size,
+            processed: 0,
+            created: 0,
+            updated: 0,
+            failed: 0,
+        });
+    }
+
+    fn on_item_success(&mut self, created: bool) {
+        self.processed += 1;
+        if created {
+            self.created += 1;
+        } else {
+            self.updated += 1;
+        }
+        if let Some(batch) = self.active_batch.as_mut() {
+            batch.processed += 1;
+            if created {
+                batch.created += 1;
+            } else {
+                batch.updated += 1;
+            }
+        }
+    }
+
+    fn on_item_failure(&mut self) {
+        self.processed += 1;
+        self.failed += 1;
+        if let Some(batch) = self.active_batch.as_mut() {
+            batch.processed += 1;
+            batch.failed += 1;
+        }
+    }
+
+    fn finish_batch(&mut self) {
+        if let Some(batch) = self.active_batch.take() {
+            log::info!(
+                "account import batch finished: {}/{} size={} processed={} created={} updated={} failed={} total_processed={} elapsed_ms={}",
+                batch.index,
+                batch.total,
+                batch.size,
+                batch.processed,
+                batch.created,
+                batch.updated,
+                batch.failed,
+                self.processed,
+                self.started_at.elapsed().as_millis()
+            );
+        }
+    }
+
+    fn finish(&self) {
+        log::info!(
+            "account import finished: processed={} created={} updated={} failed={} elapsed_ms={}",
+            self.processed,
+            self.created,
+            self.updated,
+            self.failed,
+            self.started_at.elapsed().as_millis()
+        );
+    }
 }
 
 fn parse_items_from_content(content: &str) -> Result<Vec<Value>, String> {
@@ -160,7 +302,7 @@ fn parse_items_from_content(content: &str) -> Result<Vec<Value>, String> {
 fn import_single_item(
     storage: &Storage,
     index: &mut ExistingAccountIndex,
-    item: Value,
+    item: &Value,
     sequence: usize,
 ) -> Result<bool, String> {
     let payload = extract_token_payload(&item)?;
@@ -224,7 +366,11 @@ fn import_single_item(
             },
             chatgpt_account_id: Some(chatgpt_account_id),
             workspace_id,
-            group_name: existing.group_name.clone(),
+            group_name: existing
+                .group_name
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| Some("import".to_string())),
             sort: existing.sort,
             status: "active".to_string(),
             created_at: existing.created_at,
@@ -240,7 +386,7 @@ fn import_single_item(
             issuer: DEFAULT_ISSUER.to_string(),
             chatgpt_account_id: Some(chatgpt_account_id),
             workspace_id,
-            group_name: None,
+            group_name: Some("import".to_string()),
             sort: next_sort,
             status: "active".to_string(),
             created_at: now,

@@ -1,6 +1,7 @@
 import { state } from "../../state.js";
 import { dom } from "../../ui/dom.js";
-import { formatLimitLabel, formatTs } from "../../utils/format.js";
+import { formatLimitLabel, formatTs, resolveUsageWindows } from "../../utils/format.js";
+import { getRefreshAllProgress } from "../../services/management/account-actions.js";
 import {
   buildAccountDerivedMap,
   buildGroupFilterOptions,
@@ -17,6 +18,46 @@ let accountLookupById = new Map();
 let groupOptionsCacheKey = "";
 let groupOptionsCache = [];
 let groupSelectRenderedKey = "";
+let refreshProgressNode = null;
+
+function ensureRefreshProgressNode() {
+  if (refreshProgressNode?.isConnected) {
+    return refreshProgressNode;
+  }
+  if (!dom.accountsToolbar) {
+    return null;
+  }
+  const existing = dom.accountsToolbar.querySelector(".accounts-refresh-progress");
+  if (existing) {
+    refreshProgressNode = existing;
+    return refreshProgressNode;
+  }
+  const node = document.createElement("div");
+  node.className = "accounts-refresh-progress";
+  node.hidden = true;
+  node.setAttribute("aria-live", "polite");
+  dom.accountsToolbar.prepend(node);
+  refreshProgressNode = node;
+  return refreshProgressNode;
+}
+
+export function renderAccountsRefreshProgress(progress = getRefreshAllProgress()) {
+  const node = ensureRefreshProgressNode();
+  if (!node) return;
+  const total = Math.max(0, Number(progress?.total || 0));
+  const completed = Math.min(total, Math.max(0, Number(progress?.completed || 0)));
+  const remaining = Math.max(0, Number(progress?.remaining ?? total - completed));
+  const active = Boolean(progress?.active) && total > 0;
+  if (!active) {
+    node.hidden = true;
+    node.textContent = "";
+    return;
+  }
+  const primaryText = `刷新进度 ${completed}/${total}，剩余 ${remaining} 项`;
+  const lastTaskLabel = String(progress?.lastTaskLabel || "").trim();
+  node.hidden = false;
+  node.textContent = lastTaskLabel ? `${primaryText} · 最近完成：${lastTaskLabel}` : primaryText;
+}
 
 function getGroupOptionsCacheKey(accounts) {
   const list = Array.isArray(accounts) ? accounts : [];
@@ -116,16 +157,22 @@ function createAccountCell(account, accountDerived) {
   accountWrap.appendChild(accountMeta);
   const mini = document.createElement("div");
   mini.className = "mini-usage";
-  const primaryLabel = formatLimitLabel(accountDerived?.usage?.windowMinutes, "5小时");
-  mini.appendChild(
-    renderMiniUsageLine(primaryLabel, primaryRemain, false),
-  );
-  const hasSecondaryWindow =
-    accountDerived?.usage?.secondaryUsedPercent != null
-    || accountDerived?.usage?.secondaryWindowMinutes != null;
-  if (hasSecondaryWindow) {
+  const usage = accountDerived?.usage || null;
+  const windows = resolveUsageWindows(usage);
+  const hasPrimaryWindow = windows.hasPrimaryWindow;
+  const hasSecondaryWindow = windows.hasSecondaryWindow;
+
+  if (hasPrimaryWindow) {
+    const primaryLabel = formatLimitLabel(windows.primaryWindow, "5小时");
     mini.appendChild(
-      renderMiniUsageLine("7天", secondaryRemain, true),
+      renderMiniUsageLine(primaryLabel, primaryRemain, false),
+    );
+  }
+
+  if (hasSecondaryWindow) {
+    const secondaryAsPrimary = !hasPrimaryWindow;
+    mini.appendChild(
+      renderMiniUsageLine("7天", secondaryRemain, !secondaryAsPrimary),
     );
   }
   accountWrap.appendChild(mini);
@@ -146,6 +193,7 @@ function createSortCell(account) {
   sortInput.type = "number";
   sortInput.setAttribute("data-field", "sort");
   sortInput.value = account.sort != null ? String(account.sort) : "0";
+  sortInput.dataset.originSort = sortInput.value;
   cellSort.appendChild(sortInput);
   return cellSort;
 }
@@ -210,7 +258,7 @@ function renderAccountRow(account, accountDerivedMap, { onDelete }) {
 
   row.appendChild(createUpdatedCell(accountDerived.usage));
   row.appendChild(createActionsCell(Boolean(onDelete)));
-  dom.accountRows.appendChild(row);
+  return row;
 }
 
 function getAccountFromRow(row, lookup) {
@@ -246,7 +294,12 @@ export function handleAccountRowsChange(target, handlers = accountRowHandlers) {
   const accountId = row.dataset.accountId;
   if (!accountId) return false;
   const sortValue = Number(sortInput.value || 0);
-  handlers?.onUpdateSort?.(accountId, sortValue);
+  const originSort = Number(sortInput.dataset.originSort);
+  if (Number.isFinite(originSort) && originSort === sortValue) {
+    return false;
+  }
+  sortInput.dataset.originSort = String(sortValue);
+  handlers?.onUpdateSort?.(accountId, sortValue, originSort);
   return true;
 }
 
@@ -266,6 +319,7 @@ function ensureAccountRowsEventsBound() {
 // 渲染账号列表
 export function renderAccounts({ onUpdateSort, onOpenUsage, onDelete }) {
   ensureAccountRowsEventsBound();
+  renderAccountsRefreshProgress();
   accountRowHandlers = { onUpdateSort, onOpenUsage, onDelete };
   dom.accountRows.innerHTML = "";
   syncGroupFilterSelect(getGroupOptions(state.accountList), groupOptionsCacheKey);
@@ -287,7 +341,9 @@ export function renderAccounts({ onUpdateSort, onOpenUsage, onDelete }) {
   }
 
   accountLookupById = new Map(filtered.map((account) => [account.id, account]));
+  const fragment = document.createDocumentFragment();
   filtered.forEach((account) => {
-    renderAccountRow(account, accountDerivedMap, { onDelete });
+    fragment.appendChild(renderAccountRow(account, accountDerivedMap, { onDelete }));
   });
+  dom.accountRows.appendChild(fragment);
 }

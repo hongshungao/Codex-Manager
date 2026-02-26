@@ -8,7 +8,7 @@ param(
   [string]$PortableDir,
   [switch]$AllPlatforms,
   [string]$GithubToken,
-  [string]$WorkflowFile = "release-multi-platform.yml",
+  [string]$WorkflowFile = "release-windows.yml",
   [string]$GitRef,
   [string]$ReleaseTag,
   [switch]$NoVerify,
@@ -125,6 +125,35 @@ function Invoke-GitHubApi {
   return Invoke-RestMethod -Method Post -Uri $Uri -Headers $headers -ContentType "application/json" -Body $json
 }
 
+function Resolve-WorkflowDefinition {
+  param(
+    [hashtable]$Repo,
+    [string]$Token,
+    [string]$WorkflowFile
+  )
+
+  $workflowUri = "https://api.github.com/repos/$($Repo.owner)/$($Repo.repo)/actions/workflows/$WorkflowFile"
+  try {
+    return Invoke-GitHubApi -Method GET -Uri $workflowUri -Token $Token -Body $null
+  } catch {
+    $listUri = "https://api.github.com/repos/$($Repo.owner)/$($Repo.repo)/actions/workflows?per_page=100"
+    $workflowList = @()
+    try {
+      $resp = Invoke-GitHubApi -Method GET -Uri $listUri -Token $Token -Body $null
+      if ($null -ne $resp.workflows) {
+        $workflowList = $resp.workflows | ForEach-Object { $_.path } | Sort-Object
+      }
+    } catch {
+      # no-op; keep fallback message
+    }
+
+    if ($workflowList.Count -gt 0) {
+      throw "workflow '$WorkflowFile' not found. Available workflows: $($workflowList -join ', ')"
+    }
+    throw "workflow '$WorkflowFile' not found."
+  }
+}
+
 function Invoke-LocalWindowsBuild {
   if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     throw "cargo not found in PATH"
@@ -203,6 +232,9 @@ function Invoke-AllPlatformBuild {
   if ([string]::IsNullOrWhiteSpace($resolvedSha)) {
     throw "cannot resolve git ref to commit: $GitRef"
   }
+
+  $workflow = Resolve-WorkflowDefinition -Repo $repo -Token $token -WorkflowFile $WorkflowFile
+  Write-Step "using workflow: $($workflow.path)"
 
   $dispatchUri = "https://api.github.com/repos/$($repo.owner)/$($repo.repo)/actions/workflows/$WorkflowFile/dispatches"
   $runsUri = "https://api.github.com/repos/$($repo.owner)/$($repo.repo)/actions/workflows/$WorkflowFile/runs?event=workflow_dispatch&per_page=50"

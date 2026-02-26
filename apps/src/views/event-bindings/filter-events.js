@@ -3,6 +3,8 @@ let filterEventsBound = false;
 let requestLogInputSeq = 0;
 let accountSearchTimer = null;
 let accountSearchInputSeq = 0;
+let requestLogRenderTaskScheduled = false;
+let accountRenderTaskScheduled = false;
 
 export function bindFilterEvents({
   dom,
@@ -18,15 +20,51 @@ export function bindFilterEvents({
   }
   filterEventsBound = true;
 
+  const scheduleRequestLogRender = () => {
+    if (requestLogRenderTaskScheduled) {
+      return;
+    }
+    requestLogRenderTaskScheduled = true;
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => {
+        requestLogRenderTaskScheduled = false;
+        renderRequestLogs();
+      });
+      return;
+    }
+    setTimeout(() => {
+      requestLogRenderTaskScheduled = false;
+      renderRequestLogs();
+    }, 0);
+  };
+
   const runRequestLogRefresh = async (query) => {
     try {
       const applied = await refreshRequestLogs(query, { latestOnly: true });
       if (applied !== false) {
-        renderRequestLogs();
+        scheduleRequestLogRender();
       }
     } catch (err) {
       console.error("[requestlogs] refresh failed", err);
     }
+  };
+
+  const scheduleAccountsRender = () => {
+    if (accountRenderTaskScheduled) {
+      return;
+    }
+    accountRenderTaskScheduled = true;
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => {
+        accountRenderTaskScheduled = false;
+        renderAccountsView();
+      });
+      return;
+    }
+    setTimeout(() => {
+      accountRenderTaskScheduled = false;
+      renderAccountsView();
+    }, 0);
   };
 
   if (dom.refreshRequestLogs) {
@@ -40,6 +78,9 @@ export function bindFilterEvents({
   if (dom.requestLogSearch) {
     dom.requestLogSearch.addEventListener("input", (event) => {
       const query = event.target.value || "";
+      if (query === state.requestLogQuery) {
+        return;
+      }
       state.requestLogQuery = query;
       const currentSeq = ++requestLogInputSeq;
       if (requestLogSearchTimer) {
@@ -54,9 +95,12 @@ export function bindFilterEvents({
     });
   }
   const setLogFilter = (value) => {
+    if (state.requestLogStatusFilter === value) {
+      return;
+    }
     state.requestLogStatusFilter = value;
     updateRequestLogFilterButtons();
-    renderRequestLogs();
+    scheduleRequestLogRender();
   };
   if (dom.filterLogAll) dom.filterLogAll.addEventListener("click", () => setLogFilter("all"));
   if (dom.filterLog2xx) dom.filterLog2xx.addEventListener("click", () => setLogFilter("2xx"));
@@ -66,6 +110,9 @@ export function bindFilterEvents({
   if (dom.accountSearch) {
     dom.accountSearch.addEventListener("input", (event) => {
       const query = event.target.value || "";
+      if (query === state.accountSearch) {
+        return;
+      }
       state.accountSearch = query;
       const currentSeq = ++accountSearchInputSeq;
       if (accountSearchTimer) {
@@ -75,15 +122,19 @@ export function bindFilterEvents({
         if (currentSeq !== accountSearchInputSeq) {
           return;
         }
-        renderAccountsView();
+        scheduleAccountsRender();
       }, 220);
     });
   }
 
   if (dom.accountGroupFilter) {
     dom.accountGroupFilter.addEventListener("change", (event) => {
-      state.accountGroupFilter = event.target.value || "all";
-      renderAccountsView();
+      const nextGroup = event.target.value || "all";
+      if (nextGroup === state.accountGroupFilter) {
+        return;
+      }
+      state.accountGroupFilter = nextGroup;
+      scheduleAccountsRender();
     });
   }
 
@@ -94,9 +145,12 @@ export function bindFilterEvents({
   };
 
   const setFilter = (filter) => {
+    if (state.accountFilter === filter) {
+      return;
+    }
     state.accountFilter = filter;
     updateFilterButtons();
-    renderAccountsView();
+    scheduleAccountsRender();
   };
 
   if (dom.filterAll) dom.filterAll.addEventListener("click", () => setFilter("all"));

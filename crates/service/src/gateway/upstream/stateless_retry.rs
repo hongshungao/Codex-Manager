@@ -58,9 +58,11 @@ pub(super) fn retry_stateless_then_optional_alt(
         return StatelessRetryResult::NotTriggered;
     }
     if debug {
-        eprintln!(
-            "gateway upstream stateless retry: account_id={}, status={}",
-            account.id, status
+        log::warn!(
+            "event=gateway_upstream_stateless_retry path={} status={} account_id={}",
+            request.url(),
+            status.as_u16(),
+            account.id
         );
     }
     if status.as_u16() == 403 {
@@ -93,7 +95,8 @@ pub(super) fn retry_stateless_then_optional_alt(
         Ok(resp) => resp,
         Err(err) => {
             log::warn!(
-                "gateway stateless retry error: account_id={}, err={}",
+                "event=gateway_stateless_retry_error path={} status=502 account_id={} err={}",
+                request.url(),
                 account.id,
                 err
             );
@@ -133,8 +136,10 @@ pub(super) fn retry_stateless_then_optional_alt(
                 }
                 Err(err) => {
                     log::warn!(
-                        "gateway stateless alt retry error: account_id={}, err={}",
+                        "event=gateway_stateless_alt_retry_error path={} status=502 account_id={} upstream_url={} err={}",
+                        request.url(),
                         account.id,
+                        alt_url,
                         err
                     );
                 }

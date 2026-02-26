@@ -162,6 +162,11 @@ async fn service_requestlog_list(
 }
 
 #[tauri::command]
+async fn service_rpc_token() -> Result<String, String> {
+  Ok(codexmanager_service::rpc_auth_token().to_string())
+}
+
+#[tauri::command]
 async fn service_requestlog_clear(addr: Option<String>) -> Result<serde_json::Value, String> {
   rpc_call_in_background("requestlog/clear", addr, None).await
 }
@@ -366,6 +371,7 @@ pub fn run() {
       service_usage_read,
       service_usage_list,
       service_usage_refresh,
+      service_rpc_token,
       service_requestlog_list,
       service_requestlog_clear,
       service_requestlog_today_summary,

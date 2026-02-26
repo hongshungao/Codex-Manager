@@ -25,6 +25,7 @@ function wait(ms) {
 
 test("account search input uses debounce before rendering", async () => {
   const accountSearch = new FakeElement();
+  const filterAll = new FakeElement();
   const state = {
     requestLogQuery: "",
     requestLogStatusFilter: "all",
@@ -45,7 +46,7 @@ test("account search input uses debounce before rendering", async () => {
       filterLog5xx: null,
       accountSearch,
       accountGroupFilter: null,
-      filterAll: null,
+      filterAll,
       filterActive: null,
       filterLow: null,
     },
@@ -70,4 +71,6 @@ test("account search input uses debounce before rendering", async () => {
   await wait(140);
   assert.equal(renderCount, 1);
   assert.equal(state.accountSearch, "abc");
+  filterAll.dispatch("click", {});
+  assert.equal(renderCount, 1);
 });

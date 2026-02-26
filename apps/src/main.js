@@ -44,6 +44,11 @@ import { createServiceLifecycle } from "./services/service-lifecycle";
 import { createLoginFlow } from "./services/login-flow";
 import { createManagementActions } from "./services/management-actions";
 import { openAccountModal, closeAccountModal } from "./views/accounts";
+import { renderAccountsRefreshProgress } from "./views/accounts/render";
+import {
+  clearRefreshAllProgress,
+  setRefreshAllProgress,
+} from "./services/management/account-actions";
 import { renderApiKeys, openApiKeyModal, closeApiKeyModal, populateApiKeyModelSelect } from "./views/apikeys";
 import { openUsageModal, closeUsageModal, renderUsageSnapshot } from "./views/usage";
 import { renderRequestLogs } from "./views/requestlogs";
@@ -79,10 +84,19 @@ const ROUTE_STRATEGY_ORDERED = "ordered";
 const ROUTE_STRATEGY_BALANCED = "balanced";
 const UPDATE_CHECK_DELAY_MS = 1200;
 let refreshAllInFlight = null;
+let refreshAllProgressClearTimer = null;
 let updateCheckInFlight = null;
 let pendingUpdateCandidate = null;
 let routeStrategySyncInFlight = null;
 let routeStrategySyncedProbeId = -1;
+const REFRESH_ALL_TASKS = [
+  { name: "accounts", label: "账号列表", run: refreshAccounts },
+  { name: "usage", label: "账号用量", run: () => refreshUsageList({ refreshRemote: true }) },
+  { name: "api-models", label: "模型列表", run: refreshApiModels },
+  { name: "api-keys", label: "平台 Key", run: refreshApiKeys },
+  { name: "request-logs", label: "请求日志", run: () => refreshRequestLogs(state.requestLogQuery) },
+  { name: "request-log-today-summary", label: "今日摘要", run: refreshRequestLogTodaySummary },
+];
 
 function isTauriRuntime() {
   return Boolean(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
@@ -612,25 +626,44 @@ async function refreshAll() {
     return refreshAllInFlight;
   }
   refreshAllInFlight = (async () => {
+    const tasks = REFRESH_ALL_TASKS;
+    const total = tasks.length;
+    let completed = 0;
+    const setProgress = (next) => {
+      renderAccountsRefreshProgress(setRefreshAllProgress(next));
+    };
+    setProgress({ active: true, total, completed: 0, remaining: total, lastTaskLabel: "" });
+
     const ok = await ensureConnected();
     serviceLifecycle.updateServiceToggle();
-    if (!ok) return;
+    if (!ok) return [];
     if (routeStrategySyncedProbeId !== state.serviceProbeId) {
       await applyRouteStrategyToService(readRouteStrategySetting(), { silent: true });
     }
-    const results = await runRefreshTasks(
-      [
-        { name: "accounts", run: refreshAccounts },
-        { name: "usage", run: () => refreshUsageList({ refreshRemote: true }) },
-        { name: "api-models", run: refreshApiModels },
-        { name: "api-keys", run: refreshApiKeys },
-        { name: "request-logs", run: () => refreshRequestLogs(state.requestLogQuery) },
-        { name: "request-log-today-summary", run: refreshRequestLogTodaySummary },
-      ],
-      (taskName, err) => {
-        console.error(`[refreshAll] ${taskName} failed`, err);
-      },
+
+    const settled = await Promise.allSettled(
+      tasks.map((task) => Promise.resolve().then(() => task.run())
+        .finally(() => {
+          completed += 1;
+          setProgress({
+            active: true,
+            total,
+            completed,
+            remaining: total - completed,
+            lastTaskLabel: task.label || task.name,
+          });
+        })),
     );
+    const results = settled.map((result, index) => {
+      const task = tasks[index] || {};
+      if (result.status === "rejected") {
+        console.error(`[refreshAll] ${task.name || `task-${index}`} failed`, result.reason);
+      }
+      return {
+        name: task.name || `task-${index}`,
+        ...result,
+      };
+    });
     // 中文注释：并行刷新时允许“部分失败部分成功”，否则某个慢/失败接口会拖垮整页刷新体验。
     const hasFailedTask = results.some((item) => item.status === "rejected");
     if (hasFailedTask) {
@@ -642,27 +675,48 @@ async function refreshAll() {
     return await refreshAllInFlight;
   } finally {
     refreshAllInFlight = null;
+    if (refreshAllProgressClearTimer) {
+      clearTimeout(refreshAllProgressClearTimer);
+    }
+    refreshAllProgressClearTimer = setTimeout(() => {
+      renderAccountsRefreshProgress(clearRefreshAllProgress());
+      refreshAllProgressClearTimer = null;
+    }, 450);
   }
 }
 
 async function handleRefreshAllClick() {
   await withButtonBusy(dom.refreshAll, "刷新中...", async () => {
     // 中文注释：先让浏览器绘制 loading 态，避免用户感知“点击后卡住”。
+    if (refreshAllProgressClearTimer) {
+      clearTimeout(refreshAllProgressClearTimer);
+      refreshAllProgressClearTimer = null;
+    }
+    renderAccountsRefreshProgress(setRefreshAllProgress({
+      active: true,
+      total: REFRESH_ALL_TASKS.length,
+      completed: 0,
+      remaining: REFRESH_ALL_TASKS.length,
+      lastTaskLabel: "",
+    }));
     await nextPaintTick();
     await refreshAll();
   });
 }
 
 async function refreshAccountsAndUsage() {
+  const options = arguments[0] || {};
+  const includeUsage = options.includeUsage !== false;
   const ok = await ensureConnected();
   serviceLifecycle.updateServiceToggle();
   if (!ok) return false;
 
+  const tasks = [{ name: "accounts", run: refreshAccounts }];
+  if (includeUsage) {
+    tasks.push({ name: "usage", run: refreshUsageList });
+  }
   const results = await runRefreshTasks(
-    [
-      { name: "accounts", run: refreshAccounts },
-      { name: "usage", run: refreshUsageList },
-    ],
+    tasks,
     (taskName, err) => {
       console.error(`[refreshAccountsAndUsage] ${taskName} failed`, err);
     },

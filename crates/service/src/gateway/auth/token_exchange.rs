@@ -57,10 +57,8 @@ fn maybe_cleanup_exchange_locks(table: &mut AccountTokenExchangeLockTable, now: 
 
 fn find_cached_api_key_access_token(storage: &Storage, account_id: &str) -> Option<String> {
     storage
-        .list_tokens()
+        .find_token_by_account_id(account_id)
         .ok()?
-        .into_iter()
-        .find(|t| t.account_id == account_id)
         .and_then(|t| t.api_key_access_token)
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())

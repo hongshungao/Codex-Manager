@@ -19,8 +19,8 @@ pub(super) fn load_active_api_key(
 
     let Some(api_key) = api_key else {
         if debug {
-            eprintln!(
-                "gateway auth invalid: url={}, key_hash_prefix={}",
+            log::warn!(
+                "event=gateway_auth_invalid path={} status=403 key_hash_prefix={}",
                 request_url,
                 &key_hash[..8]
             );
@@ -30,8 +30,8 @@ pub(super) fn load_active_api_key(
 
     if api_key.status != "active" {
         if debug {
-            eprintln!(
-                "gateway auth disabled: url={}, key_id={}",
+            log::warn!(
+                "event=gateway_auth_disabled path={} status=403 key_id={}",
                 request_url, api_key.id
             );
         }
