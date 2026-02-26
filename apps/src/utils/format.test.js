@@ -19,7 +19,19 @@ test("calcAvailability treats missing primary fields as unavailable", () => {
   assert.equal(result.level, "bad");
 });
 
-test("calcAvailability treats missing secondary fields as unavailable", () => {
+test("calcAvailability treats fully missing secondary fields as single-window available", () => {
+  const usage = {
+    usedPercent: 10,
+    windowMinutes: 300,
+    secondaryUsedPercent: null,
+    secondaryWindowMinutes: null,
+  };
+  const result = calcAvailability(usage);
+  assert.equal(result.level, "ok");
+  assert.equal(result.text, "单窗口可用");
+});
+
+test("calcAvailability treats partial secondary fields as unavailable", () => {
   const usage = {
     usedPercent: 10,
     windowMinutes: 300,
@@ -28,6 +40,18 @@ test("calcAvailability treats missing secondary fields as unavailable", () => {
   };
   const result = calcAvailability(usage);
   assert.equal(result.level, "bad");
+});
+
+test("calcAvailability keeps primary exhausted unavailable even in single-window mode", () => {
+  const usage = {
+    usedPercent: 100,
+    windowMinutes: 300,
+    secondaryUsedPercent: null,
+    secondaryWindowMinutes: null,
+  };
+  const result = calcAvailability(usage);
+  assert.equal(result.level, "warn");
+  assert.equal(result.text, "5小时已用尽");
 });
 
 test("calcAvailability keeps ok when both windows present and under limit", () => {

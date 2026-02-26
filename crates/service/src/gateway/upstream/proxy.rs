@@ -97,6 +97,16 @@ pub(in super::super) fn proxy_validated_request(
     let anthropic_has_prompt_cache_key = protocol_type == PROTOCOL_ANTHROPIC_NATIVE
         && has_prompt_cache_key;
     super::super::apply_route_strategy(&mut candidates, &key_id, model_for_log.as_deref());
+    let candidate_order = candidates
+        .iter()
+        .map(|(account, _)| format!("{}#sort={}", account.id, account.sort))
+        .collect::<Vec<_>>();
+    super::super::trace_log::log_candidate_pool(
+        trace_id.as_str(),
+        key_id.as_str(),
+        super::super::current_route_strategy(),
+        candidate_order.as_slice(),
+    );
 
     let context = GatewayUpstreamExecutionContext::new(
         &trace_id,

@@ -324,6 +324,32 @@ pub(crate) fn log_candidate_start(
     append_trace_line(line, false);
 }
 
+pub(crate) fn log_candidate_pool(
+    trace_id: &str,
+    key_id: &str,
+    strategy: &str,
+    candidates: &[String],
+) {
+    let ts = now_ts();
+    let ordered = if candidates.is_empty() {
+        "-".to_string()
+    } else {
+        candidates
+            .iter()
+            .map(|item| sanitize_text(item))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let line = format!(
+        "ts={ts} event=CANDIDATE_POOL trace_id={} key_id={} strategy={} ordered_candidates={}",
+        sanitize_text(trace_id),
+        sanitize_text(key_id),
+        sanitize_text(strategy),
+        ordered,
+    );
+    append_trace_line(line, false);
+}
+
 pub(crate) fn log_candidate_skip(
     trace_id: &str,
     idx: usize,

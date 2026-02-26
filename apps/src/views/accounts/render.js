@@ -1,6 +1,6 @@
 import { state } from "../../state.js";
 import { dom } from "../../ui/dom.js";
-import { formatTs } from "../../utils/format.js";
+import { formatLimitLabel, formatTs } from "../../utils/format.js";
 import {
   buildAccountDerivedMap,
   buildGroupFilterOptions,
@@ -116,12 +116,18 @@ function createAccountCell(account, accountDerived) {
   accountWrap.appendChild(accountMeta);
   const mini = document.createElement("div");
   mini.className = "mini-usage";
+  const primaryLabel = formatLimitLabel(accountDerived?.usage?.windowMinutes, "5小时");
   mini.appendChild(
-    renderMiniUsageLine("5小时", primaryRemain, false),
+    renderMiniUsageLine(primaryLabel, primaryRemain, false),
   );
-  mini.appendChild(
-    renderMiniUsageLine("7天", secondaryRemain, true),
-  );
+  const hasSecondaryWindow =
+    accountDerived?.usage?.secondaryUsedPercent != null
+    || accountDerived?.usage?.secondaryWindowMinutes != null;
+  if (hasSecondaryWindow) {
+    mini.appendChild(
+      renderMiniUsageLine("7天", secondaryRemain, true),
+    );
+  }
   accountWrap.appendChild(mini);
   cellAccount.appendChild(accountWrap);
   return cellAccount;

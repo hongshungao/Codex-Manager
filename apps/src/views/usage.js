@@ -59,14 +59,18 @@ export function renderUsageSnapshot(snapshot) {
   dom.usageProgress.appendChild(
     renderProgressRow(primaryLabel, primaryRemain, snapshot.resetsAt, primaryLevel),
   );
-  dom.usageProgress.appendChild(
-    renderProgressRow(
-      secondaryLabel,
-      secondaryRemain,
-      snapshot.secondaryResetsAt,
-      secondaryLevel,
-    ),
-  );
+  const hasSecondaryWindow =
+    snapshot.secondaryUsedPercent != null || snapshot.secondaryWindowMinutes != null;
+  if (hasSecondaryWindow) {
+    dom.usageProgress.appendChild(
+      renderProgressRow(
+        secondaryLabel,
+        secondaryRemain,
+        snapshot.secondaryResetsAt,
+        secondaryLevel,
+      ),
+    );
+  }
 
   const credits = parseCredits(snapshot.creditsJson);
   if (credits && credits.balance != null) {

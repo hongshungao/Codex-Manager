@@ -119,18 +119,25 @@ export function formatResetLabel(ts) {
 export function calcAvailability(usage) {
   if (!usage) return { text: "未知", level: "unknown" };
   const secondary = usage.secondaryUsedPercent;
+  const secondaryWindow = usage.secondaryWindowMinutes;
   const primary = usage.usedPercent;
   const primaryMissing = primary == null || usage.windowMinutes == null;
-  const secondaryMissing =
-    secondary == null || usage.secondaryWindowMinutes == null;
-  if (primaryMissing || secondaryMissing) {
+  const secondaryPresent = secondary != null || secondaryWindow != null;
+  const secondaryMissing = secondary == null || secondaryWindow == null;
+  if (primaryMissing) {
+    return { text: "用量缺失", level: "bad" };
+  }
+  if (primary != null && primary >= 100) {
+    return { text: "5小时已用尽", level: "warn" };
+  }
+  if (!secondaryPresent) {
+    return { text: "单窗口可用", level: "ok" };
+  }
+  if (secondaryMissing) {
     return { text: "用量缺失", level: "bad" };
   }
   if (secondary != null && secondary >= 100) {
     return { text: "7日已用尽", level: "bad" };
-  }
-  if (primary != null && primary >= 100) {
-    return { text: "5小时已用尽", level: "warn" };
   }
   return { text: "可用", level: "ok" };
 }

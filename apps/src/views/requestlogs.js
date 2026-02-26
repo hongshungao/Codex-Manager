@@ -148,14 +148,27 @@ function createRequestLogRow(item, index) {
   const cellAccount = document.createElement("td");
   const accountLabel = resolveAccountDisplayName(item);
   const accountId = item?.accountId || item?.account?.id || "";
+  const accountWrap = document.createElement("div");
+  accountWrap.className = "cell-stack";
   if (accountLabel) {
-    cellAccount.textContent = accountLabel;
+    const title = document.createElement("strong");
+    title.textContent = accountLabel;
+    accountWrap.appendChild(title);
+    if (accountId) {
+      const meta = document.createElement("small");
+      meta.textContent = accountId;
+      accountWrap.appendChild(meta);
+    }
     cellAccount.title = accountId || accountLabel;
   } else if (accountId) {
-    cellAccount.textContent = accountId;
+    const meta = document.createElement("small");
+    meta.textContent = accountId;
+    accountWrap.appendChild(meta);
+    cellAccount.title = accountId;
   } else {
-    cellAccount.textContent = "-";
+    accountWrap.textContent = "-";
   }
+  cellAccount.appendChild(accountWrap);
   row.appendChild(cellAccount);
 
   const cellKey = document.createElement("td");

@@ -216,6 +216,20 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 - 模型列表/请求被挑战拦截：可尝试设置 `CODEXMANAGER_UPSTREAM_COOKIE`，或显式配置 `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`。
 - 独立运行 service 报存储不可用：先设置 `CODEXMANAGER_DB_PATH` 到可写路径。
 
+## 账号命中规则
+- `ordered`（顺序优先）模式下，网关按账号 `sort` 升序构建候选并依次尝试（例如 `0 -> 1 -> 2 -> 3`）。
+- 这表示“按顺序尝试”，不是“永远命中 0 号”：前序账号若不可用/失败，会自动切到下一个。
+- 以下情况会导致前序账号不被命中：
+  - 账号状态不是 `active`
+  - 账号缺少 token
+  - 用量判定不可用（如主窗口已用尽、用量字段缺失等）
+  - 账号处于 cooldown 或并发软上限触发跳过
+- `balanced`（均衡轮询）模式会按 `Key + 模型` 维度轮换起点，不保证从最小 `sort` 开始。
+- 排查时可查看数据库同目录 `gateway-trace.log`：
+  - `CANDIDATE_POOL`：本次请求候选顺序
+  - `CANDIDATE_START` / `CANDIDATE_SKIP`：实际尝试与跳过原因
+  - `REQUEST_FINAL`：最终命中账号
+
 ## 🤝 鸣谢项目 (Special Thanks)
 本项目在网关协议适配与稳定性治理上参考了以下开源项目的思路：
 

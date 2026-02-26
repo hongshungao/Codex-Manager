@@ -203,6 +203,20 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 - Model list/request blocked by challenge: try `CODEXMANAGER_UPSTREAM_COOKIE` or explicit `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`.
 - Standalone service reports storage unavailable: set `CODEXMANAGER_DB_PATH` to a writable path first.
 
+## Account Hit Rules 
+- In `ordered` mode, gateway candidates are built and attempted by account `sort` ascending (for example `0 -> 1 -> 2 -> 3`).
+- This means "try in order", not "always hit account 0". If an earlier account is unavailable/fails, gateway automatically falls through to the next one.
+- Common reasons an earlier account is not hit:
+  - account status is not `active`
+  - token record is missing
+  - usage availability check marks it unavailable (for example primary window exhausted or required usage fields missing)
+  - account is skipped by cooldown or soft inflight cap
+- In `balanced` mode, the start candidate rotates by `Key + model`, so attempts do not necessarily start from the smallest `sort`.
+- For diagnosis, check `gateway-trace.log` in the same directory as the database:
+  - `CANDIDATE_POOL`: candidate order for this request
+  - `CANDIDATE_START` / `CANDIDATE_SKIP`: actual attempt and skip reason
+  - `REQUEST_FINAL`: final account selected
+
 ## 🤝 Special Thanks
 This project references the following open-source project for gateway protocol adaptation and stability hardening ideas:
 

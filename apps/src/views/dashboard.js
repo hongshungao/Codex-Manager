@@ -58,11 +58,32 @@ export function renderDashboard() {
     dom.metricTodayCost.textContent = formatEstimatedCost(state.requestLogTodaySummary?.estimatedCost);
   }
 
-  renderCurrentAccount(state.accountList, usageMap);
+  renderCurrentAccount(state.accountList, usageMap, state.requestLogList);
   renderRecommendations(state.accountList, usageMap);
 }
 
-function renderCurrentAccount(accounts, usageMap) {
+function pickCurrentAccount(accounts, requestLogs) {
+  const accountList = Array.isArray(accounts) ? accounts : [];
+  if (!accountList.length) return null;
+
+  const logList = Array.isArray(requestLogs) ? requestLogs : [];
+  let latestHit = null;
+  for (let i = 0; i < logList.length; i += 1) {
+    const item = logList[i];
+    const accountId = String(item?.accountId || "").trim();
+    if (!accountId) continue;
+    if (!latestHit || Number(item?.createdAt || 0) > Number(latestHit?.createdAt || 0)) {
+      latestHit = item;
+    }
+  }
+  if (latestHit) {
+    const found = accountList.find((item) => item.id === latestHit.accountId);
+    if (found) return found;
+  }
+  return accountList[0];
+}
+
+function renderCurrentAccount(accounts, usageMap, requestLogs) {
   if (!dom.currentAccountCard) return;
   dom.currentAccountCard.innerHTML = "";
   if (!accounts.length) {
@@ -72,7 +93,8 @@ function renderCurrentAccount(accounts, usageMap) {
     dom.currentAccountCard.appendChild(empty);
     return;
   }
-  const account = accounts[0];
+  const account = pickCurrentAccount(accounts, requestLogs);
+  if (!account) return;
   const usage = usageMap.get(account.id);
   const status = calcAvailability(usage);
 

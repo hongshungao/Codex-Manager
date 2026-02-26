@@ -296,7 +296,7 @@ test("renderRequestLogs keeps status filter behavior", () => {
     assert.equal(renderedRows.length, 2);
     assert.equal(renderedRows[0].children[7].textContent, "500");
     assert.equal(renderedRows[1].children[7].textContent, "503");
-    assert.equal(renderedRows[0].children[1].textContent, "账号2");
+    assert.equal(renderedRows[0].children[1].textContent, "账号2acc-2");
   } finally {
     globalThis.document = previousDocument;
     dom.requestLogRows = previousRowsEl;
@@ -535,8 +535,14 @@ test("renderRequestLogs resolves account label from account list and composite i
   try {
     renderRequestLogs();
     const renderedRows = getDataRows(rows);
-    assert.equal(renderedRows[0].children[1].textContent, "prospergao@126.com");
-    assert.equal(renderedRows[1].children[1].textContent, "Frank Smith");
+    assert.equal(
+      renderedRows[0].children[1].textContent,
+      "prospergao@126.comauth0|BCfCgLzzLw3FOSaYqN2jDimX::Frank Smith",
+    );
+    assert.equal(
+      renderedRows[1].children[1].textContent,
+      "Frank Smithauth0|fallback-only::Frank Smith",
+    );
   } finally {
     globalThis.document = previousDocument;
     dom.requestLogRows = previousRowsEl;
