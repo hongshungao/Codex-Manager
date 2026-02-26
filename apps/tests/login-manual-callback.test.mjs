@@ -33,5 +33,3 @@ assert(
   apiJs.includes("serviceLoginComplete"),
   "api.js missing serviceLoginComplete",
 );
-
-console.log("manual callback wiring present");

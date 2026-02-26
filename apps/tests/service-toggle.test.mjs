@@ -24,5 +24,3 @@ assert(
   "service toggle usage missing in main/service lifecycle",
 );
 assert(stateJs.includes("serviceBusy"), "state.js missing serviceBusy state");
-
-console.log("service toggle wiring present");

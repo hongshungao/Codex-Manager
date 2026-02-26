@@ -15,5 +15,3 @@ assert(indexHtml.includes('id="pageApiKeys"'), "index.html missing pageApiKeys s
 assert(domJs.includes("navApiKeys"), "dom.js missing navApiKeys mapping");
 assert(domJs.includes("pageApiKeys"), "dom.js missing pageApiKeys mapping");
 assert(mainJs.includes("apikeys"), "main.js missing apikeys page switch");
-
-console.log("apikeys page wiring present");

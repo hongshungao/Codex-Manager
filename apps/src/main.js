@@ -4,7 +4,6 @@ import "./styles/components.css";
 import "./styles/responsive.css";
 
 import {
-  serviceTokenRefreshProbe,
   serviceGatewayRouteStrategyGet,
   serviceGatewayRouteStrategySet,
   serviceUsageRefresh,
@@ -858,26 +857,6 @@ async function handleRefreshAllClick() {
   });
 }
 
-async function handleTestTokenRefreshClick() {
-  await withButtonBusy(dom.testTokenRefreshBtn, "测试中...", async () => {
-    const ok = await ensureConnected();
-    serviceLifecycle.updateServiceToggle();
-    if (!ok) {
-      return;
-    }
-    const accounts = Array.isArray(state.accountList) ? state.accountList : [];
-    const accountId = accounts.length > 0 ? accounts[0].id : null;
-    const result = await serviceTokenRefreshProbe(accountId);
-    const payload = result && typeof result === "object" && result.result ? result.result : result;
-    const targetAccount = payload?.accountId || accountId || "-";
-    const rotatedRefreshToken = payload?.rotatedRefreshToken === true;
-    const rotatedIdToken = payload?.rotatedIdToken === true;
-    showToast(
-      `测试完成：账号 ${targetAccount}，refresh_token更新=${rotatedRefreshToken ? "是" : "否"}，id_token更新=${rotatedIdToken ? "是" : "否"}`,
-    );
-  });
-}
-
 async function refreshAccountsAndUsage() {
   const options = arguments[0] || {};
   const includeUsage = options.includeUsage !== false;
@@ -1025,12 +1004,6 @@ function bindEvents() {
       saveRouteStrategySetting(selected);
       setRouteStrategySelect(selected);
       void applyRouteStrategyToService(selected, { silent: false });
-    });
-  }
-  if (dom.testTokenRefreshBtn && dom.testTokenRefreshBtn.dataset.bound !== "1") {
-    dom.testTokenRefreshBtn.dataset.bound = "1";
-    dom.testTokenRefreshBtn.addEventListener("click", () => {
-      void handleTestTokenRefreshClick();
     });
   }
 }

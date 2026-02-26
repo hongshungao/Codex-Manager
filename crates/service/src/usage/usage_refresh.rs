@@ -440,40 +440,6 @@ pub(crate) fn refresh_usage_for_account(account_id: &str) -> Result<(), String> 
     Ok(())
 }
 
-pub(crate) fn refresh_token_probe(account_id: Option<&str>) -> Result<serde_json::Value, String> {
-    let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
-    let issuer = std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
-    let client_id =
-        std::env::var("CODEXMANAGER_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string());
-
-    let picked_account_id = account_id
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            storage
-                .list_tokens()
-                .ok()?
-                .into_iter()
-                .find(|token| !token.account_id.trim().is_empty())
-                .map(|token| token.account_id)
-        })
-        .ok_or_else(|| "no account token available for refresh probe".to_string())?;
-
-    let mut token = storage
-        .find_token_by_account_id(&picked_account_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("token not found for account: {picked_account_id}"))?;
-
-    let result = refresh_and_persist_access_token(&storage, &mut token, &issuer, &client_id)?;
-    Ok(serde_json::json!({
-        "ok": true,
-        "accountId": picked_account_id,
-        "rotatedRefreshToken": result.rotated_refresh_token,
-        "rotatedIdToken": result.rotated_id_token,
-    }))
-}
-
 fn record_usage_refresh_metrics(success: bool, started_at: Instant) {
     crate::gateway::record_usage_refresh_outcome(
         success,
