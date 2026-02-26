@@ -95,6 +95,10 @@
   gap: 14px;
 }
 
+#modalApiKey .modal-card {
+  width: min(640px, 100%);
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -106,6 +110,22 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.azure-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.azure-fields-grid[hidden] {
+  display: none;
 }
 
 .modal-body input,
@@ -202,6 +222,16 @@
   padding: 8px 9px;
   font-size: 12px;
   background: #fff;
+}
+
+@media (max-width: 760px) {
+  #modalApiKey .modal-card {
+    width: min(560px, 100%);
+  }
+
+  .azure-fields-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .startup-mask {

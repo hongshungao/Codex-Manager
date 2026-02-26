@@ -1,4 +1,4 @@
-use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
+use crate::apikey_profile::{PROTOCOL_ANTHROPIC_NATIVE, PROTOCOL_AZURE_OPENAI};
 use std::time::{Duration, Instant};
 use tiny_http::{Request, Response};
 
@@ -46,6 +46,8 @@ pub(in super::super) fn proxy_validated_request(
         has_prompt_cache_key,
         request_shape,
         protocol_type,
+        upstream_base_url,
+        static_headers_json,
         response_adapter,
         request_method,
         key_id,
@@ -68,6 +70,27 @@ pub(in super::super) fn proxy_validated_request(
         protocol_type.as_str(),
     );
     super::super::trace_log::log_request_body_preview(trace_id.as_str(), &body);
+
+    if protocol_type == PROTOCOL_AZURE_OPENAI {
+        return super::protocol::azure_openai::proxy_azure_request(
+            request,
+            &storage,
+            trace_id.as_str(),
+            key_id.as_str(),
+            path.as_str(),
+            request_method.as_str(),
+            &method,
+            &body,
+            is_stream,
+            response_adapter,
+            model_for_log.as_deref(),
+            reasoning_for_log.as_deref(),
+            upstream_base_url.as_deref(),
+            static_headers_json.as_deref(),
+            request_deadline,
+            started_at,
+        );
+    }
 
     let (request, mut candidates) = match prepare_candidates_for_proxy(
         request,

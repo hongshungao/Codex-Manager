@@ -229,6 +229,8 @@ export async function serviceApiKeyCreate(name, modelSlug, reasoningEffort, prof
     modelSlug,
     reasoningEffort,
     protocolType: profile.protocolType || null,
+    upstreamBaseUrl: profile.upstreamBaseUrl || null,
+    staticHeadersJson: profile.staticHeadersJson || null,
   }));
 }
 
@@ -243,6 +245,8 @@ export async function serviceApiKeyUpdateModel(keyId, modelSlug, reasoningEffort
     modelSlug,
     reasoningEffort,
     protocolType: profile.protocolType || null,
+    upstreamBaseUrl: profile.upstreamBaseUrl || null,
+    staticHeadersJson: profile.staticHeadersJson || null,
   }));
 }
 

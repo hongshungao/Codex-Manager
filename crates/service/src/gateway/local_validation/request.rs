@@ -69,6 +69,8 @@ pub(super) fn build_local_validation_result(
         has_prompt_cache_key,
         request_shape,
         protocol_type: api_key.protocol_type,
+        upstream_base_url: api_key.upstream_base_url,
+        static_headers_json: api_key.static_headers_json,
         response_adapter: adapted.response_adapter,
         request_method,
         key_id: api_key.id,

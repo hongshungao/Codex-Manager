@@ -37,6 +37,13 @@ function fallbackAccountNameFromId(accountId) {
   return raw.slice(sep + 2).trim();
 }
 
+function fallbackAccountDisplayFromKey(keyId) {
+  const raw = String(keyId || "").trim();
+  if (!raw) return "";
+  const compact = raw.slice(0, 10);
+  return `Key ${compact}`;
+}
+
 function ensureAccountLabelMap() {
   const list = Array.isArray(state.accountList) ? state.accountList : [];
   if (requestLogWindowState.accountListRef === list) {
@@ -176,6 +183,7 @@ function createRequestLogRow(item, index) {
   cellAccount.className = "requestlog-col requestlog-col-account";
   const accountLabel = resolveAccountDisplayName(item);
   const accountId = item?.accountId || item?.account?.id || "";
+  const keyId = item?.keyId || "";
   const accountWrap = document.createElement("div");
   accountWrap.className = "cell-stack";
   if (accountLabel) {
@@ -194,7 +202,9 @@ function createRequestLogRow(item, index) {
     accountWrap.appendChild(meta);
     cellAccount.title = accountId;
   } else {
-    accountWrap.textContent = "-";
+    const keyFallback = fallbackAccountDisplayFromKey(keyId);
+    accountWrap.textContent = keyFallback || "-";
+    cellAccount.title = keyFallback || "-";
   }
   cellAccount.appendChild(accountWrap);
   row.appendChild(cellAccount);

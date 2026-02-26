@@ -281,6 +281,10 @@ impl Storage {
             include_str!("../../migrations/025_tokens_refresh_schedule.sql"),
             |s| s.ensure_token_refresh_schedule_columns(),
         )?;
+        self.apply_sql_migration(
+            "026_api_key_profiles_constraints_azure",
+            include_str!("../../migrations/026_api_key_profiles_constraints_azure.sql"),
+        )?;
         self.ensure_request_token_stats_table()?;
         Ok(())
     }

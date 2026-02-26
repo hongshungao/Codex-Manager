@@ -109,4 +109,23 @@ export function bindModalActionEvents({
     dom.inputApiKeyModel.addEventListener("change", syncReasoningSelect);
     syncReasoningSelect();
   }
+  if (dom.inputApiKeyProtocol) {
+    const syncApiKeyProtocolFields = () => {
+      const protocolType = dom.inputApiKeyProtocol.value || "openai_compat";
+      const isAzureProtocol = protocolType === "azure_openai";
+      if (dom.apiKeyAzureFields) {
+        dom.apiKeyAzureFields.hidden = !isAzureProtocol;
+      }
+      if (!isAzureProtocol) {
+        if (dom.inputApiKeyEndpoint) {
+          dom.inputApiKeyEndpoint.value = "";
+        }
+        if (dom.inputApiKeyAzureApiKey) {
+          dom.inputApiKeyAzureApiKey.value = "";
+        }
+      }
+    };
+    dom.inputApiKeyProtocol.addEventListener("change", syncApiKeyProtocolFields);
+    syncApiKeyProtocolFields();
+  }
 }

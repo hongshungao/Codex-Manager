@@ -15,11 +15,15 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             let model_slug = super::string_param(req, "modelSlug");
             let reasoning_effort = super::string_param(req, "reasoningEffort");
             let protocol_type = super::string_param(req, "protocolType");
+            let upstream_base_url = super::string_param(req, "upstreamBaseUrl");
+            let static_headers_json = super::string_param(req, "staticHeadersJson");
             super::value_or_error(apikey_create::create_api_key(
                 name,
                 model_slug,
                 reasoning_effort,
                 protocol_type,
+                upstream_base_url,
+                static_headers_json,
             ))
         }
         "apikey/readSecret" => {
@@ -35,11 +39,15 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             let model_slug = super::string_param(req, "modelSlug");
             let reasoning_effort = super::string_param(req, "reasoningEffort");
             let protocol_type = super::string_param(req, "protocolType");
+            let upstream_base_url = super::string_param(req, "upstreamBaseUrl");
+            let static_headers_json = super::string_param(req, "staticHeadersJson");
             super::ok_or_error(apikey_update_model::update_api_key_model(
                 key_id,
                 model_slug,
                 reasoning_effort,
                 protocol_type,
+                upstream_base_url,
+                static_headers_json,
             ))
         }
         "apikey/delete" => {

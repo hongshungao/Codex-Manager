@@ -13,6 +13,9 @@ export function mapReasoningEffortToSelectValue(reasoningEffort) {
 }
 
 export function getProtocolProfileLabel(protocolType) {
+  if (protocolType === "azure_openai") {
+    return "Azure OpenAI";
+  }
   return protocolType === "anthropic_native"
     ? "Claude Code 兼容"
     : "OpenAI Compatible";

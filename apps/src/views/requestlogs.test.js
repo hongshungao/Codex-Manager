@@ -551,3 +551,36 @@ test("renderRequestLogs resolves account label from account list and composite i
     state.requestLogStatusFilter = previousFilter;
   }
 });
+
+test("renderRequestLogs shows key fallback when account is missing", () => {
+  const previousDocument = globalThis.document;
+  const previousRowsEl = dom.requestLogRows;
+  const previousList = state.requestLogList;
+  const previousAccounts = state.accountList;
+  const previousFilter = state.requestLogStatusFilter;
+  globalThis.document = new FakeDocument();
+  const { rows } = createRequestLogLayout();
+  dom.requestLogRows = rows;
+  state.requestLogStatusFilter = "all";
+  state.accountList = [];
+  state.requestLogList = [
+    {
+      ...makeLog(12, 200),
+      accountLabel: "",
+      accountId: "",
+      keyId: "gk_9bacc9d0690d",
+    },
+  ];
+
+  try {
+    renderRequestLogs();
+    const renderedRows = getDataRows(rows);
+    assert.equal(renderedRows[0].children[1].textContent, "Key gk_9bacc9d");
+  } finally {
+    globalThis.document = previousDocument;
+    dom.requestLogRows = previousRowsEl;
+    state.requestLogList = previousList;
+    state.accountList = previousAccounts;
+    state.requestLogStatusFilter = previousFilter;
+  }
+});

@@ -12,6 +12,7 @@ pub(super) mod postprocess;
 pub(super) mod precheck;
 pub(super) mod primary_attempt;
 pub(super) mod primary_flow;
+pub(super) mod protocol;
 pub(super) mod proxy;
 pub(super) mod retry;
 pub(super) mod stateless_retry;

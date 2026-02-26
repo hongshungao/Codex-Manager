@@ -257,12 +257,16 @@ async fn service_apikey_create(
   model_slug: Option<String>,
   reasoning_effort: Option<String>,
   protocol_type: Option<String>,
+  upstream_base_url: Option<String>,
+  static_headers_json: Option<String>,
 ) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({
     "name": name,
     "modelSlug": model_slug,
     "reasoningEffort": reasoning_effort,
     "protocolType": protocol_type,
+    "upstreamBaseUrl": upstream_base_url,
+    "staticHeadersJson": static_headers_json,
   });
   rpc_call_in_background("apikey/create", addr, Some(params)).await
 }
@@ -283,12 +287,16 @@ async fn service_apikey_update_model(
   model_slug: Option<String>,
   reasoning_effort: Option<String>,
   protocol_type: Option<String>,
+  upstream_base_url: Option<String>,
+  static_headers_json: Option<String>,
 ) -> Result<serde_json::Value, String> {
   let params = serde_json::json!({
     "id": key_id,
     "modelSlug": model_slug,
     "reasoningEffort": reasoning_effort,
     "protocolType": protocol_type,
+    "upstreamBaseUrl": upstream_base_url,
+    "staticHeadersJson": static_headers_json,
   });
   rpc_call_in_background("apikey/updateModel", addr, Some(params)).await
 }

@@ -24,6 +24,22 @@ function populateReasoningSelect(force = false) {
   reasoningOptionsReady = true;
 }
 
+function syncApiKeyProtocolFields() {
+  const protocolType = dom.inputApiKeyProtocol?.value || "openai_compat";
+  const isAzureProtocol = protocolType === "azure_openai";
+  if (dom.apiKeyAzureFields) {
+    dom.apiKeyAzureFields.hidden = !isAzureProtocol;
+  }
+  if (!isAzureProtocol) {
+    if (dom.inputApiKeyEndpoint) {
+      dom.inputApiKeyEndpoint.value = "";
+    }
+    if (dom.inputApiKeyAzureApiKey) {
+      dom.inputApiKeyAzureApiKey.value = "";
+    }
+  }
+}
+
 export function populateApiKeyModelSelect(options = {}) {
   const force = Boolean(options.force);
   if (!dom.inputApiKeyModel) return;
@@ -56,6 +72,13 @@ export function openApiKeyModal() {
   if (dom.inputApiKeyProtocol) {
     dom.inputApiKeyProtocol.value = "openai_compat";
   }
+  if (dom.inputApiKeyEndpoint) {
+    dom.inputApiKeyEndpoint.value = "";
+  }
+  if (dom.inputApiKeyAzureApiKey) {
+    dom.inputApiKeyAzureApiKey.value = "";
+  }
+  syncApiKeyProtocolFields();
   populateApiKeyModelSelect();
   if (dom.inputApiKeyModel) {
     dom.inputApiKeyModel.value = "";

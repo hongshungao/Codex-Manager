@@ -62,12 +62,20 @@ export function createApiKeyActions({
       const modelSlug = dom.inputApiKeyModel.value || null;
       const reasoningEffort = modelSlug ? (dom.inputApiKeyReasoning.value || null) : null;
       const protocolType = dom.inputApiKeyProtocol?.value || "openai_compat";
+      const isAzureProtocol = protocolType === "azure_openai";
+      const upstreamBaseUrl = isAzureProtocol ? (dom.inputApiKeyEndpoint?.value.trim() || null) : null;
+      const azureApiKey = isAzureProtocol ? (dom.inputApiKeyAzureApiKey?.value.trim() || null) : null;
+      const staticHeadersJson = isAzureProtocol && azureApiKey
+        ? JSON.stringify({ "api-key": azureApiKey })
+        : null;
       const res = await api.serviceApiKeyCreate(
         dom.inputApiKeyName.value.trim() || null,
         modelSlug,
         reasoningEffort,
         {
           protocolType,
+          upstreamBaseUrl,
+          staticHeadersJson,
         },
       );
       if (res && res.error) {
@@ -135,7 +143,11 @@ export function createApiKeyActions({
     if (!ok) return;
     const normalizedModel = modelSlug || null;
     const normalizedEffort = normalizedModel ? (reasoningEffort || null) : null;
-    const res = await api.serviceApiKeyUpdateModel(item.id, normalizedModel, normalizedEffort);
+    const res = await api.serviceApiKeyUpdateModel(item.id, normalizedModel, normalizedEffort, {
+      protocolType: item.protocolType || "openai_compat",
+      upstreamBaseUrl: item.upstreamBaseUrl || null,
+      staticHeadersJson: item.staticHeadersJson || null,
+    });
     if (res && res.ok === false) {
       showToast(res.error || "模型配置保存失败", "error");
       return;

@@ -376,8 +376,27 @@
                     <label>协议</label>
                     <select id="inputApiKeyProtocol">
                         <option value="openai_compat">OpenAI Compatible（默认）</option>
+                        <option value="azure_openai">Azure OpenAI</option>
                         <option value="anthropic_native">Claude Code 兼容</option>
                     </select>
+                    <div id="apiKeyAzureFields" class="azure-fields-grid" hidden>
+                        <div class="modal-field">
+                            <label for="inputApiKeyEndpoint">Endpoint</label>
+                            <input
+                                id="inputApiKeyEndpoint"
+                                class="mono"
+                                placeholder="例如：https://your-resource.openai.azure.com"
+                            />
+                        </div>
+                        <div class="modal-field">
+                            <label for="inputApiKeyAzureApiKey">API Key</label>
+                            <input
+                                id="inputApiKeyAzureApiKey"
+                                class="mono"
+                                placeholder="例如：your-azure-key"
+                            />
+                        </div>
+                    </div>
                     <label>模型配置</label>
                     <select id="inputApiKeyModel">
                         <option value="">跟随请求模型（不覆盖）</option>
