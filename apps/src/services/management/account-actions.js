@@ -11,6 +11,17 @@ const EMPTY_REFRESH_PROGRESS = Object.freeze({
 
 let refreshAllProgress = { ...EMPTY_REFRESH_PROGRESS };
 
+function nextPaintTick() {
+  return new Promise((resolve) => {
+    const raf = typeof globalThis !== "undefined" ? globalThis.requestAnimationFrame : null;
+    if (typeof raf === "function") {
+      raf(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
 function normalizeProgress(next) {
   const total = Math.max(0, Number(next?.total || 0));
   const completed = Math.min(total, Math.max(0, Number(next?.completed || 0)));
@@ -149,17 +160,37 @@ export function createAccountActions({
     const ok = await ensureConnected();
     if (!ok) return;
 
-    const contents = (await Promise.all(
-      files.map(async (file) => {
-        try {
-          return await file.text();
-        } catch {
-          return "";
+    // 中文注释：多文件/大文件读取时，避免 Promise.all 同时触发所有 file.text() 导致 UI 抖动或卡顿。
+    // 这里改为顺序读取，并在关键阶段让出一次绘制机会。
+    const totalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file?.size || 0)), 0);
+    const shouldShowProgressToast = files.length > 1 || totalBytes >= 2 * 1024 * 1024;
+    if (shouldShowProgressToast) {
+      showToast(`正在读取并导入账号（${files.length} 个文件）...`);
+    }
+    await nextPaintTick();
+
+    const contents = [];
+    const yieldEvery = files.length > 6 || totalBytes >= 8 * 1024 * 1024 ? 1 : 2;
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      let text = "";
+      try {
+        if (file && typeof file.text === "function") {
+          text = await file.text();
         }
-      }),
-    ))
-      .map((item) => String(item || "").trim())
-      .filter((item) => item.length > 0);
+      } catch {
+        text = "";
+      }
+      const trimmed = String(text || "").trim();
+      if (trimmed) {
+        contents.push(trimmed);
+      }
+      if ((index + 1) % yieldEvery === 0) {
+        await nextPaintTick();
+      }
+    }
+
+    await nextPaintTick();
 
     if (!contents.length) {
       showToast("未读取到可导入内容", "error");
@@ -167,6 +198,7 @@ export function createAccountActions({
     }
 
     await enqueueAccountOp(async () => {
+      await nextPaintTick();
       const res = await api.serviceAccountImport(contents);
       if (res && res.error) {
         showToast(res.error || "导入失败", "error");
@@ -179,6 +211,7 @@ export function createAccountActions({
 
       await refreshAccountsSection();
       showToast(`导入完成：共${total}，新增${created}，更新${updated}，失败${failed}`);
+      await nextPaintTick();
       if (failed > 0 && Array.isArray(res?.errors) && res.errors.length > 0) {
         const first = res.errors[0];
         const index = Number(first?.index || 0);
