@@ -10,6 +10,7 @@ import {
 } from "./state.js";
 
 const ACCOUNT_ACTION_OPEN_USAGE = "open-usage";
+const ACCOUNT_ACTION_SET_CURRENT = "set-current";
 const ACCOUNT_ACTION_DELETE = "delete";
 
 let accountRowsEventsBound = false;
@@ -216,6 +217,12 @@ function createActionsCell(isDeletable) {
   btn.setAttribute("data-action", ACCOUNT_ACTION_OPEN_USAGE);
   btn.textContent = "用量查询";
   actionsWrap.appendChild(btn);
+  const setCurrent = document.createElement("button");
+  setCurrent.className = "secondary";
+  setCurrent.type = "button";
+  setCurrent.setAttribute("data-action", ACCOUNT_ACTION_SET_CURRENT);
+  setCurrent.textContent = "切到当前";
+  actionsWrap.appendChild(setCurrent);
 
   if (isDeletable) {
     const del = document.createElement("button");
@@ -279,6 +286,10 @@ export function handleAccountRowsClick(target, handlers = accountRowHandlers, lo
     handlers?.onOpenUsage?.(account);
     return true;
   }
+  if (action === ACCOUNT_ACTION_SET_CURRENT) {
+    handlers?.onSetCurrentAccount?.(account);
+    return true;
+  }
   if (action === ACCOUNT_ACTION_DELETE) {
     handlers?.onDelete?.(account);
     return true;
@@ -317,10 +328,10 @@ function ensureAccountRowsEventsBound() {
 }
 
 // 渲染账号列表
-export function renderAccounts({ onUpdateSort, onOpenUsage, onDelete }) {
+export function renderAccounts({ onUpdateSort, onOpenUsage, onSetCurrentAccount, onDelete }) {
   ensureAccountRowsEventsBound();
   renderAccountsRefreshProgress();
-  accountRowHandlers = { onUpdateSort, onOpenUsage, onDelete };
+  accountRowHandlers = { onUpdateSort, onOpenUsage, onSetCurrentAccount, onDelete };
   dom.accountRows.innerHTML = "";
   syncGroupFilterSelect(getGroupOptions(state.accountList), groupOptionsCacheKey);
   const accountDerivedMap = buildAccountDerivedMap(state.accountList, state.usageList);

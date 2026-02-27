@@ -193,6 +193,29 @@ async fn service_gateway_route_strategy_set(
 }
 
 #[tauri::command]
+async fn service_gateway_manual_account_get(
+  addr: Option<String>,
+) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("gateway/manualAccount/get", addr, None).await
+}
+
+#[tauri::command]
+async fn service_gateway_manual_account_set(
+  addr: Option<String>,
+  account_id: String,
+) -> Result<serde_json::Value, String> {
+  let params = serde_json::json!({ "accountId": account_id });
+  rpc_call_in_background("gateway/manualAccount/set", addr, Some(params)).await
+}
+
+#[tauri::command]
+async fn service_gateway_manual_account_clear(
+  addr: Option<String>,
+) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("gateway/manualAccount/clear", addr, None).await
+}
+
+#[tauri::command]
 async fn service_login_start(
   addr: Option<String>,
   login_type: String,
@@ -389,6 +412,9 @@ pub fn run() {
       service_requestlog_today_summary,
       service_gateway_route_strategy_get,
       service_gateway_route_strategy_set,
+      service_gateway_manual_account_get,
+      service_gateway_manual_account_set,
+      service_gateway_manual_account_clear,
       service_login_start,
       service_login_status,
       service_login_complete,

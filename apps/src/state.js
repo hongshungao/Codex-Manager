@@ -23,6 +23,7 @@ export const state = {
   accountSearch: "",
   accountFilter: "all",
   accountGroupFilter: "all",
+  manualPreferredAccountId: "",
   currentUsageAccount: null,
   activeLoginId: null,
   autoRefreshTimer: null,

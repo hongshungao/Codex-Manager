@@ -232,6 +232,7 @@ pub(in super::super) fn proxy_validated_request(
         context.log_candidate_start(&account.id, idx, strip_session_affinity);
         if let Some(skip_reason) = context.should_skip_candidate(&account.id, idx) {
             context.log_candidate_skip(&account.id, idx, skip_reason);
+            let _ = super::super::clear_manual_preferred_account_if(&account.id);
             continue;
         }
 
@@ -292,6 +293,7 @@ pub(in super::super) fn proxy_validated_request(
 
         match decision {
             CandidateUpstreamDecision::Failover => {
+                let _ = super::super::clear_manual_preferred_account_if(&account.id);
                 super::super::record_gateway_failover_attempt();
                 continue;
             }
@@ -299,6 +301,7 @@ pub(in super::super) fn proxy_validated_request(
                 status_code,
                 message,
             } => {
+                let _ = super::super::clear_manual_preferred_account_if(&account.id);
                 let elapsed_ms = started_at.elapsed().as_millis();
                 context.log_final_result(
                     Some(&account.id),
@@ -315,6 +318,9 @@ pub(in super::super) fn proxy_validated_request(
             }
             CandidateUpstreamDecision::RespondUpstream(resp) => {
                 let status_code = resp.status().as_u16();
+                if status_code >= 400 {
+                    let _ = super::super::clear_manual_preferred_account_if(&account.id);
+                }
                 let final_error = if status_code >= 400 {
                     last_attempt_error.as_deref()
                 } else {

@@ -120,6 +120,22 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
     Ok(applied)
 }
 
+pub(crate) fn manual_preferred_account() -> Option<String> {
+    route_hint::get_manual_preferred_account()
+}
+
+pub(crate) fn set_manual_preferred_account(account_id: &str) -> Result<(), String> {
+    route_hint::set_manual_preferred_account(account_id)
+}
+
+pub(crate) fn clear_manual_preferred_account() {
+    route_hint::clear_manual_preferred_account();
+}
+
+pub(crate) fn clear_manual_preferred_account_if(account_id: &str) -> bool {
+    route_hint::clear_manual_preferred_account_if(account_id)
+}
+
 #[cfg(test)]
 #[path = "../../tests/gateway/availability/mod.rs"]
 mod availability_tests;

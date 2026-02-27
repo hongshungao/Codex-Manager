@@ -913,6 +913,7 @@ const managementActions = createManagementActions({
   renderRequestLogs,
   refreshAccountsAndUsage,
   renderAccountsView,
+  renderCurrentPageView,
   openUsageModal,
   renderUsageSnapshot,
   refreshApiModels,
@@ -924,6 +925,7 @@ const managementActions = createManagementActions({
 const {
   handleClearRequestLogs,
   updateAccountSort,
+  setManualPreferredAccount,
   deleteAccount,
   importAccountsFromFiles,
   handleOpenUsageModal,
@@ -940,6 +942,7 @@ function buildMainRenderActions() {
   return buildRenderActions({
     updateAccountSort,
     handleOpenUsageModal,
+    setManualPreferredAccount,
     deleteAccount,
     toggleApiKeyStatus,
     deleteApiKey,

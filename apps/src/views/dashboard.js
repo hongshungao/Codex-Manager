@@ -59,13 +59,25 @@ export function renderDashboard() {
     dom.metricTodayCost.textContent = formatEstimatedCost(state.requestLogTodaySummary?.estimatedCost);
   }
 
-  renderCurrentAccount(state.accountList, usageMap, state.requestLogList);
+  renderCurrentAccount(
+    state.accountList,
+    usageMap,
+    state.requestLogList,
+    state.manualPreferredAccountId,
+  );
   renderRecommendations(state.accountList, usageMap);
 }
 
-function pickCurrentAccount(accounts, requestLogs) {
+function pickCurrentAccount(accounts, requestLogs, manualPreferredAccountId) {
   const accountList = Array.isArray(accounts) ? accounts : [];
   if (!accountList.length) return null;
+  const preferredId = String(manualPreferredAccountId || "").trim();
+  if (preferredId) {
+    const preferred = accountList.find((item) => item.id === preferredId);
+    if (preferred) {
+      return preferred;
+    }
+  }
 
   const logList = Array.isArray(requestLogs) ? requestLogs : [];
   let latestHit = null;
@@ -84,7 +96,7 @@ function pickCurrentAccount(accounts, requestLogs) {
   return accountList[0];
 }
 
-function renderCurrentAccount(accounts, usageMap, requestLogs) {
+function renderCurrentAccount(accounts, usageMap, requestLogs, manualPreferredAccountId) {
   if (!dom.currentAccountCard) return;
   dom.currentAccountCard.innerHTML = "";
   if (!accounts.length) {
@@ -94,7 +106,7 @@ function renderCurrentAccount(accounts, usageMap, requestLogs) {
     dom.currentAccountCard.appendChild(empty);
     return;
   }
-  const account = pickCurrentAccount(accounts, requestLogs);
+  const account = pickCurrentAccount(accounts, requestLogs, manualPreferredAccountId);
   if (!account) return;
   const usage = usageMap.get(account.id);
   const status = calcAvailability(usage);

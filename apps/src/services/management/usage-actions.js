@@ -19,11 +19,7 @@ export function createUsageActions({
     if (!ok) return;
     dom.refreshUsageSingle.disabled = true;
     try {
-      const refreshResult = await api.serviceUsageRefresh(state.currentUsageAccount.id);
-      if (refreshResult && typeof refreshResult === "object" && refreshResult.ok === false) {
-        const msg = String(refreshResult.error || "用量刷新失败");
-        throw new Error(msg);
-      }
+      await api.serviceUsageRefresh(state.currentUsageAccount.id);
       const res = await api.serviceUsageRead(state.currentUsageAccount.id);
       const snap = res ? res.snapshot : null;
       if (snap) {
@@ -41,7 +37,10 @@ export function createUsageActions({
       }
       renderUsageSnapshot(snap);
     } catch (err) {
-      dom.usageDetail.textContent = String(err);
+      const message = String(err && err.message ? err.message : err || "").trim();
+      dom.usageDetail.textContent = message
+        ? `用量刷新失败：${message}`
+        : "用量刷新失败";
     }
     dom.refreshUsageSingle.disabled = false;
   }

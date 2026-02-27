@@ -239,6 +239,18 @@ export async function serviceGatewayRouteStrategySet(strategy) {
   return invoke("service_gateway_route_strategy_set", withAddr({ strategy }));
 }
 
+export async function serviceGatewayManualAccountGet() {
+  return invoke("service_gateway_manual_account_get", withAddr());
+}
+
+export async function serviceGatewayManualAccountSet(accountId) {
+  return invoke("service_gateway_manual_account_set", withAddr({ accountId }));
+}
+
+export async function serviceGatewayManualAccountClear() {
+  return invoke("service_gateway_manual_account_clear", withAddr());
+}
+
 // 登录
 export async function serviceLoginStart(payload) {
   return invoke("service_login_start", withAddr(payload));

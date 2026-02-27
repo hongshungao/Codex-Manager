@@ -16,6 +16,7 @@ static ROUTE_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
 #[derive(Default)]
 struct RouteRoundRobinState {
     next_start_by_key_model: HashMap<String, usize>,
+    manual_preferred_account_id: Option<String>,
 }
 
 pub(crate) fn apply_route_strategy(
@@ -27,6 +28,11 @@ pub(crate) fn apply_route_strategy(
     if candidates.len() <= 1 {
         return;
     }
+
+    if rotate_to_manual_preferred_account(candidates) {
+        return;
+    }
+
     if route_mode() != ROUTE_MODE_BALANCED_ROUND_ROBIN {
         return;
     }
@@ -35,6 +41,25 @@ pub(crate) fn apply_route_strategy(
     if start > 0 {
         candidates.rotate_left(start);
     }
+}
+
+fn rotate_to_manual_preferred_account(candidates: &mut [(Account, Token)]) -> bool {
+    let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+    let Ok(mut state) = lock.lock() else {
+        return false;
+    };
+    let Some(account_id) = state.manual_preferred_account_id.as_deref() else {
+        return false;
+    };
+    let Some(index) = candidates.iter().position(|(account, _)| account.id.eq(account_id)) else {
+        // 中文注释：手动指定账号已不在可用候选池（可能用尽/不可用），自动回退到常规轮转。
+        state.manual_preferred_account_id = None;
+        return false;
+    };
+    if index > 0 {
+        candidates.rotate_left(index);
+    }
+    true
 }
 
 fn route_mode() -> u8 {
@@ -80,6 +105,57 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
     Ok(route_mode_label(mode))
 }
 
+pub(crate) fn get_manual_preferred_account() -> Option<String> {
+    ensure_route_config_loaded();
+    let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+    lock.lock()
+        .ok()
+        .and_then(|state| state.manual_preferred_account_id.clone())
+}
+
+pub(crate) fn set_manual_preferred_account(account_id: &str) -> Result<(), String> {
+    ensure_route_config_loaded();
+    let id = account_id.trim();
+    if id.is_empty() {
+        return Err("accountId is required".to_string());
+    }
+    let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+    let Ok(mut state) = lock.lock() else {
+        return Err("route state unavailable".to_string());
+    };
+    state.manual_preferred_account_id = Some(id.to_string());
+    Ok(())
+}
+
+pub(crate) fn clear_manual_preferred_account() {
+    ensure_route_config_loaded();
+    let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+    if let Ok(mut state) = lock.lock() {
+        state.manual_preferred_account_id = None;
+    }
+}
+
+pub(crate) fn clear_manual_preferred_account_if(account_id: &str) -> bool {
+    ensure_route_config_loaded();
+    let id = account_id.trim();
+    if id.is_empty() {
+        return false;
+    }
+    let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+    let Ok(mut state) = lock.lock() else {
+        return false;
+    };
+    if state
+        .manual_preferred_account_id
+        .as_deref()
+        .is_some_and(|current| current == id)
+    {
+        state.manual_preferred_account_id = None;
+        return true;
+    }
+    false
+}
+
 fn next_start_index(key_id: &str, model: Option<&str>, candidate_count: usize) -> usize {
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
     let Ok(mut state) = lock.lock() else {
@@ -108,6 +184,7 @@ pub(super) fn reload_from_env() {
     if let Some(lock) = ROUTE_STATE.get() {
         if let Ok(mut state) = lock.lock() {
             state.next_start_by_key_model.clear();
+            state.manual_preferred_account_id = None;
         }
     }
 }

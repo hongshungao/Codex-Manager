@@ -1,6 +1,7 @@
 export function buildRenderActions({
   updateAccountSort,
   handleOpenUsageModal,
+  setManualPreferredAccount,
   deleteAccount,
   toggleApiKeyStatus,
   deleteApiKey,
@@ -10,6 +11,7 @@ export function buildRenderActions({
   return {
     onUpdateSort: updateAccountSort,
     onOpenUsage: handleOpenUsageModal,
+    onSetCurrentAccount: setManualPreferredAccount,
     onDeleteAccount: deleteAccount,
     onToggleApiKeyStatus: toggleApiKeyStatus,
     onDeleteApiKey: deleteApiKey,

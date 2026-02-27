@@ -16,6 +16,7 @@ export function renderAccountsOnly(handlers) {
   renderAccounts({
     onUpdateSort: handlers.onUpdateSort,
     onOpenUsage: handlers.onOpenUsage,
+    onSetCurrentAccount: handlers.onSetCurrentAccount,
     onDelete: handlers.onDeleteAccount,
   });
 }

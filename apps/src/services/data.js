@@ -73,10 +73,17 @@ function isAbortError(err) {
   return Boolean(err && typeof err === "object" && err.name === "AbortError");
 }
 
+
 // 刷新账号列表
 export async function refreshAccounts() {
   const res = ensureRpcSuccess(await api.serviceAccountList(), "读取账号列表失败");
   state.accountList = Array.isArray(res.items) ? res.items : [];
+  try {
+    const manual = await api.serviceGatewayManualAccountGet();
+    state.manualPreferredAccountId = String(manual?.accountId || "").trim();
+  } catch {
+    state.manualPreferredAccountId = "";
+  }
 }
 
 // 刷新用量列表

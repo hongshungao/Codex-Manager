@@ -39,9 +39,11 @@ export function getRefreshAllProgress() {
 }
 
 export function createAccountActions({
+  state,
   ensureConnected,
   refreshAccountsAndUsage,
   renderAccountsView,
+  renderCurrentPageView,
   showToast,
   showConfirmDialog,
 }) {
@@ -126,6 +128,21 @@ export function createAccountActions({
     });
   }
 
+  async function setManualPreferredAccount(account) {
+    if (!account || !account.id) return;
+    const ok = await ensureConnected();
+    if (!ok) return;
+    await enqueueAccountOp(async () => {
+      await api.serviceGatewayManualAccountSet(account.id);
+      if (state && typeof state === "object") {
+        state.manualPreferredAccountId = account.id;
+      }
+      showToast(`已锁定 ${account.label || account.id}，异常前将持续优先使用`);
+      renderAccountsView?.();
+      renderCurrentPageView?.();
+    });
+  }
+
   async function importAccountsFromFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
@@ -171,5 +188,5 @@ export function createAccountActions({
     });
   }
 
-  return { updateAccountSort, deleteAccount, importAccountsFromFiles };
+  return { updateAccountSort, deleteAccount, importAccountsFromFiles, setManualPreferredAccount };
 }
