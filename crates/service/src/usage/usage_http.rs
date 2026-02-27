@@ -2,7 +2,7 @@ use codexmanager_core::usage::usage_endpoint;
 use reqwest::blocking::Client;
 use serde::de::DeserializeOwned;
 use std::sync::mpsc;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 static USAGE_HTTP_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
@@ -10,12 +10,89 @@ const USAGE_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const USAGE_HTTP_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const USAGE_HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
 
+// 中文注释：以前每次 read_json_with_timeout 都会 spawn 线程，只为实现 recv_timeout。
+// 这里改为复用固定 worker 线程池，避免频繁创建/销毁线程带来的开销与抖动。
+static JSON_READ_EXECUTOR: OnceLock<JsonReadExecutor> = OnceLock::new();
+const JSON_READ_WORKERS_MIN: usize = 4;
+const JSON_READ_WORKERS_MAX: usize = 32;
+
+type JsonReadTask = Box<dyn JsonReadTaskRunner + Send + 'static>;
+
+trait JsonReadTaskRunner {
+    fn run(self: Box<Self>);
+}
+
+impl<F> JsonReadTaskRunner for F
+where
+    F: FnOnce(),
+{
+    fn run(self: Box<Self>) {
+        (*self)()
+    }
+}
+
+struct JsonReadExecutor {
+    sender: mpsc::Sender<JsonReadTask>,
+}
+
+impl JsonReadExecutor {
+    fn new(worker_count: usize) -> Self {
+        let (sender, receiver) = mpsc::channel::<JsonReadTask>();
+        let receiver = Arc::new(Mutex::new(receiver));
+
+        for idx in 0..worker_count.max(1) {
+            let rx = Arc::clone(&receiver);
+            let name = format!("usage_http_json_read_{idx}");
+            let _ = std::thread::Builder::new().name(name).spawn(move || loop {
+                let task = {
+                    let guard = match rx.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    guard.recv()
+                };
+
+                let task = match task {
+                    Ok(task) => task,
+                    Err(_) => break,
+                };
+
+                // 防止单个任务 panic 终止整个 worker 线程。
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    task.run();
+                }));
+            });
+        }
+
+        Self { sender }
+    }
+
+    fn submit<F>(&self, task: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        // worker 全部意外退出时，send 会失败；调用方仍会按 recv_timeout 超时返回。
+        let _ = self.sender.send(Box::new(task));
+    }
+}
+
+fn json_read_worker_count() -> usize {
+    let detected = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(JSON_READ_WORKERS_MIN);
+    detected.clamp(JSON_READ_WORKERS_MIN, JSON_READ_WORKERS_MAX)
+}
+
+fn json_read_executor() -> &'static JsonReadExecutor {
+    JSON_READ_EXECUTOR.get_or_init(|| JsonReadExecutor::new(json_read_worker_count()))
+}
+
 fn read_json_with_timeout<T>(resp: reqwest::blocking::Response, read_timeout: Duration) -> Result<T, String>
 where
     T: DeserializeOwned + Send + 'static,
 {
     let (tx, rx) = mpsc::sync_channel(1);
-    std::thread::spawn(move || {
+    json_read_executor().submit(move || {
         let _ = tx.send(resp.json::<T>().map_err(|e| e.to_string()));
     });
     match rx.recv_timeout(read_timeout) {
