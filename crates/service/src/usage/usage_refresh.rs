@@ -1,8 +1,9 @@
 use codexmanager_core::auth::{extract_token_exp, DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use codexmanager_core::usage::parse_usage_snapshot;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::{HashMap, HashSet};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -221,16 +222,15 @@ struct UsageRefreshTask {
 }
 
 struct UsageRefreshExecutor {
-    sender: mpsc::Sender<UsageRefreshTask>,
+    sender: Sender<UsageRefreshTask>,
 }
 
 impl UsageRefreshExecutor {
     fn new() -> Self {
         let worker_count = usage_refresh_worker_count();
-        let (sender, receiver) = mpsc::channel::<UsageRefreshTask>();
-        let receiver = Arc::new(Mutex::new(receiver));
+        let (sender, receiver) = unbounded::<UsageRefreshTask>();
         for index in 0..worker_count {
-            let receiver = Arc::clone(&receiver);
+            let receiver = receiver.clone();
             let _ = thread::Builder::new()
                 .name(format!("usage-refresh-worker-{index}"))
                 .spawn(move || usage_refresh_worker_loop(receiver));
@@ -243,18 +243,15 @@ fn usage_refresh_executor() -> &'static UsageRefreshExecutor {
     USAGE_REFRESH_EXECUTOR.get_or_init(UsageRefreshExecutor::new)
 }
 
-fn usage_refresh_worker_loop(receiver: Arc<Mutex<mpsc::Receiver<UsageRefreshTask>>>) {
-    loop {
-        let task = {
-            let receiver = receiver.lock().expect("usage refresh worker queue poisoned");
-            receiver.recv()
-        };
-        let Ok(task) = task else {
-            break;
-        };
+fn usage_refresh_worker_loop(receiver: Receiver<UsageRefreshTask>) {
+    while let Ok(task) = receiver.recv() {
         let UsageRefreshTask { account_id, worker } = task;
         let account_id_for_clear = account_id.clone();
-        worker(account_id);
+        // 中文注释：worker 若 panic 可能导致 pending 标记无法清理，从而永久“卡死”该账号的刷新任务。
+        // 这里捕获 panic 并确保一定清理 pending，提升长跑稳定性。
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            worker(account_id);
+        }));
         clear_usage_refresh_task_pending(&account_id_for_clear);
     }
 }
@@ -269,7 +266,7 @@ fn usage_refresh_worker_count() -> usize {
 
 fn mark_usage_refresh_task_pending(account_id: &str) -> bool {
     let mutex = PENDING_USAGE_REFRESH_TASKS.get_or_init(|| Mutex::new(HashSet::new()));
-    let mut pending = mutex.lock().expect("usage refresh task set poisoned");
+    let mut pending = mutex.lock().unwrap_or_else(|err| err.into_inner());
     pending.insert(account_id.to_string())
 }
 
@@ -277,14 +274,14 @@ fn clear_usage_refresh_task_pending(account_id: &str) {
     let Some(mutex) = PENDING_USAGE_REFRESH_TASKS.get() else {
         return;
     };
-    let mut pending = mutex.lock().expect("usage refresh task set poisoned");
+    let mut pending = mutex.lock().unwrap_or_else(|err| err.into_inner());
     pending.remove(account_id);
 }
 
 #[cfg(test)]
 fn clear_pending_usage_refresh_tasks_for_tests() {
     if let Some(mutex) = PENDING_USAGE_REFRESH_TASKS.get() {
-        let mut pending = mutex.lock().expect("usage refresh task set poisoned");
+        let mut pending = mutex.lock().unwrap_or_else(|err| err.into_inner());
         pending.clear();
     }
 }
