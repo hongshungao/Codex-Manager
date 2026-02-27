@@ -16,6 +16,7 @@ const ACCOUNT_ACTION_DELETE = "delete";
 let accountRowsEventsBound = false;
 let accountRowHandlers = null;
 let accountLookupById = new Map();
+let accountRowNodesById = new Map();
 let groupOptionsCacheKey = "";
 let groupOptionsCache = [];
 let groupSelectRenderedKey = "";
@@ -268,6 +269,161 @@ function renderAccountRow(account, accountDerivedMap, { onDelete }) {
   return row;
 }
 
+function removeAllAccountRows() {
+  if (!dom.accountRows) return;
+  while (dom.accountRows.firstElementChild) {
+    dom.accountRows.firstElementChild.remove();
+  }
+  accountRowNodesById = new Map();
+}
+
+function updateStatusTag(node, status) {
+  if (!node) return;
+  const next = status || { text: "未知", level: "unknown" };
+  node.textContent = next.text;
+  node.className = "status-tag";
+  if (next.level === "ok") node.classList.add("status-ok");
+  if (next.level === "warn") node.classList.add("status-warn");
+  if (next.level === "bad") node.classList.add("status-bad");
+  if (next.level === "unknown") node.classList.add("status-unknown");
+}
+
+function updateMiniUsage(mini, usage, primaryRemain, secondaryRemain) {
+  if (!mini) return;
+  const safeUsage = usage || null;
+  const hasPrimaryWindow = safeUsage?.usedPercent != null && safeUsage?.windowMinutes != null;
+  const hasSecondaryWindow =
+    safeUsage?.secondaryUsedPercent != null
+    || safeUsage?.secondaryWindowMinutes != null;
+
+  mini.textContent = "";
+  if (hasPrimaryWindow) {
+    const primaryLabel = formatLimitLabel(safeUsage?.windowMinutes, "5小时");
+    mini.appendChild(renderMiniUsageLine(primaryLabel, primaryRemain ?? null, false));
+  }
+  if (hasSecondaryWindow) {
+    mini.appendChild(renderMiniUsageLine("7天", secondaryRemain ?? null, true));
+  }
+}
+
+function ensureDeleteButton(actionsWrap) {
+  if (!actionsWrap) return null;
+  const existing = actionsWrap.querySelector(`button[data-action="${ACCOUNT_ACTION_DELETE}"]`);
+  if (existing) return existing;
+  const del = document.createElement("button");
+  del.className = "danger";
+  del.type = "button";
+  del.setAttribute("data-action", ACCOUNT_ACTION_DELETE);
+  del.textContent = "删除";
+  actionsWrap.appendChild(del);
+  return del;
+}
+
+function syncDeleteButton(actionsWrap, enabled) {
+  if (!actionsWrap) return;
+  const existing = actionsWrap.querySelector(`button[data-action="${ACCOUNT_ACTION_DELETE}"]`);
+  if (enabled) {
+    ensureDeleteButton(actionsWrap);
+    return;
+  }
+  existing?.remove();
+}
+
+function updateAccountRow(row, account, accountDerivedMap, { onDelete }) {
+  if (!row || !account || !account.id) {
+    return row;
+  }
+  row.setAttribute("data-account-id", account.id);
+  const accountDerived = accountDerivedMap.get(account.id) || {
+    usage: null,
+    primaryRemain: null,
+    secondaryRemain: null,
+    status: { text: "未知", level: "unknown" },
+  };
+
+  // Column 0: account cell
+  const cellAccount = row.children[0];
+  const title = cellAccount?.querySelector?.("strong");
+  const meta = cellAccount?.querySelector?.("small");
+  if (title) title.textContent = account.label || "-";
+  if (meta) meta.textContent = `${account.id || "-"}`;
+  const mini = cellAccount?.querySelector?.(".mini-usage");
+  updateMiniUsage(mini, accountDerived.usage, accountDerived.primaryRemain, accountDerived.secondaryRemain);
+
+  // Column 1: group
+  const cellGroup = row.children[1];
+  if (cellGroup) cellGroup.textContent = normalizeGroupName(account.groupName) || "-";
+
+  // Column 2: sort input (avoid clobbering user input while focused)
+  const sortInput = row.querySelector?.("input[data-field='sort']");
+  if (sortInput) {
+    const next = account.sort != null ? String(account.sort) : "0";
+    if (document.activeElement !== sortInput) {
+      sortInput.value = next;
+      sortInput.dataset.originSort = next;
+    }
+  }
+
+  // Column 3: status
+  const statusTag = row.querySelector?.(".status-tag");
+  updateStatusTag(statusTag, accountDerived.status);
+
+  // Column 4: updated
+  const updatedStrong = row.children[4]?.querySelector?.("strong");
+  if (updatedStrong) {
+    updatedStrong.textContent = accountDerived.usage && accountDerived.usage.capturedAt
+      ? formatTs(accountDerived.usage.capturedAt)
+      : "未知";
+  }
+
+  // Column 5: actions
+  const actionsWrap = row.children[5]?.querySelector?.(".cell-actions");
+  syncDeleteButton(actionsWrap, Boolean(onDelete));
+  return row;
+}
+
+function syncAccountRows(filtered, accountDerivedMap, { onDelete }) {
+  if (!dom.accountRows) return;
+  const nextIds = new Set(filtered.map((account) => account.id));
+
+  // Remove stale cache entries (and DOM nodes if still present)
+  for (const [accountId, cachedRow] of accountRowNodesById.entries()) {
+    if (!nextIds.has(accountId)) {
+      cachedRow?.remove?.();
+      accountRowNodesById.delete(accountId);
+    }
+  }
+
+  let cursor = dom.accountRows.firstElementChild;
+  for (const account of filtered) {
+    if (!account || !account.id) continue;
+    const accountId = account.id;
+    let row = accountRowNodesById.get(accountId);
+    if (!row || !row.isConnected) {
+      row = renderAccountRow(account, accountDerivedMap, { onDelete });
+      accountRowNodesById.set(accountId, row);
+    } else {
+      updateAccountRow(row, account, accountDerivedMap, { onDelete });
+    }
+
+    if (row === cursor) {
+      cursor = cursor?.nextElementSibling || null;
+      continue;
+    }
+    dom.accountRows.insertBefore(row, cursor);
+  }
+
+  // Remove any leftover nodes (including previous empty row) after the cursor.
+  while (cursor) {
+    const next = cursor.nextElementSibling;
+    const accountId = cursor?.dataset?.accountId || "";
+    if (!accountId || !nextIds.has(accountId)) {
+      cursor.remove();
+    }
+    cursor = next;
+  }
+}
+
 function getAccountFromRow(row, lookup) {
   const accountId = row?.dataset?.accountId;
   if (!accountId) return null;
@@ -332,7 +488,6 @@ export function renderAccounts({ onUpdateSort, onOpenUsage, onSetCurrentAccount,
   ensureAccountRowsEventsBound();
   renderAccountsRefreshProgress();
   accountRowHandlers = { onUpdateSort, onOpenUsage, onSetCurrentAccount, onDelete };
-  dom.accountRows.innerHTML = "";
   syncGroupFilterSelect(getGroupOptions(state.accountList), groupOptionsCacheKey);
   const accountDerivedMap = buildAccountDerivedMap(state.accountList, state.usageList);
 
@@ -347,14 +502,11 @@ export function renderAccounts({ onUpdateSort, onOpenUsage, onSetCurrentAccount,
   if (filtered.length === 0) {
     accountLookupById = new Map();
     const message = state.accountList.length === 0 ? "暂无账号" : "当前筛选条件下无结果";
+    removeAllAccountRows();
     renderEmptyRow(message);
     return;
   }
 
   accountLookupById = new Map(filtered.map((account) => [account.id, account]));
-  const fragment = document.createDocumentFragment();
-  filtered.forEach((account) => {
-    fragment.appendChild(renderAccountRow(account, accountDerivedMap, { onDelete }));
-  });
-  dom.accountRows.appendChild(fragment);
+  syncAccountRows(filtered, accountDerivedMap, { onDelete });
 }
