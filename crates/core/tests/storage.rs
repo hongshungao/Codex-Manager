@@ -449,6 +449,65 @@ fn request_log_today_summary_reads_from_token_stats_table() {
 }
 
 #[test]
+fn insert_request_log_with_token_stat_writes_both_tables_in_one_call() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let created_at = now_ts();
+
+    let (request_log_id, token_stat_error) = storage
+        .insert_request_log_with_token_stat(
+            &RequestLog {
+                key_id: Some("key-atomic".to_string()),
+                account_id: Some("acc-atomic".to_string()),
+                request_path: "/v1/responses".to_string(),
+                method: "POST".to_string(),
+                model: Some("gpt-5.3-codex".to_string()),
+                reasoning_effort: Some("high".to_string()),
+                upstream_url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
+                status_code: Some(200),
+                input_tokens: None,
+                cached_input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                reasoning_output_tokens: None,
+                estimated_cost_usd: None,
+                error: None,
+                created_at,
+            },
+            &RequestTokenStat {
+                request_log_id: 0,
+                key_id: Some("key-atomic".to_string()),
+                account_id: Some("acc-atomic".to_string()),
+                model: Some("gpt-5.3-codex".to_string()),
+                input_tokens: Some(10),
+                cached_input_tokens: Some(2),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                reasoning_output_tokens: Some(1),
+                estimated_cost_usd: Some(0.01),
+                created_at,
+            },
+        )
+        .expect("insert request log with token stat");
+
+    assert!(request_log_id > 0);
+    assert!(
+        token_stat_error.is_none(),
+        "token stat insert should succeed: {:?}",
+        token_stat_error
+    );
+
+    let logs = storage.list_request_logs(Some("key:=key-atomic"), 10).expect("list logs");
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].key_id.as_deref(), Some("key-atomic"));
+    assert_eq!(logs[0].input_tokens, Some(10));
+    assert_eq!(logs[0].cached_input_tokens, Some(2));
+    assert_eq!(logs[0].output_tokens, Some(5));
+    assert_eq!(logs[0].total_tokens, Some(15));
+    assert_eq!(logs[0].reasoning_output_tokens, Some(1));
+}
+
+#[test]
 fn clear_request_logs_keeps_token_stats_for_usage_summary() {
     let storage = Storage::open_in_memory().expect("open in memory");
     storage.init().expect("init schema");

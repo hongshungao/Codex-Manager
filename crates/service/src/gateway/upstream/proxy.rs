@@ -56,8 +56,7 @@ pub(in super::super) fn proxy_validated_request(
         method,
     } = validated;
     let started_at = Instant::now();
-    let request_deadline =
-        super::super::upstream_total_timeout().map(|timeout| started_at + timeout);
+    let request_deadline = super::deadline::request_deadline(started_at, is_stream);
 
     super::super::trace_log::log_request_start(
         trace_id.as_str(),

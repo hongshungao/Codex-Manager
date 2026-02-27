@@ -1,6 +1,6 @@
 use rusqlite::{Result, Row};
 
-use super::{request_log_query, RequestLog, RequestLogTodaySummary, Storage};
+use super::{request_log_query, RequestLog, RequestLogTodaySummary, RequestTokenStat, Storage};
 
 impl Storage {
     pub fn insert_request_log(&self, log: &RequestLog) -> Result<i64> {
@@ -21,6 +21,60 @@ impl Storage {
             ),
         )?;
         Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn insert_request_log_with_token_stat(
+        &self,
+        log: &RequestLog,
+        stat: &RequestTokenStat,
+    ) -> Result<(i64, Option<String>)> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO request_logs (key_id, account_id, request_path, method, model, reasoning_effort, upstream_url, status_code, error, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            (
+                &log.key_id,
+                &log.account_id,
+                &log.request_path,
+                &log.method,
+                &log.model,
+                &log.reasoning_effort,
+                &log.upstream_url,
+                log.status_code,
+                &log.error,
+                log.created_at,
+            ),
+        )?;
+        let request_log_id = tx.last_insert_rowid();
+
+        // 中文注释：token 统计写入失败不应阻塞 request log 保留（例如 sqlite busy/锁竞争）。
+        // 这里保持“单事务单提交”，但 stat 失败时仍 commit request log。
+        let token_stat_error = tx
+            .execute(
+                "INSERT INTO request_token_stats (
+                    request_log_id, key_id, account_id, model,
+                    input_tokens, cached_input_tokens, output_tokens, total_tokens, reasoning_output_tokens,
+                    estimated_cost_usd, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                (
+                    request_log_id,
+                    &stat.key_id,
+                    &stat.account_id,
+                    &stat.model,
+                    stat.input_tokens,
+                    stat.cached_input_tokens,
+                    stat.output_tokens,
+                    stat.total_tokens,
+                    stat.reasoning_output_tokens,
+                    stat.estimated_cost_usd,
+                    stat.created_at,
+                ),
+            )
+            .err()
+            .map(|err| err.to_string());
+
+        tx.commit()?;
+        Ok((request_log_id, token_stat_error))
     }
 
     pub fn list_request_logs(&self, query: Option<&str>, limit: i64) -> Result<Vec<RequestLog>> {
@@ -242,7 +296,7 @@ fn map_request_log_row(row: &Row<'_>) -> Result<RequestLog> {
 
 #[cfg(test)]
 mod tests {
-    use super::Storage;
+    use super::{RequestLog, RequestTokenStat, Storage};
 
     fn collect_query_plan_details(storage: &Storage, sql: &str) -> Vec<String> {
         let mut stmt = storage.conn.prepare(sql).expect("prepare explain");
@@ -289,5 +343,115 @@ mod tests {
         assert!(details
             .iter()
             .any(|detail| detail.contains("idx_request_logs_key_id_created_at")));
+    }
+
+    #[test]
+    fn insert_request_log_with_token_stat_is_visible_via_join() {
+        let storage = Storage::open_in_memory().expect("open");
+        storage.init().expect("init");
+
+        let created_at = 123456_i64;
+        let log = RequestLog {
+            key_id: Some("gk_1".to_string()),
+            account_id: Some("acc_1".to_string()),
+            request_path: "/v1/responses".to_string(),
+            method: "POST".to_string(),
+            model: Some("gpt-5".to_string()),
+            reasoning_effort: Some("medium".to_string()),
+            upstream_url: Some("https://example.test".to_string()),
+            status_code: Some(200),
+            input_tokens: None,
+            cached_input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_output_tokens: None,
+            estimated_cost_usd: None,
+            error: None,
+            created_at,
+        };
+
+        let stat = RequestTokenStat {
+            request_log_id: 0,
+            key_id: log.key_id.clone(),
+            account_id: log.account_id.clone(),
+            model: log.model.clone(),
+            input_tokens: Some(10),
+            cached_input_tokens: Some(1),
+            output_tokens: Some(2),
+            total_tokens: Some(12),
+            reasoning_output_tokens: Some(3),
+            estimated_cost_usd: Some(0.123),
+            created_at,
+        };
+
+        let (_request_log_id, token_err) = storage
+            .insert_request_log_with_token_stat(&log, &stat)
+            .expect("insert request log with token stat");
+        assert!(token_err.is_none(), "token stat should insert");
+
+        let logs = storage
+            .list_request_logs(None, 10)
+            .expect("list request logs");
+        assert_eq!(logs.len(), 1);
+        let row = &logs[0];
+        assert_eq!(row.request_path, log.request_path);
+        assert_eq!(row.input_tokens, Some(10));
+        assert_eq!(row.cached_input_tokens, Some(1));
+        assert_eq!(row.output_tokens, Some(2));
+        assert_eq!(row.total_tokens, Some(12));
+        assert_eq!(row.reasoning_output_tokens, Some(3));
+        assert_eq!(row.estimated_cost_usd, Some(0.123));
+    }
+
+    #[test]
+    fn token_stat_failure_still_commits_request_log() {
+        let storage = Storage::open_in_memory().expect("open");
+        // Only create request_logs table, so request_token_stats insert fails.
+        storage.ensure_request_logs_table().expect("ensure logs table");
+
+        let created_at = 42_i64;
+        let log = RequestLog {
+            key_id: Some("gk_1".to_string()),
+            account_id: Some("acc_1".to_string()),
+            request_path: "/v1/responses".to_string(),
+            method: "POST".to_string(),
+            model: Some("gpt-5".to_string()),
+            reasoning_effort: None,
+            upstream_url: None,
+            status_code: Some(200),
+            input_tokens: None,
+            cached_input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_output_tokens: None,
+            estimated_cost_usd: None,
+            error: None,
+            created_at,
+        };
+
+        let stat = RequestTokenStat {
+            request_log_id: 0,
+            key_id: log.key_id.clone(),
+            account_id: log.account_id.clone(),
+            model: log.model.clone(),
+            input_tokens: Some(1),
+            cached_input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_output_tokens: None,
+            estimated_cost_usd: None,
+            created_at,
+        };
+
+        let (_request_log_id, token_err) = storage
+            .insert_request_log_with_token_stat(&log, &stat)
+            .expect("insert request log with token stat");
+        assert!(token_err.is_some(), "token stat insert should fail");
+
+        let count: i64 = storage
+            .conn
+            .query_row("SELECT COUNT(1) FROM request_logs", [], |row| row.get(0))
+            .expect("count request_logs");
+        assert_eq!(count, 1);
     }
 }

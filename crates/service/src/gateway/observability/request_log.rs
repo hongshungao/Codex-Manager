@@ -115,7 +115,8 @@ pub(super) fn write_request_log(
         );
     }
     // 记录请求最终结果（而非内部重试明细），保证 UI 一次请求只展示一条记录。
-    let request_log_id = match storage.insert_request_log(&RequestLog {
+    let (request_log_id, token_stat_error) = match storage.insert_request_log_with_token_stat(
+        &RequestLog {
         key_id: key_id.map(|v| v.to_string()),
         account_id: account_id.map(|v| v.to_string()),
         request_path: request_path.to_string(),
@@ -132,8 +133,22 @@ pub(super) fn write_request_log(
         estimated_cost_usd: None,
         error: error.map(|v| v.to_string()),
         created_at,
-    }) {
-        Ok(request_log_id) => request_log_id,
+    },
+        &RequestTokenStat {
+            request_log_id: 0,
+            key_id: key_id.map(|v| v.to_string()),
+            account_id: account_id.map(|v| v.to_string()),
+            model: model.map(|v| v.to_string()),
+            input_tokens,
+            cached_input_tokens,
+            output_tokens,
+            total_tokens,
+            reasoning_output_tokens,
+            estimated_cost_usd: Some(estimated_cost_usd),
+            created_at,
+        },
+    ) {
+        Ok(result) => result,
         Err(err) => {
             log::error!(
                 "event=gateway_request_log_insert_failed path={} status={} account_id={} key_id={} err={}",
@@ -147,25 +162,14 @@ pub(super) fn write_request_log(
         }
     };
 
-    if let Err(err) = storage.insert_request_token_stat(&RequestTokenStat {
-        request_log_id,
-        key_id: key_id.map(|v| v.to_string()),
-        account_id: account_id.map(|v| v.to_string()),
-        model: model.map(|v| v.to_string()),
-        input_tokens,
-        cached_input_tokens,
-        output_tokens,
-        total_tokens,
-        reasoning_output_tokens,
-        estimated_cost_usd: Some(estimated_cost_usd),
-        created_at,
-    }) {
+    if let Some(err) = token_stat_error {
         log::error!(
-            "event=gateway_request_token_stat_insert_failed path={} status={} account_id={} key_id={} err={}",
+            "event=gateway_request_token_stat_insert_failed path={} status={} account_id={} key_id={} request_log_id={} err={}",
             request_path,
             status_code.unwrap_or(0),
             account_id.unwrap_or("-"),
             key_id.unwrap_or("-"),
+            request_log_id,
             err
         );
     }
