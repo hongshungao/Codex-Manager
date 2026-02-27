@@ -1,8 +1,9 @@
-use codexmanager_core::storage::{Account, Token};
 use super::route_quality::route_health_score;
+use codexmanager_core::storage::{Account, Token};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const ROUTE_STRATEGY_ENV: &str = "CODEXMANAGER_ROUTE_STRATEGY";
 const ROUTE_MODE_ORDERED: u8 = 0;
@@ -12,9 +13,16 @@ const ROUTE_STRATEGY_BALANCED: &str = "balanced";
 const ROUTE_HEALTH_P2C_ENABLED_ENV: &str = "CODEXMANAGER_ROUTE_HEALTH_P2C_ENABLED";
 const ROUTE_HEALTH_P2C_ORDERED_WINDOW_ENV: &str = "CODEXMANAGER_ROUTE_HEALTH_P2C_ORDERED_WINDOW";
 const ROUTE_HEALTH_P2C_BALANCED_WINDOW_ENV: &str = "CODEXMANAGER_ROUTE_HEALTH_P2C_BALANCED_WINDOW";
+const ROUTE_STATE_TTL_SECS_ENV: &str = "CODEXMANAGER_ROUTE_STATE_TTL_SECS";
+const ROUTE_STATE_CAPACITY_ENV: &str = "CODEXMANAGER_ROUTE_STATE_CAPACITY";
 const DEFAULT_ROUTE_HEALTH_P2C_ENABLED: bool = true;
 const DEFAULT_ROUTE_HEALTH_P2C_ORDERED_WINDOW: usize = 3;
 const DEFAULT_ROUTE_HEALTH_P2C_BALANCED_WINDOW: usize = 6;
+// 中文注释：Route 状态（按 key_id + model 维度）用于 round-robin 起点与 P2C nonce。
+// 为避免 key/model 高基数导致 HashMap 无限增长，默认增加 TTL + 容量上限；不会影响“短时间内连续请求”的既有语义。
+const DEFAULT_ROUTE_STATE_TTL_SECS: u64 = 6 * 60 * 60;
+const DEFAULT_ROUTE_STATE_CAPACITY: usize = 4096;
+const ROUTE_STATE_MAINTENANCE_EVERY: u64 = 64;
 
 static ROUTE_MODE: AtomicU8 = AtomicU8::new(ROUTE_MODE_ORDERED);
 static ROUTE_HEALTH_P2C_ENABLED: AtomicBool = AtomicBool::new(DEFAULT_ROUTE_HEALTH_P2C_ENABLED);
@@ -22,14 +30,29 @@ static ROUTE_HEALTH_P2C_ORDERED_WINDOW: AtomicUsize =
     AtomicUsize::new(DEFAULT_ROUTE_HEALTH_P2C_ORDERED_WINDOW);
 static ROUTE_HEALTH_P2C_BALANCED_WINDOW: AtomicUsize =
     AtomicUsize::new(DEFAULT_ROUTE_HEALTH_P2C_BALANCED_WINDOW);
+static ROUTE_STATE_TTL_SECS: AtomicU64 = AtomicU64::new(DEFAULT_ROUTE_STATE_TTL_SECS);
+static ROUTE_STATE_CAPACITY: AtomicUsize = AtomicUsize::new(DEFAULT_ROUTE_STATE_CAPACITY);
 static ROUTE_STATE: OnceLock<Mutex<RouteRoundRobinState>> = OnceLock::new();
 static ROUTE_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
 
+#[derive(Clone, Copy)]
+struct RouteStateEntry<T: Copy> {
+    value: T,
+    last_seen: Instant,
+}
+
+impl<T: Copy> RouteStateEntry<T> {
+    fn new(value: T, last_seen: Instant) -> Self {
+        Self { value, last_seen }
+    }
+}
+
 #[derive(Default)]
 struct RouteRoundRobinState {
-    next_start_by_key_model: HashMap<String, usize>,
-    p2c_nonce_by_key_model: HashMap<String, u64>,
+    next_start_by_key_model: HashMap<String, RouteStateEntry<usize>>,
+    p2c_nonce_by_key_model: HashMap<String, RouteStateEntry<u64>>,
     manual_preferred_account_id: Option<String>,
+    maintenance_tick: u64,
 }
 
 pub(crate) fn apply_route_strategy(
@@ -115,6 +138,7 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
         if let Ok(mut state) = lock.lock() {
             state.next_start_by_key_model.clear();
             state.p2c_nonce_by_key_model.clear();
+            state.maintenance_tick = 0;
         }
     }
     Ok(route_mode_label(mode))
@@ -173,13 +197,32 @@ pub(crate) fn clear_manual_preferred_account_if(account_id: &str) -> bool {
 
 fn next_start_index(key_id: &str, model: Option<&str>, candidate_count: usize) -> usize {
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    let Ok(mut state) = lock.lock() else {
+    let Ok(mut state_guard) = lock.lock() else {
         return 0;
     };
+    let state = &mut *state_guard;
+    let now = Instant::now();
+    state.maybe_maintain(now);
+
+    let ttl = route_state_ttl();
+    let capacity = route_state_capacity();
     let key = key_model_key(key_id, model);
-    let next = state.next_start_by_key_model.entry(key).or_insert(0);
-    let start = *next % candidate_count;
-    *next = (start + 1) % candidate_count;
+    remove_entry_if_expired(&mut state.next_start_by_key_model, key.as_str(), now, ttl);
+    let start = {
+        let entry = state
+            .next_start_by_key_model
+            .entry(key.clone())
+            .or_insert(RouteStateEntry::new(0, now));
+        entry.last_seen = now;
+        let start = entry.value % candidate_count;
+        entry.value = (start + 1) % candidate_count;
+        start
+    };
+    enforce_capacity_pair(
+        &mut state.next_start_by_key_model,
+        &mut state.p2c_nonce_by_key_model,
+        capacity,
+    );
     start
 }
 
@@ -216,13 +259,33 @@ fn p2c_challenger_index(
         return None;
     }
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    let Ok(mut state) = lock.lock() else {
+    let Ok(mut state_guard) = lock.lock() else {
         return None;
     };
+    let state = &mut *state_guard;
+    let now = Instant::now();
+    state.maybe_maintain(now);
+
+    let ttl = route_state_ttl();
+    let capacity = route_state_capacity();
     let key = key_model_key(key_id, model);
-    let nonce = state.p2c_nonce_by_key_model.entry(key.clone()).or_insert(0);
+    remove_entry_if_expired(&mut state.p2c_nonce_by_key_model, key.as_str(), now, ttl);
+    let nonce = {
+        let entry = state
+            .p2c_nonce_by_key_model
+            .entry(key.clone())
+            .or_insert(RouteStateEntry::new(0, now));
+        entry.last_seen = now;
+        let nonce = entry.value;
+        entry.value = nonce.wrapping_add(1);
+        nonce
+    };
+    enforce_capacity_pair(
+        &mut state.p2c_nonce_by_key_model,
+        &mut state.next_start_by_key_model,
+        capacity,
+    );
     let seed = stable_hash_u64(format!("{key}|{nonce}").as_bytes());
-    *nonce = nonce.wrapping_add(1);
     // 中文注释：当前候选列表已有顺序（ordered / round-robin 后），P2C 只从前 window 内挑一个挑战者
     // 与“当前头部候选”对比，避免完全打乱轮询/排序语义。
     let offset = (seed as usize) % (candidate_count - 1);
@@ -248,6 +311,77 @@ fn route_health_window(mode: u8) -> usize {
     } else {
         ROUTE_HEALTH_P2C_ORDERED_WINDOW.load(Ordering::Relaxed)
     }
+}
+
+fn route_state_ttl() -> Duration {
+    Duration::from_secs(ROUTE_STATE_TTL_SECS.load(Ordering::Relaxed))
+}
+
+fn route_state_capacity() -> usize {
+    ROUTE_STATE_CAPACITY.load(Ordering::Relaxed)
+}
+
+fn is_entry_expired(last_seen: Instant, now: Instant, ttl: Duration) -> bool {
+    if ttl.is_zero() {
+        return false;
+    }
+    now.checked_duration_since(last_seen)
+        .is_some_and(|age| age > ttl)
+}
+
+fn remove_entry_if_expired<T: Copy>(
+    map: &mut HashMap<String, RouteStateEntry<T>>,
+    key: &str,
+    now: Instant,
+    ttl: Duration,
+) {
+    if ttl.is_zero() {
+        return;
+    }
+    let expired = map
+        .get(key)
+        .is_some_and(|entry| is_entry_expired(entry.last_seen, now, ttl));
+    if expired {
+        map.remove(key);
+    }
+}
+
+fn prune_expired_entries<T: Copy>(
+    map: &mut HashMap<String, RouteStateEntry<T>>,
+    now: Instant,
+    ttl: Duration,
+) {
+    if ttl.is_zero() {
+        return;
+    }
+    map.retain(|_, entry| !is_entry_expired(entry.last_seen, now, ttl));
+}
+
+fn enforce_capacity_pair<T: Copy, U: Copy>(
+    map: &mut HashMap<String, RouteStateEntry<T>>,
+    other: &mut HashMap<String, RouteStateEntry<U>>,
+    capacity: usize,
+) {
+    if capacity == 0 {
+        return;
+    }
+    while map.len() > capacity {
+        let Some(oldest_key) = find_oldest_key(map) else {
+            break;
+        };
+        map.remove(oldest_key.as_str());
+        other.remove(oldest_key.as_str());
+    }
+}
+
+fn find_oldest_key<T: Copy>(map: &HashMap<String, RouteStateEntry<T>>) -> Option<String> {
+    map.iter()
+        .min_by(|(ka, ea), (kb, eb)| {
+            ea.last_seen
+                .cmp(&eb.last_seen)
+                .then_with(|| ka.cmp(kb))
+        })
+        .map(|(key, _)| key.clone())
 }
 
 fn key_model_key(key_id: &str, model: Option<&str>) -> String {
@@ -280,12 +414,21 @@ pub(super) fn reload_from_env() {
         ),
         Ordering::Relaxed,
     );
+    ROUTE_STATE_TTL_SECS.store(
+        env_u64_or(ROUTE_STATE_TTL_SECS_ENV, DEFAULT_ROUTE_STATE_TTL_SECS),
+        Ordering::Relaxed,
+    );
+    ROUTE_STATE_CAPACITY.store(
+        env_usize_or(ROUTE_STATE_CAPACITY_ENV, DEFAULT_ROUTE_STATE_CAPACITY),
+        Ordering::Relaxed,
+    );
 
     if let Some(lock) = ROUTE_STATE.get() {
         if let Ok(mut state) = lock.lock() {
             state.next_start_by_key_model.clear();
             state.p2c_nonce_by_key_model.clear();
             state.manual_preferred_account_id = None;
+            state.maintenance_tick = 0;
         }
     }
 }
@@ -312,6 +455,36 @@ fn env_usize_or(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+fn env_u64_or(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+impl RouteRoundRobinState {
+    fn maybe_maintain(&mut self, now: Instant) {
+        self.maintenance_tick = self.maintenance_tick.wrapping_add(1);
+        if self.maintenance_tick % ROUTE_STATE_MAINTENANCE_EVERY != 0 {
+            return;
+        }
+        let ttl = route_state_ttl();
+        let capacity = route_state_capacity();
+        prune_expired_entries(&mut self.next_start_by_key_model, now, ttl);
+        prune_expired_entries(&mut self.p2c_nonce_by_key_model, now, ttl);
+        enforce_capacity_pair(
+            &mut self.next_start_by_key_model,
+            &mut self.p2c_nonce_by_key_model,
+            capacity,
+        );
+        enforce_capacity_pair(
+            &mut self.p2c_nonce_by_key_model,
+            &mut self.next_start_by_key_model,
+            capacity,
+        );
+    }
+}
+
 #[cfg(test)]
 fn clear_route_state_for_tests() {
     super::route_quality::clear_route_quality_for_tests();
@@ -320,6 +493,7 @@ fn clear_route_state_for_tests() {
             state.next_start_by_key_model.clear();
             state.p2c_nonce_by_key_model.clear();
             state.manual_preferred_account_id = None;
+            state.maintenance_tick = 0;
         }
     }
 }
@@ -515,6 +689,123 @@ mod tests {
         );
         assert_eq!(current_route_strategy(), "balanced");
         assert!(set_route_strategy("unsupported").is_err());
+    }
+
+    #[test]
+    fn route_state_ttl_expires_per_key_state() {
+        let _guard = route_strategy_test_guard();
+        let prev_strategy = std::env::var(ROUTE_STRATEGY_ENV).ok();
+        let prev_ttl = std::env::var(ROUTE_STATE_TTL_SECS_ENV).ok();
+        let prev_cap = std::env::var(ROUTE_STATE_CAPACITY_ENV).ok();
+
+        std::env::set_var(ROUTE_STRATEGY_ENV, "balanced");
+        std::env::set_var(ROUTE_STATE_TTL_SECS_ENV, "1");
+        std::env::set_var(ROUTE_STATE_CAPACITY_ENV, "100");
+        reload_from_env();
+        clear_route_state_for_tests();
+
+        let key = key_model_key("gk_ttl", Some("m1"));
+        let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+        let now = Instant::now();
+        {
+            let mut state = lock.lock().expect("route state");
+            state.next_start_by_key_model.insert(
+                key.clone(),
+                RouteStateEntry::new(2, now - Duration::from_secs(5)),
+            );
+            state.p2c_nonce_by_key_model.insert(
+                key.clone(),
+                RouteStateEntry::new(9, now - Duration::from_secs(5)),
+            );
+        }
+
+        // 中文注释：过期后应视为“无状态”，从 0 开始轮询。
+        assert_eq!(next_start_index("gk_ttl", Some("m1"), 3), 0);
+
+        // 中文注释：nonce 过期后应重置；第一次调用后 value=1（从 0 自增）。
+        let _ = p2c_challenger_index("gk_ttl", Some("m1"), 3);
+        {
+            let state = lock.lock().expect("route state");
+            let entry = state
+                .p2c_nonce_by_key_model
+                .get(key.as_str())
+                .expect("nonce entry");
+            assert_eq!(entry.value, 1);
+        }
+
+        if let Some(value) = prev_strategy {
+            std::env::set_var(ROUTE_STRATEGY_ENV, value);
+        } else {
+            std::env::remove_var(ROUTE_STRATEGY_ENV);
+        }
+        if let Some(value) = prev_ttl {
+            std::env::set_var(ROUTE_STATE_TTL_SECS_ENV, value);
+        } else {
+            std::env::remove_var(ROUTE_STATE_TTL_SECS_ENV);
+        }
+        if let Some(value) = prev_cap {
+            std::env::set_var(ROUTE_STATE_CAPACITY_ENV, value);
+        } else {
+            std::env::remove_var(ROUTE_STATE_CAPACITY_ENV);
+        }
+        reload_from_env();
+    }
+
+    #[test]
+    fn route_state_capacity_evicts_lru_and_keeps_maps_in_sync() {
+        let _guard = route_strategy_test_guard();
+        let prev_ttl = std::env::var(ROUTE_STATE_TTL_SECS_ENV).ok();
+        let prev_cap = std::env::var(ROUTE_STATE_CAPACITY_ENV).ok();
+
+        // 中文注释：禁用 TTL，单测只验证容量淘汰逻辑。
+        std::env::set_var(ROUTE_STATE_TTL_SECS_ENV, "0");
+        std::env::set_var(ROUTE_STATE_CAPACITY_ENV, "2");
+        reload_from_env();
+        clear_route_state_for_tests();
+
+        let k1 = key_model_key("k1", None);
+        let k2 = key_model_key("k2", None);
+        let k3 = key_model_key("k3", None);
+
+        let _ = next_start_index("k1", None, 3);
+        let _ = next_start_index("k2", None, 3);
+
+        // 中文注释：预填充另一张 map，用于验证“同 key 联动清理”。
+        let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+        {
+            let mut state = lock.lock().expect("route state");
+            let now = Instant::now();
+            state
+                .p2c_nonce_by_key_model
+                .insert(k1.clone(), RouteStateEntry::new(0, now));
+            state
+                .p2c_nonce_by_key_model
+                .insert(k2.clone(), RouteStateEntry::new(0, now));
+        }
+
+        let _ = next_start_index("k3", None, 3);
+
+        {
+            let state = lock.lock().expect("route state");
+            assert_eq!(state.next_start_by_key_model.len(), 2);
+            assert!(!state.next_start_by_key_model.contains_key(k1.as_str()));
+            assert!(state.next_start_by_key_model.contains_key(k2.as_str()));
+            assert!(state.next_start_by_key_model.contains_key(k3.as_str()));
+
+            assert!(!state.p2c_nonce_by_key_model.contains_key(k1.as_str()));
+        }
+
+        if let Some(value) = prev_ttl {
+            std::env::set_var(ROUTE_STATE_TTL_SECS_ENV, value);
+        } else {
+            std::env::remove_var(ROUTE_STATE_TTL_SECS_ENV);
+        }
+        if let Some(value) = prev_cap {
+            std::env::set_var(ROUTE_STATE_CAPACITY_ENV, value);
+        } else {
+            std::env::remove_var(ROUTE_STATE_CAPACITY_ENV);
+        }
+        reload_from_env();
     }
 
     #[test]
