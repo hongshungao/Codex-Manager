@@ -13,20 +13,21 @@
 本地桌面端 + 服务进程的 Codex 账号池管理器，用于统一管理账号、用量与平台 Key，并提供本地网关能力。
 
 ## 最近变更
-- `v0.1.2`（最新）
+- `v0.1.2`（最新，包含自 `v0.1.1` 以来全部更新）
 - 新增 Azure OpenAI 协议支持：平台 Key 可选择 `azure_openai`，支持独立 Endpoint 配置与 Azure API Key 鉴权链路。
 - 网关新增 Azure 专属转发模块（独立文件），在不破坏原有 OpenAI/Anthropic 路径的前提下完成协议分流。
 - 平台 Key 弹窗优化：Azure 配置改为 `Endpoint + API Key` 直填模式，交互更直观。
 - 请求日志体验优化：当账号信息缺失时，账号列使用 Key 前缀兜底展示，避免空白。
 - 启动速度优化：启动阶段改为“本地优先加载”（账号/用量/模型先读本地），模型列表引入本地缓存与后台按需刷新（缓存为空立即拉取，随后按周期刷新），显著降低首屏等待。
 - 网关模块重构：`gateway` 按 `auth/core/request/routing/observability/upstream` 分层，代码可维护性与定位效率提升。
-- 前端交互优化：账号页与日志页显著降卡顿，筛选与刷新链路改为更稳定的异步合并策略。
+- 前端交互优化：账号页与日志页显著降卡顿；刷新任务加入通用并发上限；并新增统一请求封装（`timeout/retry/取消`）提升弱网稳定性。
 - 刷新体验升级：账号页“刷新所有”支持进度展示（完成/剩余）与按钮 busy 稳定处理，避免“点了没反应”感知。
 - 账号导入增强：支持大批量导入分批处理，默认导入分组为 `IMPORT`，空分组账号自动补齐。
 - 用量状态统一：后端引入统一可用状态枚举，并透出到前端进行一致文案映射（可用/单窗口可用/不可用/未知）。
 - 请求日志体验优化：窄屏下按优先级隐藏次要列，保留账号/路径/模型/状态核心信息。
 - 按钮与布局统一：页面主按钮、操作列按钮与弹窗按钮统一尺寸规范，账号管理与仪表盘版心对齐。
-- 发布流程继续规范：`release-windows.yml`、`release-linux.yml`、`release-macos-beta.yml` ；Linux 构建缓存策略进一步优化。
+- 网关观测增强：`http_bridge` 输出累积加上限；新增 `/metrics` 暴露 DB busy、HTTP 队列深度、upstream attempt latency 等指标。
+- 发布流程提速与防错：三平台 workflow 全手动触发；统一 Tauri CLI 版本；校验 tag/version；产物附带 `SHA256SUMS`/`manifest.json`；upload-artifact 关闭压缩；同 tag 串行避免竞态。
 
 ## 功能概览
 - 账号池管理：分组、标签、排序、备注
@@ -254,8 +255,8 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 
 对应实现可见：
-- `crates/codexmanager-service/src/gateway/protocol_adapter/request_mapping.rs`
-- `crates/codexmanager-service/src/gateway/upstream/transport.rs`
+- `crates/service/src/gateway/protocol_adapter/request_mapping.rs`
+- `crates/service/src/gateway/upstream/transport.rs`
 
 ## 联系方式
 ![个人](assets/images/personal.jpg)

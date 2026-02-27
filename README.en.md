@@ -13,20 +13,21 @@
 A local desktop + service toolkit for managing a Codex-compatible ChatGPT account pool, usage, and platform keys, with a built-in local gateway.
 
 ## Recent Changes
-- `v0.1.2` (latest)
+- `v0.1.2` (latest, includes all updates since `v0.1.1`)
 - Added Azure OpenAI protocol support: platform keys can now use `azure_openai` with dedicated endpoint configuration and Azure API key authentication flow.
 - Added an Azure-specific upstream module (separate files) to keep OpenAI/Anthropic paths stable while introducing protocol-based routing.
 - Improved Platform Key modal UX: Azure setup now uses direct `Endpoint + API Key` inputs.
 - Improved Request Logs UX: when account info is missing, the account column now falls back to a key-prefix label instead of showing blank.
 - Startup speed optimization: startup now uses a local-first load path (accounts/usage/models from local storage first), with model list local cache plus background on-demand refresh (immediate pull when cache is empty, then periodic refresh), significantly reducing first-screen wait time.
 - Gateway modular refactor: `gateway` is now organized into `auth/core/request/routing/observability/upstream`, improving maintainability and troubleshooting speed.
-- Frontend interaction improvements: noticeable lag reduction in Accounts and Request Logs; filtering and refresh pipelines now use more stable async batching.
+- Frontend interaction improvements: noticeable lag reduction in Accounts and Request Logs; refresh tasks now have a shared concurrency cap; added a unified request wrapper (`timeout/retry/cancel`) for better weak-network stability.
 - Refresh UX upgrade: “Refresh All” now shows progress (completed/remaining) with stable busy-state handling to avoid “clicked but no feedback” perception.
 - Account import enhancement: large-batch imports are processed in chunks; default import group is `IMPORT`; empty group values are auto-filled.
 - Usage status unification: backend now exposes a unified availability enum and frontend maps it to consistent labels (`Available / Single-window available / Unavailable / Unknown`).
 - Request logs responsive optimization: narrow screens hide secondary columns by priority while preserving core fields (account/path/model/status).
 - Button and layout consistency: unified sizing for page buttons, row action buttons, and modal buttons; Accounts and Dashboard content widths are aligned.
-- Release flow remains manual-only and further standardized: `release-windows.yml`, `release-linux.yml`, and `release-macos-beta.yml`; Linux cache strategy is additionally optimized.
+- Gateway observability: capped `http_bridge` output accumulation; added `/metrics` to expose DB busy, HTTP queue depth, upstream attempt latency, etc.
+- Release flow speed & safety: manual-only workflows across platforms; unified Tauri CLI version; tag/version consistency checks; release assets include `SHA256SUMS`/`manifest.json`; upload-artifact compression disabled; per-tag concurrency to avoid release write races.
 
 ## Features
 - Account pool management: group, tag, sort, note
@@ -102,8 +103,22 @@ All workflows are `workflow_dispatch` only.
 - `ci-verify.yml`
   - Purpose: quality gate (Rust tests + frontend tests + frontend build)
   - Trigger: manual only
-- `release-multi-platform.yml`
-  - Purpose: multi-platform packaging and release publishing
+- `release-windows.yml`
+  - Purpose: Windows packaging and release publishing (installer + portable)
+  - Trigger: manual only
+  - Inputs:
+    - `tag` (required)
+    - `ref` (default: `main`)
+    - `run_verify` (default: `true`)
+- `release-linux.yml`
+  - Purpose: Linux packaging and release publishing (AppImage/deb + portable)
+  - Trigger: manual only
+  - Inputs:
+    - `tag` (required)
+    - `ref` (default: `main`)
+    - `run_verify` (default: `true`)
+- `release-macos-beta.yml`
+  - Purpose: macOS beta release (unsigned, for internal testing only)
   - Trigger: manual only
   - Inputs:
     - `tag` (required)
@@ -119,16 +134,17 @@ Examples:
 # Local Windows build
 pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 -Bundle nsis -CleanDist -Portable
 
-# Dispatch multi-platform workflow (and download artifacts)
+# Dispatch a release workflow (and download artifacts)
 pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
   -AllPlatforms `
   -GitRef main `
   -ReleaseTag v0.0.9 `
-  -GithubToken <token>
+  -GithubToken <token> `
+  -WorkflowFile release-windows.yml
 
 # Skip verify gate inside release workflow
 pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 `
-  -AllPlatforms -GitRef main -ReleaseTag v0.0.9 -GithubToken <token> -NoVerify
+  -AllPlatforms -GitRef main -ReleaseTag v0.0.9 -GithubToken <token> -NoVerify -WorkflowFile release-windows.yml
 ```
 
 Parameters (with defaults):
@@ -137,9 +153,9 @@ Parameters (with defaults):
 - `-CleanDist`: clean `apps/dist` before build
 - `-Portable`: also stage portable output
 - `-PortableDir <path>`: portable output dir, default `portable/`
-- `-AllPlatforms`: dispatch `release-multi-platform.yml`
+- `-AllPlatforms`: dispatch the selected release workflow (`-WorkflowFile`)
 - `-GithubToken <token>`: GitHub token; falls back to `GITHUB_TOKEN`/`GH_TOKEN`
-- `-WorkflowFile <name>`: default `release-multi-platform.yml`
+- `-WorkflowFile <name>`: choose one of `release-windows.yml` / `release-linux.yml` / `release-macos-beta.yml`
 - `-GitRef <ref>`: workflow ref; defaults to current branch or current tag
 - `-ReleaseTag <tag>`: release tag; strongly recommended in `-AllPlatforms`
 - `-NoVerify`: sets workflow input `run_verify=false`
@@ -241,8 +257,8 @@ This project references the following open-source project for gateway protocol a
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 
 Related implementation points:
-- `crates/codexmanager-service/src/gateway/protocol_adapter/request_mapping.rs`
-- `crates/codexmanager-service/src/gateway/upstream/transport.rs`
+- `crates/service/src/gateway/protocol_adapter/request_mapping.rs`
+- `crates/service/src/gateway/upstream/transport.rs`
 
 ## Contact
 ![Personal](assets/images/personal.jpg)
