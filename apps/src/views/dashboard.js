@@ -10,6 +10,14 @@ import {
 import { buildProgressLine } from "./dashboard-progress";
 import { renderRecommendations } from "./dashboard-recommendations";
 
+const dashboardDerivedCache = {
+  usageListRef: null,
+  usageMap: new Map(),
+  statsAccountListRef: null,
+  statsUsageMapRef: null,
+  usageStats: null,
+};
+
 function toSafeNumber(value, fallback = 0) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : fallback;
@@ -31,13 +39,45 @@ function formatEstimatedCost(value) {
   return `$${num.toFixed(2)}`;
 }
 
+function getUsageMapFromState() {
+  const list = Array.isArray(state.usageList) ? state.usageList : [];
+  if (dashboardDerivedCache.usageListRef === list) {
+    return dashboardDerivedCache.usageMap;
+  }
+  const map = new Map();
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    const accountId = item?.accountId;
+    if (accountId) {
+      map.set(accountId, item);
+    }
+  }
+  dashboardDerivedCache.usageListRef = list;
+  dashboardDerivedCache.usageMap = map;
+  return map;
+}
+
+function getUsageStats(accounts, usageMap) {
+  const list = Array.isArray(accounts) ? accounts : [];
+  if (
+    dashboardDerivedCache.statsAccountListRef === list
+    && dashboardDerivedCache.statsUsageMapRef === usageMap
+    && dashboardDerivedCache.usageStats
+  ) {
+    return dashboardDerivedCache.usageStats;
+  }
+  const stats = computeUsageStats(list, usageMap);
+  dashboardDerivedCache.statsAccountListRef = list;
+  dashboardDerivedCache.statsUsageMapRef = usageMap;
+  dashboardDerivedCache.usageStats = stats;
+  return stats;
+}
+
 // 渲染仪表盘视图
 export function renderDashboard() {
-  const usageMap = new Map(
-    state.usageList.map((item) => [item.accountId, item]),
-  );
+  const usageMap = getUsageMapFromState();
 
-  const stats = computeUsageStats(state.accountList, usageMap);
+  const stats = getUsageStats(state.accountList, usageMap);
   if (dom.metricTotal) dom.metricTotal.textContent = stats.total;
   if (dom.metricAvailable) dom.metricAvailable.textContent = stats.okCount;
   if (dom.metricUnavailable) dom.metricUnavailable.textContent = stats.unavailableCount;

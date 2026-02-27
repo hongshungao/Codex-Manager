@@ -87,6 +87,10 @@ function matchesStatusFilter(item, filter) {
 }
 
 function buildRequestLogIdentity(item, fallbackIndex) {
+  const precomputed = item && typeof item === "object" ? item.__identity : null;
+  if (precomputed != null && String(precomputed).trim()) {
+    return String(precomputed);
+  }
   if (item && typeof item === "object" && item.id != null && String(item.id).trim()) {
     return String(item.id);
   }

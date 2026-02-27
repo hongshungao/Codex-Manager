@@ -2,6 +2,7 @@ import "./styles/base.css";
 import "./styles/layout.css";
 import "./styles/components.css";
 import "./styles/responsive.css";
+import "./styles/performance.css";
 
 import {
   serviceGatewayRouteStrategyGet,
@@ -80,6 +81,10 @@ const { switchPage, updateRequestLogFilterButtons } = createNavigationHandlers({
 
 const { setStartupMask } = createStartupMaskController({ dom, state });
 const UPDATE_AUTO_CHECK_STORAGE_KEY = "codexmanager.update.auto_check";
+const UI_LOW_TRANSPARENCY_STORAGE_KEY = "codexmanager.ui.low_transparency";
+const UI_LOW_TRANSPARENCY_BODY_CLASS = "cm-low-transparency";
+const UI_LOW_TRANSPARENCY_TOGGLE_ID = "lowTransparencyMode";
+const UI_LOW_TRANSPARENCY_CARD_ID = "settingsLowTransparencyCard";
 const ROUTE_STRATEGY_STORAGE_KEY = "codexmanager.gateway.route_strategy";
 const ROUTE_STRATEGY_ORDERED = "ordered";
 const ROUTE_STRATEGY_BALANCED = "balanced";
@@ -136,6 +141,95 @@ function initUpdateAutoCheckSetting() {
   }
   if (dom.autoCheckUpdate) {
     dom.autoCheckUpdate.checked = enabled;
+  }
+}
+
+function readLowTransparencySetting() {
+  if (typeof localStorage === "undefined") {
+    return false;
+  }
+  const raw = localStorage.getItem(UI_LOW_TRANSPARENCY_STORAGE_KEY);
+  if (raw == null) {
+    return false;
+  }
+  const normalized = String(raw).trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function saveLowTransparencySetting(enabled) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  localStorage.setItem(UI_LOW_TRANSPARENCY_STORAGE_KEY, enabled ? "1" : "0");
+}
+
+function applyLowTransparencySetting(enabled) {
+  if (typeof document === "undefined" || !document.body) {
+    return;
+  }
+  document.body.classList.toggle(UI_LOW_TRANSPARENCY_BODY_CLASS, enabled);
+}
+
+function ensureLowTransparencySettingCard() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const existing = document.getElementById(UI_LOW_TRANSPARENCY_TOGGLE_ID);
+  if (existing) {
+    return existing;
+  }
+
+  const settingsGrid = document.querySelector("#pageSettings .settings-grid");
+  if (!settingsGrid) {
+    return null;
+  }
+
+  const existingCard = document.getElementById(UI_LOW_TRANSPARENCY_CARD_ID);
+  if (existingCard) {
+    return document.getElementById(UI_LOW_TRANSPARENCY_TOGGLE_ID);
+  }
+
+  const card = document.createElement("div");
+  card.className = "panel settings-card settings-card-span-2";
+  card.id = UI_LOW_TRANSPARENCY_CARD_ID;
+  card.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h3>视觉性能</h3>
+        <p>减少模糊/透明特效，降低掉帧</p>
+      </div>
+    </div>
+    <div class="settings-row">
+      <label class="update-auto-check switch-control" for="${UI_LOW_TRANSPARENCY_TOGGLE_ID}">
+        <input id="${UI_LOW_TRANSPARENCY_TOGGLE_ID}" type="checkbox" />
+        <span class="switch-track" aria-hidden="true">
+          <span class="switch-thumb"></span>
+        </span>
+        <span>性能模式/低透明度</span>
+      </label>
+    </div>
+    <div class="hint">开启后会关闭/降级 blur、backdrop-filter 等效果（更省 GPU，但质感会更“硬”）。</div>
+  `;
+
+  const themeCard = document.getElementById("themePanel")?.closest(".settings-card");
+  if (themeCard && themeCard.parentElement === settingsGrid) {
+    settingsGrid.insertBefore(card, themeCard);
+  } else {
+    settingsGrid.appendChild(card);
+  }
+
+  return document.getElementById(UI_LOW_TRANSPARENCY_TOGGLE_ID);
+}
+
+function initLowTransparencySetting() {
+  const enabled = readLowTransparencySetting();
+  if (typeof localStorage !== "undefined" && localStorage.getItem(UI_LOW_TRANSPARENCY_STORAGE_KEY) == null) {
+    saveLowTransparencySetting(enabled);
+  }
+  applyLowTransparencySetting(enabled);
+  const toggle = ensureLowTransparencySettingCard();
+  if (toggle) {
+    toggle.checked = enabled;
   }
 }
 
@@ -713,28 +807,34 @@ async function refreshAll(options = {}) {
       await applyRouteStrategyToService(readRouteStrategySetting(), { silent: true });
     }
 
-    // 中文注释：全并发会制造瞬时抖动（同时多次 RPC/DOM 更新）；这里改为顺序刷新，整体更稳且更可预期。
-    const results = [];
-    for (let index = 0; index < tasks.length; index += 1) {
-      const task = tasks[index];
-      try {
-        const value = await task.run();
-        results.push({ name: task.name || `task-${index}`, status: "fulfilled", value });
-      } catch (err) {
-        console.error(`[refreshAll] ${task.name || `task-${index}`} failed`, err);
-        results.push({ name: task.name || `task-${index}`, status: "rejected", reason: err });
-      } finally {
-        completed += 1;
-        setProgress({
-          active: true,
-          manual: false,
-          total,
-          completed,
-          remaining: total - completed,
-          lastTaskLabel: task.label || task.name,
-        });
-      }
-    }
+    // 中文注释：全并发会制造瞬时抖动（同时多次 RPC/DOM 更新）；这里改为有限并发并统一限流上限。
+    const results = await runRefreshTasks(
+      tasks.map((task) => ({
+        ...task,
+        run: async () => {
+          try {
+            return await task.run();
+          } finally {
+            completed += 1;
+            setProgress({
+              active: true,
+              manual: false,
+              total,
+              completed,
+              remaining: total - completed,
+              lastTaskLabel: task.label || task.name,
+            });
+            await nextPaintTick();
+          }
+        },
+      })),
+      (taskName, err) => {
+        console.error(`[refreshAll] ${taskName} failed`, err);
+      },
+      {
+        concurrency: options.concurrency,
+      },
+    );
     if (options.refreshRemoteModels === true) {
       const modelTask = results.find((item) => item.name === "api-models");
       if (modelTask && modelTask.status === "fulfilled") {
@@ -1007,6 +1107,17 @@ function bindEvents() {
       void applyRouteStrategyToService(selected, { silent: false });
     });
   }
+  const lowTransparencyToggle = typeof document === "undefined"
+    ? null
+    : document.getElementById(UI_LOW_TRANSPARENCY_TOGGLE_ID);
+  if (lowTransparencyToggle && lowTransparencyToggle.dataset.bound !== "1") {
+    lowTransparencyToggle.dataset.bound = "1";
+    lowTransparencyToggle.addEventListener("change", () => {
+      const enabled = Boolean(lowTransparencyToggle.checked);
+      saveLowTransparencySetting(enabled);
+      applyLowTransparencySetting(enabled);
+    });
+  }
 }
 
 function bootstrap() {
@@ -1015,6 +1126,7 @@ function bootstrap() {
   setServiceHint("请输入端口并点击启动", false);
   renderThemeButtons();
   restoreTheme();
+  initLowTransparencySetting();
   initUpdateAutoCheckSetting();
   initRouteStrategySetting();
   void bootstrapUpdateStatus();

@@ -1,0 +1,38 @@
+/* 性能模式/低透明度：减少 blur/backdrop-filter 等高成本效果，降低掉帧。 */
+
+body.cm-low-transparency {
+  /* 让“玻璃”背景更不透明，这样去掉 backdrop-filter 后仍保持可读性。 */
+  --top-nav-bg: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card) 96%, #ffffff),
+    color-mix(in srgb, var(--card) 92%, var(--surface))
+  );
+  --pill-nav-bg: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card) 96%, #ffffff),
+    color-mix(in srgb, var(--card) 90%, var(--surface-2))
+  );
+}
+
+/* 背景大模糊圆形：直接禁用伪元素生成，省掉 filter: blur(44px) 的开销。 */
+body.cm-low-transparency .app-shell::before,
+body.cm-low-transparency .app-shell::after {
+  content: none;
+}
+
+/* 顶部导航玻璃模糊 */
+body.cm-low-transparency .top-nav {
+  backdrop-filter: none;
+}
+
+/* 请求日志 sticky 表头模糊 */
+body.cm-low-transparency .requestlog-table thead th {
+  backdrop-filter: none;
+}
+
+/* 启动遮罩模糊：禁用 blur，并提高遮罩不透明度。 */
+body.cm-low-transparency .startup-mask {
+  backdrop-filter: none;
+  background: rgba(255, 255, 255, 0.92);
+}
+

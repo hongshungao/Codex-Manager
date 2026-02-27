@@ -73,6 +73,19 @@ function isAbortError(err) {
   return Boolean(err && typeof err === "object" && err.name === "AbortError");
 }
 
+function buildRequestLogIdentity(item, index) {
+  if (item && typeof item === "object" && item.id != null && String(item.id).trim()) {
+    return String(item.id);
+  }
+  return [
+    item?.createdAt ?? "",
+    item?.method ?? "",
+    item?.statusCode ?? "",
+    item?.accountId ?? "",
+    item?.keyId ?? "",
+    index,
+  ].join("|");
+}
 
 // 刷新账号列表
 export async function refreshAccounts() {
@@ -153,7 +166,15 @@ export async function refreshRequestLogs(query, options = {}) {
   if (latestOnly && seq !== requestLogRefreshSeq) {
     return false;
   }
-  state.requestLogList = Array.isArray(res.items) ? res.items : [];
+  const items = Array.isArray(res.items) ? res.items : [];
+  // 中文注释：预计算 identity，避免 render 阶段频繁 join 字符串造成 GC 抖动。
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    if (item && typeof item === "object" && !item.__identity) {
+      item.__identity = buildRequestLogIdentity(item, i);
+    }
+  }
+  state.requestLogList = items;
   return true;
 }
 

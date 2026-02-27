@@ -11,6 +11,8 @@ function deferred() {
     resolve = res;
     reject = rej;
   });
+  // 中文注释：避免某些取消路径下 deferred promise 未被 await 时触发 unhandledRejection。
+  promise.catch(() => {});
   return { promise, resolve, reject };
 }
 
@@ -68,7 +70,9 @@ test("refreshRequestLogs aborts stale request when query changes", async () => {
     assert.equal(oldApplied, false);
     assert.equal(newApplied, true);
     assert.ok(seenQueries.includes("new"));
-    assert.deepEqual(state.requestLogList, [{ id: "new" }]);
+    assert.equal(state.requestLogList.length, 1);
+    assert.equal(state.requestLogList[0].id, "new");
+    assert.ok(state.requestLogList[0].__identity);
   } finally {
     globalThis.window = oldWindow;
     globalThis.fetch = oldFetch;

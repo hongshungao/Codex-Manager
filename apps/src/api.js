@@ -1,12 +1,24 @@
 import { state } from "./state.js";
+import { fetchWithRetry, isAbortError, runWithControl } from "./utils/request.js";
 
 // 统一 Tauri 调用入口
-export async function invoke(method, params) {
+export async function invoke(method, params, options = {}) {
   const tauri = window.__TAURI__;
   if (!tauri || !tauri.core || !tauri.core.invoke) {
     throw new Error("Tauri API 不可用（请在桌面端运行）");
   }
-  const res = await tauri.core.invoke(method, params || {});
+  const invokeOptions = options && typeof options === "object" ? options : {};
+  const res = await runWithControl(
+    () => tauri.core.invoke(method, params || {}),
+    {
+      signal: invokeOptions.signal,
+      timeoutMs: invokeOptions.timeoutMs,
+      retries: invokeOptions.retries,
+      retryDelayMs: invokeOptions.retryDelayMs,
+      maxRetryDelayMs: invokeOptions.maxRetryDelayMs,
+      shouldRetry: invokeOptions.shouldRetry,
+    },
+  );
   // 中文注释：统一把 JSON-RPC error 转成异常，避免调用方把失败误判成成功。
   if (res && typeof res === "object" && Object.prototype.hasOwnProperty.call(res, "error")) {
     const err = res.error;
@@ -76,10 +88,6 @@ function resolveRpcAddr() {
   return "localhost:48760";
 }
 
-function isAbortError(err) {
-  return Boolean(err && typeof err === "object" && err.name === "AbortError");
-}
-
 function unwrapRpcError(payload) {
   const err = payload && typeof payload === "object" ? payload.error : null;
   if (!err) return "";
@@ -90,11 +98,19 @@ function unwrapRpcError(payload) {
   return JSON.stringify(err);
 }
 
-async function getRpcToken() {
+async function getRpcToken(options = {}) {
   if (rpcTokenCache) {
     return rpcTokenCache;
   }
-  const token = await invoke("service_rpc_token", {});
+  const opts = options && typeof options === "object" ? options : {};
+  const token = await invoke("service_rpc_token", {}, {
+    signal: opts.signal,
+    timeoutMs: opts.timeoutMs == null ? 2500 : opts.timeoutMs,
+    retries: opts.retries,
+    retryDelayMs: opts.retryDelayMs,
+    maxRetryDelayMs: opts.maxRetryDelayMs,
+    shouldRetry: opts.shouldRetry,
+  });
   const normalized = String(token || "").trim();
   if (!normalized) {
     throw new Error("RPC token unavailable");
@@ -105,23 +121,40 @@ async function getRpcToken() {
 
 async function requestlogListViaHttpRpc(query, limit, options = {}) {
   const signal = options && options.signal ? options.signal : undefined;
+  const timeoutMs = options && Number.isFinite(options.timeoutMs) ? options.timeoutMs : 8000;
+  const retries = options && Number.isFinite(options.retries) ? options.retries : 1;
+  const retryDelayMs = options && Number.isFinite(options.retryDelayMs) ? options.retryDelayMs : 160;
   const addr = resolveRpcAddr();
-  const token = await getRpcToken();
+  const token = await getRpcToken({
+    signal,
+    timeoutMs: Math.min(2500, timeoutMs),
+  });
   const body = JSON.stringify({
     jsonrpc: "2.0",
     id: rpcRequestId++,
     method: "requestlog/list",
     params: { query, limit },
   });
-  const response = await fetch(`http://${addr}/rpc`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-CodexManager-Rpc-Token": token,
+  const response = await fetchWithRetry(
+    `http://${addr}/rpc`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CodexManager-Rpc-Token": token,
+      },
+      body,
     },
-    body,
-    signal,
-  });
+    {
+      signal,
+      timeoutMs,
+      retries,
+      retryDelayMs,
+      maxRetryDelayMs: 1200,
+      shouldRetry: () => true,
+      shouldRetryStatus: (status) => status === 429 || (status >= 500 && status < 600),
+    },
+  );
   if (!response.ok) {
     throw new Error(`RPC HTTP ${response.status}`);
   }
@@ -212,7 +245,12 @@ export async function serviceRequestLogList(query, limit, options = {}) {
   const signal = options && options.signal ? options.signal : undefined;
   if (signal) {
     try {
-      return await requestlogListViaHttpRpc(query, limit, { signal });
+      return await requestlogListViaHttpRpc(query, limit, {
+        signal,
+        timeoutMs: options.timeoutMs,
+        retries: options.retries,
+        retryDelayMs: options.retryDelayMs,
+      });
     } catch (err) {
       if (isAbortError(err)) {
         throw err;

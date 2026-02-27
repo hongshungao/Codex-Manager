@@ -1,22 +1,62 @@
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 60000;
+const DEFAULT_REFRESH_TASK_CONCURRENCY = 3;
 
-export async function runRefreshTasks(tasks, onTaskError) {
+function normalizeConcurrency(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const int = Math.floor(parsed);
+  if (int <= 0) return fallback;
+  return Math.min(8, int);
+}
+
+export async function runRefreshTasks(tasks, onTaskError, options = {}) {
   const taskList = Array.isArray(tasks) ? tasks : [];
-  const settled = await Promise.allSettled(
-    taskList.map((item) => Promise.resolve().then(() => item.run())),
+  const concurrency = Math.min(
+    taskList.length,
+    normalizeConcurrency(options.concurrency, DEFAULT_REFRESH_TASK_CONCURRENCY),
   );
 
-  return settled.map((result, index) => {
+  const results = new Array(taskList.length);
+  if (taskList.length === 0) {
+    return results;
+  }
+
+  let nextIndex = 0;
+
+  async function runOne(index) {
+    const item = taskList[index];
+    try {
+      const value = await Promise.resolve().then(() => item.run());
+      results[index] = { status: "fulfilled", value };
+    } catch (reason) {
+      results[index] = { status: "rejected", reason };
+    }
+  }
+
+  const workers = [];
+  const workerCount = Math.max(1, concurrency);
+  for (let i = 0; i < workerCount; i += 1) {
+    workers.push((async () => {
+      while (nextIndex < taskList.length) {
+        const current = nextIndex;
+        nextIndex += 1;
+        await runOne(current);
+      }
+    })());
+  }
+  await Promise.all(workers);
+
+  return results.map((result, index) => {
     const taskName =
       taskList[index] && taskList[index].name
         ? taskList[index].name
         : `task-${index}`;
-    if (result.status === "rejected" && typeof onTaskError === "function") {
+    if (result && result.status === "rejected" && typeof onTaskError === "function") {
       onTaskError(taskName, result.reason);
     }
     return {
       name: taskName,
-      ...result,
+      ...(result || { status: "rejected", reason: new Error("unknown task result") }),
     };
   });
 }
