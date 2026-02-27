@@ -142,7 +142,7 @@ function createActionsCell(isDisabled) {
   return cellActions;
 }
 
-function renderApiKeyRow(item) {
+function renderApiKeyRow(item, parent = dom.apiKeyRows) {
   const row = document.createElement("tr");
   row.setAttribute("data-key-id", item.id || "");
   const cellId = document.createElement("td");
@@ -166,7 +166,8 @@ function renderApiKeyRow(item) {
   row.appendChild(cellModel);
   row.appendChild(cellStatus);
   row.appendChild(cellActions);
-  dom.apiKeyRows.appendChild(row);
+  parent?.appendChild(row);
+  return row;
 }
 
 function getApiKeyFromRow(row, lookup) {
@@ -249,7 +250,7 @@ export function renderApiKeys({ onToggleStatus, onDelete, onUpdateModel, onCopy 
   }
 
   apiKeyLookupById = new Map(state.apiKeyList.map((item) => [item.id, item]));
-  state.apiKeyList.forEach((item) => {
-    renderApiKeyRow(item);
-  });
+  const fragment = document.createDocumentFragment();
+  state.apiKeyList.forEach((item) => renderApiKeyRow(item, fragment));
+  dom.apiKeyRows.appendChild(fragment);
 }
