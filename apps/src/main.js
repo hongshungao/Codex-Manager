@@ -713,30 +713,28 @@ async function refreshAll(options = {}) {
       await applyRouteStrategyToService(readRouteStrategySetting(), { silent: true });
     }
 
-    const settled = await Promise.allSettled(
-      tasks.map((task) => Promise.resolve().then(() => task.run())
-        .finally(() => {
-          completed += 1;
-          setProgress({
-            active: true,
-            manual: false,
-            total,
-            completed,
-            remaining: total - completed,
-            lastTaskLabel: task.label || task.name,
-          });
-        })),
-    );
-    const results = settled.map((result, index) => {
-      const task = tasks[index] || {};
-      if (result.status === "rejected") {
-        console.error(`[refreshAll] ${task.name || `task-${index}`} failed`, result.reason);
+    // 中文注释：全并发会制造瞬时抖动（同时多次 RPC/DOM 更新）；这里改为顺序刷新，整体更稳且更可预期。
+    const results = [];
+    for (let index = 0; index < tasks.length; index += 1) {
+      const task = tasks[index];
+      try {
+        const value = await task.run();
+        results.push({ name: task.name || `task-${index}`, status: "fulfilled", value });
+      } catch (err) {
+        console.error(`[refreshAll] ${task.name || `task-${index}`} failed`, err);
+        results.push({ name: task.name || `task-${index}`, status: "rejected", reason: err });
+      } finally {
+        completed += 1;
+        setProgress({
+          active: true,
+          manual: false,
+          total,
+          completed,
+          remaining: total - completed,
+          lastTaskLabel: task.label || task.name,
+        });
       }
-      return {
-        name: task.name || `task-${index}`,
-        ...result,
-      };
-    });
+    }
     if (options.refreshRemoteModels === true) {
       const modelTask = results.find((item) => item.name === "api-models");
       if (modelTask && modelTask.status === "fulfilled") {
