@@ -26,9 +26,7 @@ static ACCOUNT_TOKEN_EXCHANGE_LOCKS: OnceLock<Mutex<AccountTokenExchangeLockTabl
 pub(super) fn account_token_exchange_lock(account_id: &str) -> Arc<Mutex<()>> {
     let lock =
         ACCOUNT_TOKEN_EXCHANGE_LOCKS.get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
-    let Ok(mut table) = lock.lock() else {
-        return Arc::new(Mutex::new(()));
-    };
+    let mut table = crate::lock_utils::lock_recover(lock, "account_token_exchange_locks");
     let now = now_ts();
     maybe_cleanup_exchange_locks(&mut table, now);
     let entry = table
@@ -103,9 +101,7 @@ pub(super) fn resolve_openai_bearer_token(
     }
 
     let exchange_lock = account_token_exchange_lock(&account.id);
-    let _guard = exchange_lock
-        .lock()
-        .map_err(|_| "token exchange lock poisoned".to_string())?;
+    let _guard = crate::lock_utils::lock_recover(exchange_lock.as_ref(), "account_token_exchange_lock");
 
     if let Some(existing) = token
         .api_key_access_token

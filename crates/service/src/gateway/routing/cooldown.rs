@@ -110,9 +110,7 @@ pub(super) fn cooldown_reason_for_status(status: u16) -> CooldownReason {
 
 pub(super) fn is_account_in_cooldown(account_id: &str) -> bool {
     let lock = ACCOUNT_COOLDOWN_UNTIL.get_or_init(|| Mutex::new(AccountCooldownState::default()));
-    let Ok(mut state) = lock.lock() else {
-        return false;
-    };
+    let mut state = crate::lock_utils::lock_recover(lock, "account_cooldown_until");
     let now = now_ts();
     match state.entries.get(account_id).copied() {
         Some(until) if until > now => true,
@@ -126,29 +124,28 @@ pub(super) fn is_account_in_cooldown(account_id: &str) -> bool {
 
 pub(super) fn mark_account_cooldown(account_id: &str, reason: CooldownReason) {
     let lock = ACCOUNT_COOLDOWN_UNTIL.get_or_init(|| Mutex::new(AccountCooldownState::default()));
-    if let Ok(mut guard) = lock.lock() {
-        let state = &mut *guard;
-        super::record_gateway_cooldown_mark();
-        let now = now_ts();
-        maybe_cleanup_expired_cooldowns(state, now);
-        let cooldown_until = now
-            + cooldown_secs_for_mark(
-                &mut state.offense_counts,
-                &mut state.offense_last_at,
-                account_id,
-                reason,
-                now,
-            );
-        // 中文注释：同账号短时间内可能触发不同失败类型；保留更晚的 until 可避免被较短冷却覆盖。
-        match state.entries.get_mut(account_id) {
-            Some(until) => {
-                if cooldown_until > *until {
-                    *until = cooldown_until;
-                }
+    let mut guard = crate::lock_utils::lock_recover(lock, "account_cooldown_until");
+    let state = &mut *guard;
+    super::record_gateway_cooldown_mark();
+    let now = now_ts();
+    maybe_cleanup_expired_cooldowns(state, now);
+    let cooldown_until = now
+        + cooldown_secs_for_mark(
+            &mut state.offense_counts,
+            &mut state.offense_last_at,
+            account_id,
+            reason,
+            now,
+        );
+    // 中文注释：同账号短时间内可能触发不同失败类型；保留更晚的 until 可避免被较短冷却覆盖。
+    match state.entries.get_mut(account_id) {
+        Some(until) => {
+            if cooldown_until > *until {
+                *until = cooldown_until;
             }
-            None => {
-                state.entries.insert(account_id.to_string(), cooldown_until);
-            }
+        }
+        None => {
+            state.entries.insert(account_id.to_string(), cooldown_until);
         }
     }
 }
@@ -159,15 +156,14 @@ pub(super) fn mark_account_cooldown_for_status(account_id: &str, status: u16) {
 
 pub(super) fn clear_account_cooldown(account_id: &str) {
     let lock = ACCOUNT_COOLDOWN_UNTIL.get_or_init(|| Mutex::new(AccountCooldownState::default()));
-    if let Ok(mut guard) = lock.lock() {
-        let state = &mut *guard;
-        state.entries.remove(account_id);
-        decay_offense_count_for_success(
-            &mut state.offense_counts,
-            &mut state.offense_last_at,
-            account_id,
-        );
-    }
+    let mut guard = crate::lock_utils::lock_recover(lock, "account_cooldown_until");
+    let state = &mut *guard;
+    state.entries.remove(account_id);
+    decay_offense_count_for_success(
+        &mut state.offense_counts,
+        &mut state.offense_last_at,
+        account_id,
+    );
 }
 
 fn maybe_cleanup_expired_cooldowns(state: &mut AccountCooldownState, now: i64) {

@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use codexmanager_core::storage::{Account, Storage, Token};
 
 pub(super) enum OpenAiAttemptResult {
@@ -13,7 +14,7 @@ pub(super) fn handle_openai_base_attempt<F>(
     path: &str,
     request: &tiny_http::Request,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     base: &str,
     account: &Account,

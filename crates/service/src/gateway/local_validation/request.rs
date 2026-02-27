@@ -1,4 +1,5 @@
 use codexmanager_core::storage::ApiKey;
+use bytes::Bytes;
 use reqwest::Method;
 use tiny_http::Request;
 
@@ -64,7 +65,7 @@ pub(super) fn build_local_validation_result(
         incoming_headers,
         storage,
         path,
-        body,
+        body: Bytes::from(body),
         is_stream,
         has_prompt_cache_key,
         request_shape,

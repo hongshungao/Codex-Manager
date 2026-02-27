@@ -46,8 +46,12 @@ impl RequestGateLock {
     pub(crate) fn try_acquire(
         self: &Arc<Self>,
     ) -> Result<Option<RequestGateGuard>, RequestGateAcquireError> {
-        let Ok(mut state) = self.state.lock() else {
-            return Err(RequestGateAcquireError::Poisoned);
+        let mut state = match self.state.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::warn!("event=lock_poisoned lock=request_gate_state action=skip");
+                return Err(RequestGateAcquireError::Poisoned);
+            }
         };
         if state.held {
             return Ok(None);
@@ -63,13 +67,18 @@ impl RequestGateLock {
         self: &Arc<Self>,
         timeout: Duration,
     ) -> Result<Option<RequestGateGuard>, RequestGateAcquireError> {
-        let Ok(state) = self.state.lock() else {
-            return Err(RequestGateAcquireError::Poisoned);
+        let state = match self.state.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::warn!("event=lock_poisoned lock=request_gate_state action=skip_wait");
+                return Err(RequestGateAcquireError::Poisoned);
+            }
         };
-        let Ok((mut state, _)) = self
+        let wait_result = self
             .available
-            .wait_timeout_while(state, timeout, |state| state.held)
-        else {
+            .wait_timeout_while(state, timeout, |state| state.held);
+        let Ok((mut state, _)) = wait_result else {
+            log::warn!("event=lock_poisoned lock=request_gate_state action=skip_wait_timeout");
             return Err(RequestGateAcquireError::Poisoned);
         };
         if state.held {
@@ -89,10 +98,15 @@ pub(crate) struct RequestGateGuard {
 
 impl Drop for RequestGateGuard {
     fn drop(&mut self) {
-        if let Ok(mut state) = self.lock.state.lock() {
-            state.held = false;
-            self.lock.available.notify_one();
-        }
+        let mut state = match self.lock.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("event=lock_poisoned lock=request_gate_state action=recover_release");
+                poisoned.into_inner()
+            }
+        };
+        state.held = false;
+        self.lock.available.notify_one();
     }
 }
 
@@ -107,9 +121,7 @@ fn gate_key(key_id: &str, path: &str, model: Option<&str>) -> String {
 
 pub(crate) fn request_gate_lock(key_id: &str, path: &str, model: Option<&str>) -> Arc<RequestGateLock> {
     let lock = REQUEST_GATE_LOCKS.get_or_init(|| Mutex::new(RequestGateLockTable::default()));
-    let Ok(mut table) = lock.lock() else {
-        return Arc::new(RequestGateLock::new());
-    };
+    let mut table = crate::lock_utils::lock_recover(lock, "request_gate_locks");
     let now = now_ts();
     maybe_cleanup_request_gate_locks(&mut table, now);
     let entry = table

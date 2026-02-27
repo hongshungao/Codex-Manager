@@ -528,6 +528,7 @@ name = "codexmanager-service"
 version = "0.1.2"
 dependencies = [
  "axum",
+ "bytes",
  "chrono",
  "codexmanager-core",
  "crossbeam-channel",

@@ -49,7 +49,7 @@ pub(super) fn resolve_prompt_cache_key(
 fn get_or_create_prompt_cache_id(key: &str) -> String {
     let now = Instant::now();
     let cache = PROMPT_CACHE.get_or_init(|| Mutex::new(PromptCache::new(now)));
-    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = crate::lock_utils::lock_recover(cache, "prompt_cache");
     guard.get_or_create(key, now)
 }
 

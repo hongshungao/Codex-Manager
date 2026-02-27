@@ -213,7 +213,10 @@ fn clear_storage_cache_for_tests() {
 #[cfg(test)]
 fn record_storage_open_for_tests(path: &str) {
     let mutex = STORAGE_OPEN_COUNTS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
-    let mut counts = mutex.lock().expect("storage open count poisoned");
+    let mut counts = mutex.lock().unwrap_or_else(|poisoned| {
+        log::warn!("storage open count lock poisoned; recovering for tests");
+        poisoned.into_inner()
+    });
     let entry = counts.entry(path.to_string()).or_insert(0);
     *entry += 1;
 }
@@ -223,7 +226,10 @@ fn storage_open_count_for_tests(path: &str) -> usize {
     let Some(mutex) = STORAGE_OPEN_COUNTS.get() else {
         return 0;
     };
-    let counts = mutex.lock().expect("storage open count poisoned");
+    let counts = mutex.lock().unwrap_or_else(|poisoned| {
+        log::warn!("storage open count lock poisoned; recovering for tests");
+        poisoned.into_inner()
+    });
     counts.get(path).copied().unwrap_or(0)
 }
 
@@ -232,7 +238,10 @@ fn clear_storage_open_count_for_tests(path: &str) {
     let Some(mutex) = STORAGE_OPEN_COUNTS.get() else {
         return;
     };
-    let mut counts = mutex.lock().expect("storage open count poisoned");
+    let mut counts = mutex.lock().unwrap_or_else(|poisoned| {
+        log::warn!("storage open count lock poisoned; recovering for tests");
+        poisoned.into_inner()
+    });
     counts.remove(path);
 }
 

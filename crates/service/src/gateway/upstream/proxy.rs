@@ -68,7 +68,7 @@ pub(in super::super) fn proxy_validated_request(
         is_stream,
         protocol_type.as_str(),
     );
-    super::super::trace_log::log_request_body_preview(trace_id.as_str(), &body);
+    super::super::trace_log::log_request_body_preview(trace_id.as_str(), body.as_ref());
 
     if protocol_type == PROTOCOL_AZURE_OPENAI {
         return super::protocol::azure_openai::proxy_azure_request(

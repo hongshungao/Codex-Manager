@@ -93,7 +93,15 @@ fn read_candidate_cache() -> Option<Vec<(Account, Token)>> {
     let db_path = current_db_path();
     let now = Instant::now();
     let mutex = CANDIDATE_SNAPSHOT_CACHE.get_or_init(|| Mutex::new(None));
-    let mut guard = mutex.lock().expect("candidate cache poisoned");
+    let mut guard = match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!("candidate snapshot cache lock poisoned; dropping cache and continuing");
+            let mut guard = poisoned.into_inner();
+            *guard = None;
+            guard
+        }
+    };
     let cached = guard.as_ref()?;
     if cached.db_path != db_path || cached.expires_at <= now {
         *guard = None;
@@ -110,7 +118,13 @@ fn write_candidate_cache(candidates: Vec<(Account, Token)>) {
     let db_path = current_db_path();
     let expires_at = Instant::now() + ttl;
     let mutex = CANDIDATE_SNAPSHOT_CACHE.get_or_init(|| Mutex::new(None));
-    let mut guard = mutex.lock().expect("candidate cache poisoned");
+    let mut guard = match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!("candidate snapshot cache lock poisoned; recovering");
+            poisoned.into_inner()
+        }
+    };
     *guard = Some(CandidateSnapshotCache {
         db_path,
         expires_at,
@@ -126,10 +140,7 @@ fn candidate_cache_ttl() -> Duration {
 
 fn current_db_path() -> String {
     ensure_selection_config_loaded();
-    match current_db_path_cell().read() {
-        Ok(value) => value.clone(),
-        Err(_) => "<unset>".to_string(),
-    }
+    crate::lock_utils::read_recover(current_db_path_cell(), "current_db_path").clone()
 }
 
 fn fallback_allowed(usage: Option<&UsageSnapshotRecord>) -> bool {
@@ -184,9 +195,8 @@ pub(super) fn reload_from_env() {
     CANDIDATE_CACHE_TTL_MS.store(ttl_ms, Ordering::Relaxed);
 
     let db_path = std::env::var("CODEXMANAGER_DB_PATH").unwrap_or_else(|_| "<unset>".to_string());
-    if let Ok(mut cached) = current_db_path_cell().write() {
-        *cached = db_path;
-    }
+    let mut cached = crate::lock_utils::write_recover(current_db_path_cell(), "current_db_path");
+    *cached = db_path;
 }
 
 fn ensure_selection_config_loaded() {
@@ -200,7 +210,13 @@ fn current_db_path_cell() -> &'static RwLock<String> {
 #[cfg(test)]
 fn clear_candidate_cache_for_tests() {
     if let Some(mutex) = CANDIDATE_SNAPSHOT_CACHE.get() {
-        let mut guard = mutex.lock().expect("candidate cache poisoned");
+        let mut guard = match mutex.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("candidate snapshot cache lock poisoned; recovering for tests");
+                poisoned.into_inner()
+            }
+        };
         *guard = None;
     }
 }

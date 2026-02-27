@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
+mod lock_utils;
 mod http;
 #[path = "storage/storage_helpers.rs"]
 mod storage_helpers;

@@ -24,18 +24,13 @@ pub(in super::super) fn normalize_upstream_base_url(base: &str) -> String {
 
 pub(in super::super) fn resolve_upstream_base_url() -> String {
     ensure_config_loaded();
-    match upstream_base_url_cell().read() {
-        Ok(value) => value.clone(),
-        Err(_) => DEFAULT_UPSTREAM_BASE_URL.to_string(),
-    }
+    crate::lock_utils::read_recover(upstream_base_url_cell(), "upstream_base_url").clone()
 }
 
 pub(in super::super) fn resolve_upstream_fallback_base_url(primary_base: &str) -> Option<String> {
     ensure_config_loaded();
-    match upstream_fallback_base_url_cell().read() {
-        Ok(value) => value.clone(),
-        Err(_) => None,
-    }
+    crate::lock_utils::read_recover(upstream_fallback_base_url_cell(), "upstream_fallback_base_url")
+        .clone()
     .or_else(|| {
         if is_chatgpt_backend_base(primary_base) {
             // 默认兜底到 OpenAI v1，避免 Cloudflare challenge 时模型列表不可用。
@@ -106,15 +101,17 @@ pub(in super::super) fn reload_from_env() {
     let base = env_non_empty(ENV_UPSTREAM_BASE_URL)
         .map(|value| normalize_upstream_base_url(&value))
         .unwrap_or_else(|| DEFAULT_UPSTREAM_BASE_URL.to_string());
-    if let Ok(mut cached) = upstream_base_url_cell().write() {
-        *cached = base;
-    }
+    let mut cached_base =
+        crate::lock_utils::write_recover(upstream_base_url_cell(), "upstream_base_url");
+    *cached_base = base;
 
     let fallback = env_non_empty(ENV_UPSTREAM_FALLBACK_BASE_URL)
         .map(|value| normalize_upstream_base_url(&value));
-    if let Ok(mut cached) = upstream_fallback_base_url_cell().write() {
-        *cached = fallback;
-    }
+    let mut cached_fallback = crate::lock_utils::write_recover(
+        upstream_fallback_base_url_cell(),
+        "upstream_fallback_base_url",
+    );
+    *cached_fallback = fallback;
 }
 
 fn ensure_config_loaded() {

@@ -82,9 +82,7 @@ pub(crate) fn apply_route_strategy(
 
 fn rotate_to_manual_preferred_account(candidates: &mut [(Account, Token)]) -> bool {
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    let Ok(mut state) = lock.lock() else {
-        return false;
-    };
+    let mut state = crate::lock_utils::lock_recover(lock, "route_state");
     let Some(account_id) = state.manual_preferred_account_id.as_deref() else {
         return false;
     };
@@ -135,11 +133,10 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
     };
     ROUTE_MODE.store(mode, Ordering::Relaxed);
     if let Some(lock) = ROUTE_STATE.get() {
-        if let Ok(mut state) = lock.lock() {
-            state.next_start_by_key_model.clear();
-            state.p2c_nonce_by_key_model.clear();
-            state.maintenance_tick = 0;
-        }
+        let mut state = crate::lock_utils::lock_recover(lock, "route_state");
+        state.next_start_by_key_model.clear();
+        state.p2c_nonce_by_key_model.clear();
+        state.maintenance_tick = 0;
     }
     Ok(route_mode_label(mode))
 }
@@ -147,9 +144,8 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
 pub(crate) fn get_manual_preferred_account() -> Option<String> {
     ensure_route_config_loaded();
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    lock.lock()
-        .ok()
-        .and_then(|state| state.manual_preferred_account_id.clone())
+    let state = crate::lock_utils::lock_recover(lock, "route_state");
+    state.manual_preferred_account_id.clone()
 }
 
 pub(crate) fn set_manual_preferred_account(account_id: &str) -> Result<(), String> {
@@ -159,9 +155,7 @@ pub(crate) fn set_manual_preferred_account(account_id: &str) -> Result<(), Strin
         return Err("accountId is required".to_string());
     }
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    let Ok(mut state) = lock.lock() else {
-        return Err("route state unavailable".to_string());
-    };
+    let mut state = crate::lock_utils::lock_recover(lock, "route_state");
     state.manual_preferred_account_id = Some(id.to_string());
     Ok(())
 }
@@ -169,9 +163,8 @@ pub(crate) fn set_manual_preferred_account(account_id: &str) -> Result<(), Strin
 pub(crate) fn clear_manual_preferred_account() {
     ensure_route_config_loaded();
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    if let Ok(mut state) = lock.lock() {
-        state.manual_preferred_account_id = None;
-    }
+    let mut state = crate::lock_utils::lock_recover(lock, "route_state");
+    state.manual_preferred_account_id = None;
 }
 
 pub(crate) fn clear_manual_preferred_account_if(account_id: &str) -> bool {
@@ -181,9 +174,7 @@ pub(crate) fn clear_manual_preferred_account_if(account_id: &str) -> bool {
         return false;
     }
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    let Ok(mut state) = lock.lock() else {
-        return false;
-    };
+    let mut state = crate::lock_utils::lock_recover(lock, "route_state");
     if state
         .manual_preferred_account_id
         .as_deref()
@@ -197,9 +188,7 @@ pub(crate) fn clear_manual_preferred_account_if(account_id: &str) -> bool {
 
 fn next_start_index(key_id: &str, model: Option<&str>, candidate_count: usize) -> usize {
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    let Ok(mut state_guard) = lock.lock() else {
-        return 0;
-    };
+    let mut state_guard = crate::lock_utils::lock_recover(lock, "route_state");
     let state = &mut *state_guard;
     let now = Instant::now();
     state.maybe_maintain(now);
@@ -259,9 +248,7 @@ fn p2c_challenger_index(
         return None;
     }
     let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
-    let Ok(mut state_guard) = lock.lock() else {
-        return None;
-    };
+    let mut state_guard = crate::lock_utils::lock_recover(lock, "route_state");
     let state = &mut *state_guard;
     let now = Instant::now();
     state.maybe_maintain(now);
@@ -424,12 +411,11 @@ pub(super) fn reload_from_env() {
     );
 
     if let Some(lock) = ROUTE_STATE.get() {
-        if let Ok(mut state) = lock.lock() {
-            state.next_start_by_key_model.clear();
-            state.p2c_nonce_by_key_model.clear();
-            state.manual_preferred_account_id = None;
-            state.maintenance_tick = 0;
-        }
+        let mut state = crate::lock_utils::lock_recover(lock, "route_state");
+        state.next_start_by_key_model.clear();
+        state.p2c_nonce_by_key_model.clear();
+        state.manual_preferred_account_id = None;
+        state.maintenance_tick = 0;
     }
 }
 
@@ -489,12 +475,11 @@ impl RouteRoundRobinState {
 fn clear_route_state_for_tests() {
     super::route_quality::clear_route_quality_for_tests();
     if let Some(lock) = ROUTE_STATE.get() {
-        if let Ok(mut state) = lock.lock() {
-            state.next_start_by_key_model.clear();
-            state.p2c_nonce_by_key_model.clear();
-            state.manual_preferred_account_id = None;
-            state.maintenance_tick = 0;
-        }
+        let mut state = crate::lock_utils::lock_recover(lock, "route_state");
+        state.next_start_by_key_model.clear();
+        state.p2c_nonce_by_key_model.clear();
+        state.manual_preferred_account_id = None;
+        state.maintenance_tick = 0;
     }
 }
 

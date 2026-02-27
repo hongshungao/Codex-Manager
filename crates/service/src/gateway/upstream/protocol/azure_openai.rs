@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use codexmanager_core::storage::Storage;
 use reqwest::header::{HeaderName, HeaderValue};
 use std::time::Instant;
@@ -50,7 +51,7 @@ pub(in super::super) fn proxy_azure_request(
     path: &str,
     request_method: &str,
     method: &reqwest::Method,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     response_adapter: super::super::super::ResponseAdapter,
     model_for_log: Option<&str>,
@@ -220,11 +221,17 @@ pub(in super::super) fn proxy_azure_request(
     );
     if !body.is_empty() {
         builder = builder.header("Content-Type", "application/json");
-        builder = builder.body(body.to_vec());
+        builder = builder.body(body.clone());
     }
 
+    let attempt_started_at = Instant::now();
     let upstream = match builder.send() {
-        Ok(resp) => resp,
+        Ok(resp) => {
+            let duration_ms =
+                super::super::super::duration_to_millis(attempt_started_at.elapsed());
+            super::super::super::metrics::record_gateway_upstream_attempt(duration_ms, false);
+            resp
+        }
         Err(first_err) => {
             // 中文注释：系统代理在服务启动后才切换时，旧 client 可能沿用旧网络状态；
             // 这里用 fresh client 再试一次，避免必须重启/重连。
@@ -246,11 +253,19 @@ pub(in super::super) fn proxy_azure_request(
             );
             if !body.is_empty() {
                 retry_builder = retry_builder.header("Content-Type", "application/json");
-                retry_builder = retry_builder.body(body.to_vec());
+                retry_builder = retry_builder.body(body.clone());
             }
             match retry_builder.send() {
-                Ok(resp) => resp,
+                Ok(resp) => {
+                    let duration_ms =
+                        super::super::super::duration_to_millis(attempt_started_at.elapsed());
+                    super::super::super::metrics::record_gateway_upstream_attempt(duration_ms, false);
+                    resp
+                }
                 Err(second_err) => {
+                    let duration_ms =
+                        super::super::super::duration_to_millis(attempt_started_at.elapsed());
+                    super::super::super::metrics::record_gateway_upstream_attempt(duration_ms, true);
                     let message = format!(
                         "azure upstream error: {}; retry_after_fresh_client: {}",
                         first_err, second_err

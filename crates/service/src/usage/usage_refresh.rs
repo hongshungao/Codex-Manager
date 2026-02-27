@@ -266,7 +266,7 @@ fn usage_refresh_worker_count() -> usize {
 
 fn mark_usage_refresh_task_pending(account_id: &str) -> bool {
     let mutex = PENDING_USAGE_REFRESH_TASKS.get_or_init(|| Mutex::new(HashSet::new()));
-    let mut pending = mutex.lock().unwrap_or_else(|err| err.into_inner());
+    let mut pending = crate::lock_utils::lock_recover(mutex, "pending_usage_refresh_tasks");
     pending.insert(account_id.to_string())
 }
 
@@ -274,14 +274,14 @@ fn clear_usage_refresh_task_pending(account_id: &str) {
     let Some(mutex) = PENDING_USAGE_REFRESH_TASKS.get() else {
         return;
     };
-    let mut pending = mutex.lock().unwrap_or_else(|err| err.into_inner());
+    let mut pending = crate::lock_utils::lock_recover(mutex, "pending_usage_refresh_tasks");
     pending.remove(account_id);
 }
 
 #[cfg(test)]
 fn clear_pending_usage_refresh_tasks_for_tests() {
     if let Some(mutex) = PENDING_USAGE_REFRESH_TASKS.get() {
-        let mut pending = mutex.lock().unwrap_or_else(|err| err.into_inner());
+        let mut pending = crate::lock_utils::lock_recover(mutex, "pending_usage_refresh_tasks");
         pending.clear();
     }
 }

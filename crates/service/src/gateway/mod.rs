@@ -69,6 +69,23 @@ pub(crate) use metrics::{
     begin_rpc_request, duration_to_millis, gateway_metrics_prometheus,
     record_usage_refresh_outcome,
 };
+
+// HTTP backend runtime metrics are exported via the gateway `/metrics` endpoint as well.
+pub(crate) fn record_http_queue_capacity(normal_capacity: usize, stream_capacity: usize) {
+    metrics::record_http_queue_capacity(normal_capacity, stream_capacity);
+}
+
+pub(crate) fn record_http_queue_enqueue(is_stream_queue: bool) {
+    metrics::record_http_queue_enqueue(is_stream_queue);
+}
+
+pub(crate) fn record_http_queue_dequeue(is_stream_queue: bool) {
+    metrics::record_http_queue_dequeue(is_stream_queue);
+}
+
+pub(crate) fn record_http_queue_enqueue_failure() {
+    metrics::record_http_queue_enqueue_failure();
+}
 use selection::collect_gateway_candidates;
 use upstream::candidates::prepare_gateway_candidates;
 use failover::should_failover_from_cached_snapshot;

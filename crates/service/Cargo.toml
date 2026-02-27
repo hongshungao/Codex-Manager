@@ -8,6 +8,7 @@ codexmanager-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking", "stream"] }
+bytes = "1"
 rand = "0.8"
 sha2 = "0.10"
 tiny_http = "0.12"

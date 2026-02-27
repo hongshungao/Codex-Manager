@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use codexmanager_core::storage::Account;
 use reqwest::StatusCode;
 use std::time::{Duration, Instant};
@@ -34,7 +35,7 @@ pub(super) fn retry_stateless_then_optional_alt(
     request_deadline: Option<Instant>,
     request: &Request,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     upstream_cookie: Option<&str>,
     auth_token: &str,

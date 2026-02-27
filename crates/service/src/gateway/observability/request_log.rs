@@ -150,19 +150,23 @@ pub(super) fn write_request_log(
     ) {
         Ok(result) => result,
         Err(err) => {
+            let err_text = err.to_string();
+            super::metrics::record_db_error(err_text.as_str());
             log::error!(
                 "event=gateway_request_log_insert_failed path={} status={} account_id={} key_id={} err={}",
                 request_path,
                 status_code.unwrap_or(0),
                 account_id.unwrap_or("-"),
                 key_id.unwrap_or("-"),
-                err
+                err_text
             );
             return;
         }
     };
 
     if let Some(err) = token_stat_error {
+        let err_text = err.to_string();
+        super::metrics::record_db_error(err_text.as_str());
         log::error!(
             "event=gateway_request_token_stat_insert_failed path={} status={} account_id={} key_id={} request_log_id={} err={}",
             request_path,
@@ -170,7 +174,7 @@ pub(super) fn write_request_log(
             account_id.unwrap_or("-"),
             key_id.unwrap_or("-"),
             request_log_id,
-            err
+            err_text
         );
     }
 }

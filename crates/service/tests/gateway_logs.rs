@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::thread;
@@ -17,6 +18,21 @@ struct EnvGuard {
 }
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+static TEST_DIR_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    // 中文注释：若某个测试 panic 导致锁被 poison，不应让后续测试直接二次失败。
+    ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn new_test_dir(prefix: &str) -> PathBuf {
+    // 中文注释：Windows 进程 ID 可能被复用；增加递增序号避免复用旧目录/旧 db 文件导致用例不稳定。
+    let seq = TEST_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("{prefix}-{}-{seq}", std::process::id()));
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
 
 impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
@@ -278,10 +294,8 @@ impl Drop for TestServer {
 
 #[test]
 fn gateway_logs_invalid_api_key_error() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("codexmanager-gateway-logs-{}", std::process::id()));
-    let _ = fs::create_dir_all(&dir);
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-logs");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
@@ -330,13 +344,8 @@ fn gateway_logs_invalid_api_key_error() {
 
 #[test]
 fn gateway_tolerates_non_ascii_turn_metadata_header() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
-    let mut dir = std::env::temp_dir();
-    dir.push(format!(
-        "codexmanager-gateway-logs-nonascii-{}",
-        std::process::id()
-    ));
-    let _ = fs::create_dir_all(&dir);
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-logs-nonascii");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
@@ -359,13 +368,8 @@ fn gateway_tolerates_non_ascii_turn_metadata_header() {
 
 #[test]
 fn gateway_claude_protocol_end_to_end_uses_codex_headers() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
-    let mut dir = std::env::temp_dir();
-    dir.push(format!(
-        "codexmanager-gateway-claude-e2e-{}",
-        std::process::id()
-    ));
-    let _ = fs::create_dir_all(&dir);
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-claude-e2e");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
@@ -535,13 +539,8 @@ fn gateway_claude_protocol_end_to_end_uses_codex_headers() {
 
 #[test]
 fn gateway_openai_stream_logs_cached_and_reasoning_tokens() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
-    let mut dir = std::env::temp_dir();
-    dir.push(format!(
-        "codexmanager-gateway-openai-stream-usage-{}",
-        std::process::id()
-    ));
-    let _ = fs::create_dir_all(&dir);
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-openai-stream-usage");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
@@ -652,13 +651,8 @@ fn gateway_openai_stream_logs_cached_and_reasoning_tokens() {
 
 #[test]
 fn gateway_openai_stream_usage_with_plain_content_type() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
-    let mut dir = std::env::temp_dir();
-    dir.push(format!(
-        "codexmanager-gateway-openai-stream-plain-ct-{}",
-        std::process::id()
-    ));
-    let _ = fs::create_dir_all(&dir);
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-openai-stream-plain-ct");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
@@ -769,13 +763,8 @@ fn gateway_openai_stream_usage_with_plain_content_type() {
 
 #[test]
 fn gateway_openai_non_stream_without_usage_keeps_tokens_null() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
-    let mut dir = std::env::temp_dir();
-    dir.push(format!(
-        "codexmanager-gateway-openai-no-usage-{}",
-        std::process::id()
-    ));
-    let _ = fs::create_dir_all(&dir);
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-openai-no-usage");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
@@ -893,13 +882,8 @@ fn gateway_openai_non_stream_without_usage_keeps_tokens_null() {
 
 #[test]
 fn gateway_request_log_keeps_only_final_result_for_multi_attempt_flow() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
-    let mut dir = std::env::temp_dir();
-    dir.push(format!(
-        "codexmanager-gateway-final-log-{}",
-        std::process::id()
-    ));
-    let _ = fs::create_dir_all(&dir);
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-final-log");
     let db_path: PathBuf = dir.join("codexmanager.db");
     let trace_log_path: PathBuf = dir.join("gateway-trace.log");
     let _ = fs::remove_file(&trace_log_path);

@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use codexmanager_core::storage::{Account, Storage, Token};
 use std::time::Instant;
 use tiny_http::Request;
@@ -18,7 +19,7 @@ pub(super) fn process_candidate_upstream_flow<F>(
     method: &reqwest::Method,
     request: &Request,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     base: &str,
     path: &str,

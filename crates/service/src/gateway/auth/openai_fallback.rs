@@ -1,6 +1,8 @@
+use bytes::Bytes;
 use codexmanager_core::storage::{Account, Storage, Token};
 use reqwest::blocking::Client;
 use reqwest::Method;
+use std::time::Instant;
 use tiny_http::Request;
 
 pub(super) fn try_openai_fallback(
@@ -10,7 +12,7 @@ pub(super) fn try_openai_fallback(
     request_path: &str,
     _request: &Request,
     incoming_headers: &super::IncomingHeaderSnapshot,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     upstream_base: &str,
     account: &Account,
@@ -21,6 +23,7 @@ pub(super) fn try_openai_fallback(
 ) -> Result<Option<reqwest::blocking::Response>, String> {
     let (url, _url_alt) = super::compute_upstream_url(upstream_base, request_path);
     let bearer = super::resolve_openai_bearer_token(storage, account, token)?;
+    let attempt_started_at = Instant::now();
 
     let account_id = account
         .chatgpt_account_id
@@ -55,7 +58,7 @@ pub(super) fn try_openai_fallback(
             builder = builder.header(name, value);
         }
         if !body.is_empty() {
-            builder = builder.body(body.to_vec());
+            builder = builder.body(body.clone());
         }
         builder
     };
@@ -66,6 +69,8 @@ pub(super) fn try_openai_fallback(
             match build_request(&fresh).send() {
                 Ok(resp) => resp,
                 Err(second_err) => {
+                    let duration_ms = super::duration_to_millis(attempt_started_at.elapsed());
+                    super::metrics::record_gateway_upstream_attempt(duration_ms, true);
                     return Err(format!(
                         "{}; retry_after_fresh_client: {}",
                         first_err, second_err
@@ -74,5 +79,7 @@ pub(super) fn try_openai_fallback(
             }
         }
     };
+    let duration_ms = super::duration_to_millis(attempt_started_at.elapsed());
+    super::metrics::record_gateway_upstream_attempt(duration_ms, false);
     Ok(Some(resp))
 }

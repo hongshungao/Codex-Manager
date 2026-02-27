@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use codexmanager_core::storage::{Account, Storage};
 use std::time::Instant;
 use tiny_http::Request;
@@ -24,7 +25,7 @@ pub(super) fn process_upstream_post_retry_flow<F>(
     request_deadline: Option<Instant>,
     request: &Request,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     upstream_cookie: Option<&str>,
     auth_token: &str,

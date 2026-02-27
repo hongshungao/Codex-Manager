@@ -167,26 +167,18 @@ pub(crate) fn front_proxy_max_body_bytes() -> usize {
 
 pub(super) fn upstream_cookie() -> Option<String> {
     ensure_runtime_config_loaded();
-    match upstream_cookie_cell().read() {
-        Ok(value) => value.clone(),
-        Err(_) => None,
-    }
+    crate::lock_utils::read_recover(upstream_cookie_cell(), "upstream_cookie").clone()
 }
 
 pub(super) fn token_exchange_client_id() -> String {
     ensure_runtime_config_loaded();
-    match token_exchange_client_id_cell().read() {
-        Ok(value) => value.clone(),
-        Err(_) => DEFAULT_CLIENT_ID.to_string(),
-    }
+    crate::lock_utils::read_recover(token_exchange_client_id_cell(), "token_exchange_client_id")
+        .clone()
 }
 
 pub(super) fn token_exchange_default_issuer() -> String {
     ensure_runtime_config_loaded();
-    match token_exchange_issuer_cell().read() {
-        Ok(value) => value.clone(),
-        Err(_) => DEFAULT_ISSUER.to_string(),
-    }
+    crate::lock_utils::read_recover(token_exchange_issuer_cell(), "token_exchange_issuer").clone()
 }
 
 pub(super) fn reload_from_env() {
@@ -226,21 +218,20 @@ pub(super) fn reload_from_env() {
     );
 
     let cookie = env_non_empty(ENV_UPSTREAM_COOKIE);
-    if let Ok(mut cached) = upstream_cookie_cell().write() {
-        *cached = cookie;
-    }
+    let mut cached_cookie = crate::lock_utils::write_recover(upstream_cookie_cell(), "upstream_cookie");
+    *cached_cookie = cookie;
 
     let client_id = env_non_empty(ENV_TOKEN_EXCHANGE_CLIENT_ID)
         .unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string());
-    if let Ok(mut cached) = token_exchange_client_id_cell().write() {
-        *cached = client_id;
-    }
+    let mut cached_client_id =
+        crate::lock_utils::write_recover(token_exchange_client_id_cell(), "token_exchange_client_id");
+    *cached_client_id = client_id;
 
     let issuer = env_non_empty(ENV_TOKEN_EXCHANGE_ISSUER)
         .unwrap_or_else(|| DEFAULT_ISSUER.to_string());
-    if let Ok(mut cached) = token_exchange_issuer_cell().write() {
-        *cached = issuer;
-    }
+    let mut cached_issuer =
+        crate::lock_utils::write_recover(token_exchange_issuer_cell(), "token_exchange_issuer");
+    *cached_issuer = issuer;
 }
 
 const ENV_UPSTREAM_COOKIE: &str = "CODEXMANAGER_UPSTREAM_COOKIE";

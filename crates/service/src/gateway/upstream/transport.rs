@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use codexmanager_core::storage::Account;
 use std::time::Instant;
 use tiny_http::Request;
@@ -24,13 +25,14 @@ pub(super) fn send_upstream_request(
     request_deadline: Option<Instant>,
     _request: &Request,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     upstream_cookie: Option<&str>,
     auth_token: &str,
     account: &Account,
     strip_session_affinity: bool,
 ) -> Result<reqwest::blocking::Response, reqwest::Error> {
+    let attempt_started_at = Instant::now();
     let incoming_session_id = incoming_headers.session_id();
     let mut derived_session_id = if !strip_session_affinity && incoming_session_id.is_none() {
         super::header_profile::derive_sticky_session_id_from_headers(incoming_headers)
@@ -47,7 +49,7 @@ pub(super) fn send_upstream_request(
     // 中文注释：参考 CLIProxyAPI 的 claude 兼容逻辑：当 prompt_cache_key 存在时，
     // 需要将 Session_id/Conversation_id 与其对齐，否则更容易触发 upstream challenge。
     if !strip_session_affinity && incoming_session_id.is_none() && incoming_conversation_id.is_none() {
-        if let Some(cache_key) = extract_prompt_cache_key(body) {
+        if let Some(cache_key) = extract_prompt_cache_key(body.as_ref()) {
             derived_session_id = Some(cache_key.clone());
             derived_conversation_id = Some(cache_key);
         }
@@ -79,12 +81,12 @@ pub(super) fn send_upstream_request(
             builder = builder.header(name, value);
         }
         if !body.is_empty() {
-            builder = builder.body(body.to_vec());
+            builder = builder.body(body.clone());
         }
         builder
     };
 
-    match build_request(client).send() {
+    let result = match build_request(client).send() {
         Ok(resp) => Ok(resp),
         Err(first_err) => {
             // 中文注释：进程启动后才开启系统代理时，旧单例 client 可能仍走旧网络路径；
@@ -95,7 +97,10 @@ pub(super) fn send_upstream_request(
                 Err(_) => Err(first_err),
             }
         }
-    }
+    };
+    let duration_ms = super::super::duration_to_millis(attempt_started_at.elapsed());
+    super::super::metrics::record_gateway_upstream_attempt(duration_ms, result.is_err());
+    result
 }
 
 

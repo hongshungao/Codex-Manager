@@ -67,11 +67,12 @@ fn env_usize_or(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-fn spawn_request_workers(worker_count: usize, rx: Receiver<Request>) {
+fn spawn_request_workers(worker_count: usize, rx: Receiver<Request>, is_stream_queue: bool) {
     for _ in 0..worker_count {
         let worker_rx = rx.clone();
         let _ = thread::spawn(move || {
             while let Ok(request) = worker_rx.recv() {
+                crate::gateway::record_http_queue_dequeue(is_stream_queue);
                 crate::http::backend_router::handle_backend_request(request);
             }
         });
@@ -99,13 +100,27 @@ fn enqueue_request(
     let prefer_stream = request_is_stream_like(&request);
     if prefer_stream {
         match stream_tx.send(request) {
-            Ok(()) => Ok(()),
-            Err(err) => normal_tx.send(err.into_inner()).map_err(|_| ()),
+            Ok(()) => {
+                crate::gateway::record_http_queue_enqueue(true);
+                Ok(())
+            }
+            Err(err) => {
+                normal_tx.send(err.into_inner()).map_err(|_| ())?;
+                crate::gateway::record_http_queue_enqueue(false);
+                Ok(())
+            }
         }
     } else {
         match normal_tx.send(request) {
-            Ok(()) => Ok(()),
-            Err(err) => stream_tx.send(err.into_inner()).map_err(|_| ()),
+            Ok(()) => {
+                crate::gateway::record_http_queue_enqueue(false);
+                Ok(())
+            }
+            Err(err) => {
+                stream_tx.send(err.into_inner()).map_err(|_| ())?;
+                crate::gateway::record_http_queue_enqueue(true);
+                Ok(())
+            }
         }
     }
 }
@@ -117,8 +132,9 @@ fn run_backend_server(server: Server) {
     let stream_queue_size = http_stream_queue_size(stream_worker_count);
     let (normal_tx, normal_rx) = bounded::<Request>(queue_size);
     let (stream_tx, stream_rx) = bounded::<Request>(stream_queue_size);
-    spawn_request_workers(worker_count, normal_rx);
-    spawn_request_workers(stream_worker_count, stream_rx);
+    crate::gateway::record_http_queue_capacity(queue_size, stream_queue_size);
+    spawn_request_workers(worker_count, normal_rx, false);
+    spawn_request_workers(stream_worker_count, stream_rx, true);
 
     for request in server.incoming_requests() {
         if crate::shutdown_requested() || request.url() == "/__shutdown" {
@@ -126,6 +142,7 @@ fn run_backend_server(server: Server) {
             break;
         }
         if enqueue_request(request, &normal_tx, &stream_tx).is_err() {
+            crate::gateway::record_http_queue_enqueue_failure();
             break;
         }
     }

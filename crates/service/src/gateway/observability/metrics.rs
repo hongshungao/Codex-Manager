@@ -17,6 +17,16 @@ static USAGE_REFRESH_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 static USAGE_REFRESH_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
 static USAGE_REFRESH_FAILURES: AtomicUsize = AtomicUsize::new(0);
 static USAGE_REFRESH_DURATION_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DB_ERRORS_TOTAL: AtomicUsize = AtomicUsize::new(0);
+static DB_BUSY_TOTAL: AtomicUsize = AtomicUsize::new(0);
+static HTTP_QUEUE_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+static HTTP_QUEUE_DEPTH: AtomicUsize = AtomicUsize::new(0);
+static HTTP_STREAM_QUEUE_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+static HTTP_STREAM_QUEUE_DEPTH: AtomicUsize = AtomicUsize::new(0);
+static HTTP_QUEUE_ENQUEUE_FAILURES: AtomicUsize = AtomicUsize::new(0);
+static GATEWAY_UPSTREAM_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+static GATEWAY_UPSTREAM_ATTEMPT_ERRORS: AtomicUsize = AtomicUsize::new(0);
+static GATEWAY_UPSTREAM_ATTEMPT_DURATION_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct GatewayRequestLabelKey {
@@ -39,6 +49,16 @@ pub(crate) struct GatewayMetricsSnapshot {
     pub usage_refresh_successes: usize,
     pub usage_refresh_failures: usize,
     pub usage_refresh_duration_ms_total: u64,
+    pub db_errors_total: usize,
+    pub db_busy_total: usize,
+    pub http_queue_capacity: usize,
+    pub http_queue_depth: usize,
+    pub http_stream_queue_capacity: usize,
+    pub http_stream_queue_depth: usize,
+    pub http_queue_enqueue_failures: usize,
+    pub gateway_upstream_attempt_duration_ms_total: u64,
+    pub gateway_upstream_attempts: usize,
+    pub gateway_upstream_attempt_errors: usize,
 }
 
 pub(crate) struct GatewayRequestGuard;
@@ -101,6 +121,46 @@ pub(crate) fn record_usage_refresh_outcome(success: bool, duration_ms: u64) {
     USAGE_REFRESH_DURATION_MS_TOTAL.fetch_add(duration_ms, Ordering::Relaxed);
 }
 
+pub(crate) fn record_db_error(err: &str) {
+    DB_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
+    if is_db_busy_error(err) {
+        DB_BUSY_TOTAL.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub(crate) fn record_http_queue_capacity(normal_capacity: usize, stream_capacity: usize) {
+    HTTP_QUEUE_CAPACITY.store(normal_capacity, Ordering::Relaxed);
+    HTTP_STREAM_QUEUE_CAPACITY.store(stream_capacity, Ordering::Relaxed);
+}
+
+pub(crate) fn record_http_queue_enqueue(is_stream_queue: bool) {
+    if is_stream_queue {
+        HTTP_STREAM_QUEUE_DEPTH.fetch_add(1, Ordering::Relaxed);
+    } else {
+        HTTP_QUEUE_DEPTH.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub(crate) fn record_http_queue_dequeue(is_stream_queue: bool) {
+    if is_stream_queue {
+        atomic_dec_saturating(&HTTP_STREAM_QUEUE_DEPTH);
+    } else {
+        atomic_dec_saturating(&HTTP_QUEUE_DEPTH);
+    }
+}
+
+pub(crate) fn record_http_queue_enqueue_failure() {
+    HTTP_QUEUE_ENQUEUE_FAILURES.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn record_gateway_upstream_attempt(duration_ms: u64, failed: bool) {
+    GATEWAY_UPSTREAM_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+    GATEWAY_UPSTREAM_ATTEMPT_DURATION_MS_TOTAL.fetch_add(duration_ms, Ordering::Relaxed);
+    if failed {
+        GATEWAY_UPSTREAM_ATTEMPT_ERRORS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 pub(crate) fn record_gateway_request_outcome(
     path: &str,
     status_code: u16,
@@ -112,10 +172,9 @@ pub(crate) fn record_gateway_request_outcome(
         protocol: classify_protocol(protocol_type),
     };
     let lock = GATEWAY_REQUEST_LABELS.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(mut map) = lock.lock() {
-        let entry = map.entry(key).or_insert(0);
-        *entry += 1;
-    }
+    let mut map = crate::lock_utils::lock_recover(lock, "gateway_request_labels");
+    let entry = map.entry(key).or_insert(0);
+    *entry += 1;
 }
 
 pub(crate) fn duration_to_millis(duration: Duration) -> u64 {
@@ -124,9 +183,7 @@ pub(crate) fn duration_to_millis(duration: Duration) -> u64 {
 
 fn account_inflight_total() -> usize {
     let lock = ACCOUNT_INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
-    let Ok(map) = lock.lock() else {
-        return 0;
-    };
+    let map = crate::lock_utils::lock_recover(lock, "account_inflight");
     map.values().copied().sum()
 }
 
@@ -144,6 +201,17 @@ pub(crate) fn gateway_metrics_snapshot() -> GatewayMetricsSnapshot {
         usage_refresh_successes: USAGE_REFRESH_SUCCESSES.load(Ordering::Relaxed),
         usage_refresh_failures: USAGE_REFRESH_FAILURES.load(Ordering::Relaxed),
         usage_refresh_duration_ms_total: USAGE_REFRESH_DURATION_MS_TOTAL.load(Ordering::Relaxed),
+        db_errors_total: DB_ERRORS_TOTAL.load(Ordering::Relaxed),
+        db_busy_total: DB_BUSY_TOTAL.load(Ordering::Relaxed),
+        http_queue_capacity: HTTP_QUEUE_CAPACITY.load(Ordering::Relaxed),
+        http_queue_depth: HTTP_QUEUE_DEPTH.load(Ordering::Relaxed),
+        http_stream_queue_capacity: HTTP_STREAM_QUEUE_CAPACITY.load(Ordering::Relaxed),
+        http_stream_queue_depth: HTTP_STREAM_QUEUE_DEPTH.load(Ordering::Relaxed),
+        http_queue_enqueue_failures: HTTP_QUEUE_ENQUEUE_FAILURES.load(Ordering::Relaxed),
+        gateway_upstream_attempt_duration_ms_total: GATEWAY_UPSTREAM_ATTEMPT_DURATION_MS_TOTAL
+            .load(Ordering::Relaxed),
+        gateway_upstream_attempts: GATEWAY_UPSTREAM_ATTEMPTS.load(Ordering::Relaxed),
+        gateway_upstream_attempt_errors: GATEWAY_UPSTREAM_ATTEMPT_ERRORS.load(Ordering::Relaxed),
     }
 }
 
@@ -165,6 +233,16 @@ codexmanager_usage_refresh_success_total {}\n\
 codexmanager_usage_refresh_failures_total {}\n\
 codexmanager_usage_refresh_duration_milliseconds_total {}\n\
 codexmanager_usage_refresh_duration_milliseconds_count {}\n\
+codexmanager_db_errors_total {}\n\
+codexmanager_db_busy_total {}\n\
+codexmanager_http_queue_capacity {}\n\
+codexmanager_http_queue_depth {}\n\
+codexmanager_http_stream_queue_capacity {}\n\
+codexmanager_http_stream_queue_depth {}\n\
+codexmanager_http_queue_enqueue_failures_total {}\n\
+codexmanager_gateway_upstream_attempt_duration_milliseconds_total {}\n\
+codexmanager_gateway_upstream_attempt_duration_milliseconds_count {}\n\
+codexmanager_gateway_upstream_attempt_errors_total {}\n\
 {}",
         m.total_requests,
         m.active_requests,
@@ -180,15 +258,23 @@ codexmanager_usage_refresh_duration_milliseconds_count {}\n\
         m.usage_refresh_failures,
         m.usage_refresh_duration_ms_total,
         m.usage_refresh_attempts,
+        m.db_errors_total,
+        m.db_busy_total,
+        m.http_queue_capacity,
+        m.http_queue_depth,
+        m.http_stream_queue_capacity,
+        m.http_stream_queue_depth,
+        m.http_queue_enqueue_failures,
+        m.gateway_upstream_attempt_duration_ms_total,
+        m.gateway_upstream_attempts,
+        m.gateway_upstream_attempt_errors,
         labeled,
     )
 }
 
 fn gateway_labeled_metrics_prometheus() -> String {
     let lock = GATEWAY_REQUEST_LABELS.get_or_init(|| Mutex::new(HashMap::new()));
-    let Ok(map) = lock.lock() else {
-        return String::new();
-    };
+    let map = crate::lock_utils::lock_recover(lock, "gateway_request_labels");
     let mut entries = map.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>();
     entries.sort_by_key(|(k, _)| (k.route, k.status_class, k.protocol));
     let mut text = String::new();
@@ -258,9 +344,7 @@ fn classify_protocol(protocol_type: Option<&str>) -> &'static str {
 
 pub(crate) fn account_inflight_count(account_id: &str) -> usize {
     let lock = ACCOUNT_INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
-    let Ok(map) = lock.lock() else {
-        return 0;
-    };
+    let map = crate::lock_utils::lock_recover(lock, "account_inflight");
     map.get(account_id).copied().unwrap_or(0)
 }
 
@@ -271,9 +355,7 @@ pub(crate) struct AccountInFlightGuard {
 impl Drop for AccountInFlightGuard {
     fn drop(&mut self) {
         let lock = ACCOUNT_INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
-        let Ok(mut map) = lock.lock() else {
-            return;
-        };
+        let mut map = crate::lock_utils::lock_recover(lock, "account_inflight");
         if let Some(value) = map.get_mut(&self.account_id) {
             if *value > 1 {
                 *value -= 1;
@@ -286,11 +368,35 @@ impl Drop for AccountInFlightGuard {
 
 pub(crate) fn acquire_account_inflight(account_id: &str) -> AccountInFlightGuard {
     let lock = ACCOUNT_INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(mut map) = lock.lock() {
-        let entry = map.entry(account_id.to_string()).or_insert(0);
-        *entry += 1;
-    }
+    let mut map = crate::lock_utils::lock_recover(lock, "account_inflight");
+    let entry = map.entry(account_id.to_string()).or_insert(0);
+    *entry += 1;
     AccountInFlightGuard {
         account_id: account_id.to_string(),
     }
+}
+
+fn atomic_dec_saturating(value: &AtomicUsize) {
+    let mut current = value.load(Ordering::Relaxed);
+    loop {
+        if current == 0 {
+            break;
+        }
+        match value.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+}
+
+fn is_db_busy_error(err: &str) -> bool {
+    let normalized = err.trim().to_ascii_lowercase();
+    normalized.contains("database is locked")
+        || normalized.contains("sqlite_busy")
+        || normalized.contains("busy timeout")
 }

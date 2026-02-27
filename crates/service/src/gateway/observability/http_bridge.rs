@@ -1,9 +1,19 @@
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, BufReader, Cursor, Read};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tiny_http::{Header, Request, Response, StatusCode};
 
 use super::AccountInFlightGuard;
+
+// Env:
+// - CODEXMANAGER_HTTP_BRIDGE_OUTPUT_TEXT_LIMIT_BYTES (default: 131072; 0 disables limit)
+// Caps accumulated `output_text` extracted from upstream responses to avoid unbounded memory growth.
+const OUTPUT_TEXT_LIMIT_BYTES_ENV: &str = "CODEXMANAGER_HTTP_BRIDGE_OUTPUT_TEXT_LIMIT_BYTES";
+const DEFAULT_OUTPUT_TEXT_LIMIT_BYTES: usize = 128 * 1024;
+const OUTPUT_TEXT_TRUNCATED_MARKER: &str = "[output_text truncated]";
+static OUTPUT_TEXT_LIMIT_BYTES: AtomicUsize = AtomicUsize::new(DEFAULT_OUTPUT_TEXT_LIMIT_BYTES);
+static OUTPUT_TEXT_LIMIT_LOADED: OnceLock<()> = OnceLock::new();
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct UpstreamResponseUsage {
@@ -33,7 +43,7 @@ fn merge_usage(target: &mut UpstreamResponseUsage, source: UpstreamResponseUsage
     }
     if let Some(source_text) = source.output_text {
         let target_text = target.output_text.get_or_insert_with(String::new);
-        target_text.push_str(source_text.as_str());
+        append_output_text_raw(target_text, source_text.as_str());
     }
 }
 
@@ -81,10 +91,57 @@ fn append_output_text(buffer: &mut String, text: &str) {
     if text.is_empty() {
         return;
     }
+    let limit = output_text_limit_bytes();
+    if limit > 0 && buffer.len() >= limit {
+        mark_output_text_truncated(buffer, limit);
+        return;
+    }
     if !buffer.is_empty() {
+        if limit > 0 && buffer.len() + 1 > limit {
+            mark_output_text_truncated(buffer, limit);
+            return;
+        }
         buffer.push('\n');
     }
-    buffer.push_str(text);
+    if limit == 0 {
+        buffer.push_str(text);
+        return;
+    }
+    let remaining = limit.saturating_sub(buffer.len());
+    if remaining == 0 {
+        mark_output_text_truncated(buffer, limit);
+        return;
+    }
+    let slice = truncate_str_to_bytes(text, remaining);
+    buffer.push_str(slice);
+    if slice.len() < text.len() {
+        mark_output_text_truncated(buffer, limit);
+    }
+}
+
+fn append_output_text_raw(buffer: &mut String, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let limit = output_text_limit_bytes();
+    if limit > 0 && buffer.len() >= limit {
+        mark_output_text_truncated(buffer, limit);
+        return;
+    }
+    if limit == 0 {
+        buffer.push_str(text);
+        return;
+    }
+    let remaining = limit.saturating_sub(buffer.len());
+    if remaining == 0 {
+        mark_output_text_truncated(buffer, limit);
+        return;
+    }
+    let slice = truncate_str_to_bytes(text, remaining);
+    buffer.push_str(slice);
+    if slice.len() < text.len() {
+        mark_output_text_truncated(buffer, limit);
+    }
 }
 
 fn collect_response_output_text(value: &Value, output: &mut String) {
@@ -117,6 +174,67 @@ fn collect_response_output_text(value: &Value, output: &mut String) {
         }
         _ => {}
     }
+}
+
+fn output_text_limit_bytes() -> usize {
+    let _ = OUTPUT_TEXT_LIMIT_LOADED.get_or_init(|| {
+        let raw = std::env::var(OUTPUT_TEXT_LIMIT_BYTES_ENV).unwrap_or_default();
+        let limit = raw.trim().parse::<usize>().unwrap_or(DEFAULT_OUTPUT_TEXT_LIMIT_BYTES);
+        OUTPUT_TEXT_LIMIT_BYTES.store(limit, Ordering::Relaxed);
+    });
+    OUTPUT_TEXT_LIMIT_BYTES.load(Ordering::Relaxed)
+}
+
+fn truncate_str_to_bytes(text: &str, max_bytes: usize) -> &str {
+    if max_bytes >= text.len() {
+        return text;
+    }
+    let mut idx = max_bytes;
+    while idx > 0 && !text.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    &text[..idx]
+}
+
+fn truncate_string_to_bytes(value: &mut String, max_bytes: usize) {
+    if max_bytes >= value.len() {
+        return;
+    }
+    let mut idx = max_bytes;
+    while idx > 0 && !value.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    value.truncate(idx);
+}
+
+fn mark_output_text_truncated(buffer: &mut String, limit: usize) {
+    if limit == 0 {
+        return;
+    }
+    if buffer.ends_with(OUTPUT_TEXT_TRUNCATED_MARKER) {
+        return;
+    }
+    // Try to append marker directly when possible.
+    let newline_bytes = if buffer.is_empty() { 0 } else { 1 };
+    let marker_bytes = OUTPUT_TEXT_TRUNCATED_MARKER.len();
+    if buffer.len() + newline_bytes + marker_bytes <= limit {
+        if !buffer.is_empty() {
+            buffer.push('\n');
+        }
+        buffer.push_str(OUTPUT_TEXT_TRUNCATED_MARKER);
+        return;
+    }
+    // Otherwise, shrink buffer to make room for marker.
+    if limit <= marker_bytes {
+        truncate_string_to_bytes(buffer, limit);
+        return;
+    }
+    let target = limit.saturating_sub(marker_bytes + newline_bytes);
+    truncate_string_to_bytes(buffer, target);
+    if !buffer.is_empty() {
+        buffer.push('\n');
+    }
+    buffer.push_str(OUTPUT_TEXT_TRUNCATED_MARKER);
 }
 
 fn collect_output_text_from_event_fields(value: &Value, output: &mut String) {
@@ -201,19 +319,15 @@ fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage>
             }
         }
         if !text_out.trim().is_empty() {
-            usage.output_text = Some(match usage.output_text {
-                Some(existing) if !existing.is_empty() => format!("{existing}\n{text_out}"),
-                _ => text_out,
-            });
+            let target = usage.output_text.get_or_insert_with(String::new);
+            append_output_text(target, text_out.as_str());
         }
         return Some(usage);
     }
     if let Some(delta) = value.get("delta").and_then(Value::as_str) {
         if !delta.is_empty() {
-            usage.output_text = Some(match usage.output_text {
-                Some(existing) if !existing.is_empty() => format!("{existing}\n{delta}"),
-                _ => delta.to_string(),
-            });
+            let target = usage.output_text.get_or_insert_with(String::new);
+            append_output_text(target, delta);
         }
         return Some(usage);
     }
@@ -983,5 +1097,33 @@ mod tests {
         assert_eq!(usage.output_tokens, Some(15));
         assert_eq!(usage.total_tokens, Some(41));
         assert_eq!(usage.reasoning_output_tokens, Some(4));
+    }
+
+    #[test]
+    fn parse_usage_from_sse_frame_caps_output_text() {
+        let limit = super::output_text_limit_bytes();
+        if limit == 0 || limit <= super::OUTPUT_TEXT_TRUNCATED_MARKER.len() {
+            return;
+        }
+
+        let long = "a".repeat(limit.saturating_mul(3));
+        let payload = json!({
+            "choices": [
+                {"delta": {"content": long}}
+            ]
+        });
+        let frame_lines = vec![
+            "event: message\n".to_string(),
+            format!("data: {}", payload.to_string()),
+            "\n".to_string(),
+        ];
+        let usage = parse_usage_from_sse_frame(&frame_lines).expect("extract usage from sse frame");
+        let text = usage.output_text.unwrap_or_default();
+        assert!(
+            text.len() <= limit,
+            "output_text exceeded limit: {} > {limit}",
+            text.len()
+        );
+        assert!(text.ends_with(super::OUTPUT_TEXT_TRUNCATED_MARKER));
     }
 }

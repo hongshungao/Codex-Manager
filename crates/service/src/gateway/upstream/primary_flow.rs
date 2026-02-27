@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use codexmanager_core::storage::{Account, Storage, Token};
 use reqwest::header::CONTENT_TYPE;
 use std::time::Instant;
@@ -23,7 +24,7 @@ pub(super) fn run_primary_upstream_flow<F>(
     method: &reqwest::Method,
     request: &Request,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
-    body: &[u8],
+    body: &Bytes,
     is_stream: bool,
     base: &str,
     path: &str,

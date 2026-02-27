@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use reqwest::Method;
 use tiny_http::Request;
 
@@ -10,7 +11,7 @@ pub(super) struct LocalValidationResult {
     pub(super) incoming_headers: super::IncomingHeaderSnapshot,
     pub(super) storage: crate::storage_helpers::StorageHandle,
     pub(super) path: String,
-    pub(super) body: Vec<u8>,
+    pub(super) body: Bytes,
     pub(super) is_stream: bool,
     pub(super) has_prompt_cache_key: bool,
     pub(super) request_shape: Option<String>,

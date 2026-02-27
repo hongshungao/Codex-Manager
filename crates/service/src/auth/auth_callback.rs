@@ -81,9 +81,7 @@ pub(crate) fn ensure_login_server() -> Result<LoginServerInfo, String> {
 
 fn ensure_login_server_with_addr(addr: &str) -> Result<LoginServerInfo, String> {
     let cell = LOGIN_SERVER_STATE.get_or_init(|| std::sync::Mutex::new(None));
-    let mut guard = cell
-        .lock()
-        .map_err(|_| "login server lock poisoned".to_string())?;
+    let mut guard = crate::lock_utils::lock_recover(cell, "login_server_state");
     if let Some(info) = guard.as_ref() {
         return Ok(info.clone());
     }

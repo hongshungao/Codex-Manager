@@ -96,7 +96,7 @@ fn should_record_failure_event(
         error_class: error_class.to_string(),
     };
     let throttle = FAILURE_EVENT_THROTTLE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut state = throttle.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut state = crate::lock_utils::lock_recover(throttle, "usage_refresh_failure_throttle");
     should_record_failure_event_with_state(&mut state, key, created_at, dedupe_window_secs)
 }
 

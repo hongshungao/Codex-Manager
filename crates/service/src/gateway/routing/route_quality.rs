@@ -32,9 +32,7 @@ where
     F: FnOnce(&mut HashMap<String, RouteQualityRecord>, i64),
 {
     let lock = ROUTE_QUALITY.get_or_init(|| Mutex::new(RouteQualityState::default()));
-    let Ok(mut state) = lock.lock() else {
-        return;
-    };
+    let mut state = crate::lock_utils::lock_recover(lock, "route_quality_state");
     let now = now_ts();
     maybe_cleanup_route_quality(&mut state, now);
     mutator(&mut state.entries, now);
@@ -72,9 +70,7 @@ pub(crate) fn record_route_quality(account_id: &str, status_code: u16) {
 
 pub(crate) fn route_health_score(account_id: &str) -> i32 {
     let lock = ROUTE_QUALITY.get_or_init(|| Mutex::new(RouteQualityState::default()));
-    let Ok(mut state) = lock.lock() else {
-        return DEFAULT_ROUTE_HEALTH_SCORE;
-    };
+    let mut state = crate::lock_utils::lock_recover(lock, "route_quality_state");
     let now = now_ts();
     let Some(record) = state.entries.get(account_id).cloned() else {
         return DEFAULT_ROUTE_HEALTH_SCORE;
@@ -91,9 +87,7 @@ pub(crate) fn route_health_score(account_id: &str) -> i32 {
 #[allow(dead_code)]
 pub(crate) fn route_quality_penalty(account_id: &str) -> i64 {
     let lock = ROUTE_QUALITY.get_or_init(|| Mutex::new(RouteQualityState::default()));
-    let Ok(mut state) = lock.lock() else {
-        return 0;
-    };
+    let mut state = crate::lock_utils::lock_recover(lock, "route_quality_state");
     let now = now_ts();
     let Some(record) = state.entries.get(account_id).cloned() else {
         return 0;

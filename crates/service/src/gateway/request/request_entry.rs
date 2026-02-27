@@ -82,7 +82,7 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
         protocol_type_for_count_tokens.as_str(),
         path_for_count_tokens.as_str(),
         request_method_for_count_tokens.as_str(),
-        &validated.body,
+        validated.body.as_ref(),
         model_for_count_tokens.as_deref(),
         reasoning_for_count_tokens.as_deref(),
         &validated.storage,
