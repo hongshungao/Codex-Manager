@@ -41,22 +41,31 @@ const ENV_TOKEN_EXCHANGE_ISSUER: &str = "CODEXMANAGER_ISSUER";
 pub(crate) fn upstream_client() -> &'static Client {
     UPSTREAM_CLIENT.get_or_init(|| {
         ensure_runtime_config_loaded();
-        Client::builder()
-            // 中文注释：显式关闭总超时，避免长时流式响应在客户端层被误判超时中断。
-            .timeout(None::<Duration>)
-            // 中文注释：连接阶段设置超时，避免网络异常时线程长期卡死占满并发槽位。
-            .connect_timeout(upstream_connect_timeout())
-            .pool_max_idle_per_host(32)
-            .pool_idle_timeout(Some(Duration::from_secs(90)))
-            .tcp_keepalive(Some(Duration::from_secs(30)))
-            .build()
-            .unwrap_or_else(|_| Client::new())
+        build_upstream_client()
     })
+}
+
+pub(crate) fn fresh_upstream_client() -> Client {
+    ensure_runtime_config_loaded();
+    build_upstream_client()
 }
 
 fn upstream_connect_timeout() -> Duration {
     ensure_runtime_config_loaded();
     Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS.load(Ordering::Relaxed))
+}
+
+fn build_upstream_client() -> Client {
+    Client::builder()
+        // 中文注释：显式关闭总超时，避免长时流式响应在客户端层被误判超时中断。
+        .timeout(None::<Duration>)
+        // 中文注释：连接阶段设置超时，避免网络异常时线程长期卡死占满并发槽位。
+        .connect_timeout(upstream_connect_timeout())
+        .pool_max_idle_per_host(32)
+        .pool_idle_timeout(Some(Duration::from_secs(90)))
+        .tcp_keepalive(Some(Duration::from_secs(30)))
+        .build()
+        .unwrap_or_else(|_| Client::new())
 }
 
 pub(crate) fn upstream_total_timeout() -> Option<Duration> {

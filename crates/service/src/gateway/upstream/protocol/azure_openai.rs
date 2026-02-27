@@ -206,7 +206,8 @@ pub(in super::super) fn proxy_azure_request(
         builder = builder.timeout(timeout);
     }
 
-    for (name, value) in static_headers {
+    let request_headers = static_headers.clone();
+    for (name, value) in request_headers.iter() {
         builder = builder.header(name, value);
     }
     builder = builder.header(
@@ -224,36 +225,66 @@ pub(in super::super) fn proxy_azure_request(
 
     let upstream = match builder.send() {
         Ok(resp) => resp,
-        Err(err) => {
-            let message = format!("azure upstream error: {err}");
-            super::super::super::record_gateway_request_outcome(
-                path,
-                502,
-                Some(PROTOCOL_AZURE_OPENAI),
+        Err(first_err) => {
+            // 中文注释：系统代理在服务启动后才切换时，旧 client 可能沿用旧网络状态；
+            // 这里用 fresh client 再试一次，避免必须重启/重连。
+            let fresh_client = super::super::super::fresh_upstream_client();
+            let mut retry_builder = fresh_client.request(method.clone(), &url);
+            if let Some(timeout) = super::super::deadline::send_timeout(request_deadline, is_stream) {
+                retry_builder = retry_builder.timeout(timeout);
+            }
+            for (name, value) in request_headers.iter() {
+                retry_builder = retry_builder.header(name, value);
+            }
+            retry_builder = retry_builder.header(
+                "Accept",
+                if is_stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
             );
-            super::super::super::trace_log::log_request_final(
-                trace_id,
-                502,
-                Some(key_id),
-                Some(url.as_str()),
-                Some(message.as_str()),
-                started_at.elapsed().as_millis(),
-            );
-            super::super::super::write_request_log(
-                storage,
-                Some(key_id),
-                None,
-                path,
-                request_method,
-                model_for_log,
-                reasoning_for_log,
-                Some(url.as_str()),
-                Some(502),
-                super::super::super::request_log::RequestLogUsage::default(),
-                Some(message.as_str()),
-            );
-            respond_error(request, 502, message.as_str());
-            return Ok(());
+            if !body.is_empty() {
+                retry_builder = retry_builder.header("Content-Type", "application/json");
+                retry_builder = retry_builder.body(body.to_vec());
+            }
+            match retry_builder.send() {
+                Ok(resp) => resp,
+                Err(second_err) => {
+                    let message = format!(
+                        "azure upstream error: {}; retry_after_fresh_client: {}",
+                        first_err, second_err
+                    );
+                    super::super::super::record_gateway_request_outcome(
+                        path,
+                        502,
+                        Some(PROTOCOL_AZURE_OPENAI),
+                    );
+                    super::super::super::trace_log::log_request_final(
+                        trace_id,
+                        502,
+                        Some(key_id),
+                        Some(url.as_str()),
+                        Some(message.as_str()),
+                        started_at.elapsed().as_millis(),
+                    );
+                    super::super::super::write_request_log(
+                        storage,
+                        Some(key_id),
+                        None,
+                        path,
+                        request_method,
+                        model_for_log,
+                        reasoning_for_log,
+                        Some(url.as_str()),
+                        Some(502),
+                        super::super::super::request_log::RequestLogUsage::default(),
+                        Some(message.as_str()),
+                    );
+                    respond_error(request, 502, message.as_str());
+                    return Ok(());
+                }
+            }
         }
     };
 

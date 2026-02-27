@@ -22,7 +22,6 @@ pub(super) fn try_openai_fallback(
     let (url, _url_alt) = super::compute_upstream_url(upstream_base, request_path);
     let bearer = super::resolve_openai_bearer_token(storage, account, token)?;
 
-    let mut builder = client.request(method.clone(), &url);
     let account_id = account
         .chatgpt_account_id
         .as_deref()
@@ -40,9 +39,8 @@ pub(super) fn try_openai_fallback(
         is_stream,
         has_body: !body.is_empty(),
     };
-    for (name, value) in super::upstream::header_profile::build_codex_upstream_headers(header_input) {
-        builder = builder.header(name, value);
-    }
+    let upstream_headers =
+        super::upstream::header_profile::build_codex_upstream_headers(header_input);
     if debug {
         log::debug!(
             "event=gateway_upstream_token_source path={} account_id={} token_source=api_key_access_token upstream_base={}",
@@ -51,9 +49,30 @@ pub(super) fn try_openai_fallback(
             upstream_base
         );
     }
-    if !body.is_empty() {
-        builder = builder.body(body.to_vec());
-    }
-    let resp = builder.send().map_err(|e| e.to_string())?;
+    let build_request = |http: &Client| {
+        let mut builder = http.request(method.clone(), &url);
+        for (name, value) in upstream_headers.iter() {
+            builder = builder.header(name, value);
+        }
+        if !body.is_empty() {
+            builder = builder.body(body.to_vec());
+        }
+        builder
+    };
+    let resp = match build_request(client).send() {
+        Ok(resp) => resp,
+        Err(first_err) => {
+            let fresh = super::fresh_upstream_client();
+            match build_request(&fresh).send() {
+                Ok(resp) => resp,
+                Err(second_err) => {
+                    return Err(format!(
+                        "{}; retry_after_fresh_client: {}",
+                        first_err, second_err
+                    ));
+                }
+            }
+        }
+    };
     Ok(Some(resp))
 }

@@ -31,10 +31,6 @@ pub(super) fn send_upstream_request(
     account: &Account,
     strip_session_affinity: bool,
 ) -> Result<reqwest::blocking::Response, reqwest::Error> {
-    let mut builder = client.request(method.clone(), target_url);
-    if let Some(timeout) = super::deadline::send_timeout(request_deadline, is_stream) {
-        builder = builder.timeout(timeout);
-    }
     let incoming_session_id = incoming_headers.session_id();
     let mut derived_session_id = if !strip_session_affinity && incoming_session_id.is_none() {
         super::header_profile::derive_sticky_session_id_from_headers(incoming_headers)
@@ -73,13 +69,33 @@ pub(super) fn send_upstream_request(
         is_stream,
         has_body: !body.is_empty(),
     };
-    for (name, value) in super::header_profile::build_codex_upstream_headers(header_input) {
-        builder = builder.header(name, value);
+    let upstream_headers = super::header_profile::build_codex_upstream_headers(header_input);
+    let build_request = |http: &reqwest::blocking::Client| {
+        let mut builder = http.request(method.clone(), target_url);
+        if let Some(timeout) = super::deadline::send_timeout(request_deadline, is_stream) {
+            builder = builder.timeout(timeout);
+        }
+        for (name, value) in upstream_headers.iter() {
+            builder = builder.header(name, value);
+        }
+        if !body.is_empty() {
+            builder = builder.body(body.to_vec());
+        }
+        builder
+    };
+
+    match build_request(client).send() {
+        Ok(resp) => Ok(resp),
+        Err(first_err) => {
+            // 中文注释：进程启动后才开启系统代理时，旧单例 client 可能仍走旧网络路径；
+            // 这里用 fresh client 立刻重试一次，避免必须手动重连服务。
+            let fresh = super::super::fresh_upstream_client();
+            match build_request(&fresh).send() {
+                Ok(resp) => Ok(resp),
+                Err(_) => Err(first_err),
+            }
+        }
     }
-    if !body.is_empty() {
-        builder = builder.body(body.to_vec());
-    }
-    builder.send()
 }
 
 

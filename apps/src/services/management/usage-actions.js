@@ -19,7 +19,11 @@ export function createUsageActions({
     if (!ok) return;
     dom.refreshUsageSingle.disabled = true;
     try {
-      await api.serviceUsageRefresh(state.currentUsageAccount.id);
+      const refreshResult = await api.serviceUsageRefresh(state.currentUsageAccount.id);
+      if (refreshResult && typeof refreshResult === "object" && refreshResult.ok === false) {
+        const msg = String(refreshResult.error || "用量刷新失败");
+        throw new Error(msg);
+      }
       const res = await api.serviceUsageRead(state.currentUsageAccount.id);
       const snap = res ? res.snapshot : null;
       if (snap) {

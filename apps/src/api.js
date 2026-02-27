@@ -7,9 +7,47 @@ export async function invoke(method, params) {
     throw new Error("Tauri API 不可用（请在桌面端运行）");
   }
   const res = await tauri.core.invoke(method, params || {});
-  if (res && Object.prototype.hasOwnProperty.call(res, "result")) {
-    return res.result;
+  // 中文注释：统一把 JSON-RPC error 转成异常，避免调用方把失败误判成成功。
+  if (res && typeof res === "object" && Object.prototype.hasOwnProperty.call(res, "error")) {
+    const err = res.error;
+    if (typeof err === "string" && err.trim()) {
+      throw new Error(err);
+    }
+    if (err && typeof err === "object" && typeof err.message === "string" && err.message.trim()) {
+      throw new Error(err.message);
+    }
+    try {
+      throw new Error(JSON.stringify(err));
+    } catch {
+      throw new Error("RPC 调用失败");
+    }
   }
+
+  const throwIfBusinessError = (payload) => {
+    if (!payload || typeof payload !== "object") return;
+    // 业务约定：ok=false + error 代表本次动作失败（如 usage refresh）。
+    if (payload.ok === false) {
+      const msg = typeof payload.error === "string" && payload.error.trim()
+        ? payload.error
+        : "操作失败";
+      throw new Error(msg);
+    }
+    // 兼容 value_or_error: 仅包含 error 字段时视为失败。
+    if (
+      typeof payload.error === "string"
+      && payload.error.trim()
+      && Object.keys(payload).length === 1
+    ) {
+      throw new Error(payload.error);
+    }
+  };
+
+  if (res && Object.prototype.hasOwnProperty.call(res, "result")) {
+    const payload = res.result;
+    throwIfBusinessError(payload);
+    return payload;
+  }
+  throwIfBusinessError(res);
   return res;
 }
 
