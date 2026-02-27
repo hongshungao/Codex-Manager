@@ -21,8 +21,11 @@ on:
 permissions:
   contents: write
 
+env:
+  TAURI_CLI_VERSION: 2.9.6
+
 concurrency:
-  group: ${{ startsWith(github.ref, 'refs/tags/') && format('tag-{0}', github.ref_name) || format('{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ format('tag-{0}', startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag)) }}
   cancel-in-progress: false
 
 jobs:
@@ -107,6 +110,38 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || 'main' }}
 
+      - name: Validate tag/version consistency
+        shell: pwsh
+        run: |
+          $tagInput = "${{ github.event.inputs.tag }}"
+          if ([string]::IsNullOrWhiteSpace($tagInput)) { throw "release tag is required" }
+
+          $normalizedTag = if ($tagInput.StartsWith("v")) { $tagInput } else { "v$tagInput" }
+          if ($normalizedTag -notmatch '^v(\d+\.\d+\.\d+)(?:[-+].*)?$') {
+            throw "tag must look like vX.Y.Z or vX.Y.Z-suffix, got: $normalizedTag"
+          }
+          $tagVersion = $Matches[1]
+
+          $cargoToml = Get-Content 'apps/src-tauri/Cargo.toml' -Raw
+          if ($cargoToml -notmatch '(?ms)\[package\].*?^\s*version\s*=\s*"([^"]+)"') {
+            throw "failed to read [package].version from apps/src-tauri/Cargo.toml"
+          }
+          $cargoVersion = $Matches[1]
+
+          $tauriConf = (Get-Content 'apps/src-tauri/tauri.conf.json' -Raw) | ConvertFrom-Json
+          $tauriVersion = $tauriConf.version
+
+          if ([string]::IsNullOrWhiteSpace($tauriVersion)) { throw "tauri.conf.json missing version" }
+
+          if ($cargoVersion -ne $tauriVersion) {
+            throw "version mismatch: apps/src-tauri/Cargo.toml=$cargoVersion apps/src-tauri/tauri.conf.json=$tauriVersion"
+          }
+          if ($cargoVersion -ne $tagVersion) {
+            throw "tag/version mismatch: tag=$normalizedTag expects $tagVersion, but app version is $cargoVersion"
+          }
+
+          Write-Host "Version OK: $cargoVersion (tag $normalizedTag)"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -173,7 +208,7 @@ jobs:
           attempt=1
           while [ "$attempt" -le "$max_attempts" ]; do
             echo "Build attempt $attempt/$max_attempts ..."
-            if pnpm dlx @tauri-apps/cli@2.9.6 build --bundles appimage,deb; then
+            if pnpm dlx @tauri-apps/cli@${{ env.TAURI_CLI_VERSION }} build --bundles appimage,deb; then
               exit 0
             fi
             if [ "$attempt" -lt "$max_attempts" ]; then
@@ -221,17 +256,13 @@ jobs:
             apps/src-tauri/target/release/bundle/**/*.rpm
             apps/src-tauri/target/release/portable/*.zip
           if-no-files-found: error
+          compression-level: 0
 
   release:
     needs: build_linux
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -245,6 +276,9 @@ jobs:
       - name: Resolve release meta
         id: meta
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG="${{ github.event.inputs.tag }}"
           REF="${{ github.event.inputs.ref || 'main' }}"
@@ -257,7 +291,7 @@ jobs:
             TAG="v$TAG"
           fi
 
-          TARGET_SHA="$(git rev-parse --verify "${REF}^{commit}")"
+          TARGET_SHA="$(gh api "repos/$GH_REPO/commits/$REF" --jq .sha)"
           if [[ -z "$TARGET_SHA" ]]; then
             echo "failed to resolve ref to commit: $REF"
             exit 1
@@ -274,6 +308,50 @@ jobs:
           echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
+      - name: Generate SHA256SUMS and manifest
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          cd release-assets
+
+          # Checksums for assets only (exclude checksum/manifest files themselves).
+          find . -type f ! -name 'SHA256SUMS' ! -name 'manifest.json' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's|  \./|  |' \
+            > SHA256SUMS
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(".")
+          sums_path = root / "SHA256SUMS"
+          entries = []
+
+          for line in sums_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+              continue
+            sha, rel = line.split(maxsplit=1)
+            rel = rel.strip()
+            p = root / rel
+            if not p.is_file():
+              raise SystemExit(f"SHA256SUMS refers to missing file: {rel}")
+            entries.append({"path": rel.replace("\\\\", "/"), "sha256": sha, "bytes": p.stat().st_size})
+
+          manifest = {
+            "tag": os.environ.get("RELEASE_TAG", ""),
+            "files": sorted(entries, key=lambda x: x["path"]),
+          }
+
+          (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -285,7 +363,7 @@ jobs:
           TITLE="CodexManager $TAG"
 
           mapfile -t FILES < <(find release-assets -type f \( \
-            -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.zip' \
+            -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.zip' -o -name 'SHA256SUMS' -o -name 'manifest.json' \
           \) | sort)
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "No release assets found."

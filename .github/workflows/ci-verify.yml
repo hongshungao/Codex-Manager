@@ -32,6 +32,11 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-verify-rust-stable-v1
+          workspaces: |
+            . -> target
+            apps/src-tauri -> target
 
       - name: Install frontend dependencies
         working-directory: apps
