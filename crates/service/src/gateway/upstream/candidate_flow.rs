@@ -14,7 +14,6 @@ pub(super) enum CandidateUpstreamDecision {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_candidate_upstream_flow<F>(
-    client: &reqwest::blocking::Client,
     storage: &Storage,
     method: &reqwest::Method,
     request: &Request,
@@ -40,6 +39,8 @@ pub(super) fn process_candidate_upstream_flow<F>(
 where
     F: FnMut(Option<&str>, u16, Option<&str>),
 {
+    let client = super::super::upstream_client_for_account(account.id.as_str());
+
     if super::deadline::is_expired(request_deadline) {
         return CandidateUpstreamDecision::Terminal {
             status_code: 504,

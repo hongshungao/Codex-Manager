@@ -95,8 +95,8 @@ use route_quality::record_route_quality;
 use request_gate::{request_gate_lock, RequestGateAcquireError};
 use runtime_config::{
     account_max_inflight_limit, request_gate_wait_timeout, trace_body_preview_max_bytes,
-    upstream_cookie, fresh_upstream_client,
-    upstream_client, upstream_stream_timeout, upstream_total_timeout, DEFAULT_GATEWAY_DEBUG,
+    upstream_cookie, fresh_upstream_client, fresh_upstream_client_for_account,
+    upstream_client, upstream_client_for_account, upstream_stream_timeout, upstream_total_timeout, DEFAULT_GATEWAY_DEBUG,
     DEFAULT_MODELS_CLIENT_VERSION,
 };
 pub(crate) use runtime_config::front_proxy_max_body_bytes;

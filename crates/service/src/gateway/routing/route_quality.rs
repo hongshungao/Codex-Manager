@@ -2,11 +2,18 @@ use codexmanager_core::storage::now_ts;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+const DEFAULT_ROUTE_HEALTH_SCORE: i32 = 100;
+const MIN_ROUTE_HEALTH_SCORE: i32 = 0;
+const MAX_ROUTE_HEALTH_SCORE: i32 = 200;
+
 #[derive(Debug, Clone, Default)]
 struct RouteQualityRecord {
     success_2xx: u32,
     challenge_403: u32,
     throttle_429: u32,
+    upstream_5xx: u32,
+    upstream_4xx: u32,
+    health_score: i32,
     updated_at: i64,
 }
 
@@ -36,19 +43,49 @@ where
 pub(crate) fn record_route_quality(account_id: &str, status_code: u16) {
     with_map_mut(|map, now| {
         let record = map.entry(account_id.to_string()).or_default();
+        if record.updated_at == 0 {
+            record.health_score = DEFAULT_ROUTE_HEALTH_SCORE;
+        }
         record.updated_at = now;
-        if (200..300).contains(&status_code) {
-            record.success_2xx = record.success_2xx.saturating_add(1);
-            return;
-        }
-        if status_code == 403 {
-            record.challenge_403 = record.challenge_403.saturating_add(1);
-            return;
-        }
-        if status_code == 429 {
-            record.throttle_429 = record.throttle_429.saturating_add(1);
+        let delta = route_health_delta(status_code);
+        record.health_score = (record.health_score + delta).clamp(MIN_ROUTE_HEALTH_SCORE, MAX_ROUTE_HEALTH_SCORE);
+        match status_code {
+            200..=299 => {
+                record.success_2xx = record.success_2xx.saturating_add(1);
+            }
+            403 => {
+                record.challenge_403 = record.challenge_403.saturating_add(1);
+            }
+            429 => {
+                record.throttle_429 = record.throttle_429.saturating_add(1);
+            }
+            500..=599 => {
+                record.upstream_5xx = record.upstream_5xx.saturating_add(1);
+            }
+            400..=499 => {
+                record.upstream_4xx = record.upstream_4xx.saturating_add(1);
+            }
+            _ => {}
         }
     });
+}
+
+pub(crate) fn route_health_score(account_id: &str) -> i32 {
+    let lock = ROUTE_QUALITY.get_or_init(|| Mutex::new(RouteQualityState::default()));
+    let Ok(mut state) = lock.lock() else {
+        return DEFAULT_ROUTE_HEALTH_SCORE;
+    };
+    let now = now_ts();
+    let Some(record) = state.entries.get(account_id).cloned() else {
+        return DEFAULT_ROUTE_HEALTH_SCORE;
+    };
+    if route_quality_record_expired(&record, now) {
+        state.entries.remove(account_id);
+        return DEFAULT_ROUTE_HEALTH_SCORE;
+    }
+    record
+        .health_score
+        .clamp(MIN_ROUTE_HEALTH_SCORE, MAX_ROUTE_HEALTH_SCORE)
 }
 
 #[allow(dead_code)]
@@ -103,6 +140,17 @@ fn route_quality_record_expired(record: &RouteQualityRecord, now: i64) -> bool {
     record.updated_at + ROUTE_QUALITY_TTL_SECS <= now
 }
 
+fn route_health_delta(status_code: u16) -> i32 {
+    match status_code {
+        200..=299 => 4,
+        429 => -15,
+        500..=599 => -10,
+        401 | 403 => -18,
+        400..=499 => -8,
+        _ => -2,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +163,7 @@ mod tests {
         record_route_quality("acc_a", 403);
         record_route_quality("acc_b", 200);
         assert!(route_quality_penalty("acc_a") > route_quality_penalty("acc_b"));
+        assert!(route_health_score("acc_b") > route_health_score("acc_a"));
     }
 
     #[test]
@@ -130,6 +179,9 @@ mod tests {
                 success_2xx: 0,
                 challenge_403: 1,
                 throttle_429: 0,
+                upstream_5xx: 0,
+                upstream_4xx: 0,
+                health_score: DEFAULT_ROUTE_HEALTH_SCORE,
                 updated_at: now - ROUTE_QUALITY_TTL_SECS - 1,
             },
         );
@@ -153,6 +205,9 @@ mod tests {
                 success_2xx: 0,
                 challenge_403: 1,
                 throttle_429: 0,
+                upstream_5xx: 0,
+                upstream_4xx: 0,
+                health_score: DEFAULT_ROUTE_HEALTH_SCORE,
                 updated_at: now - ROUTE_QUALITY_TTL_SECS - 1,
             },
         );

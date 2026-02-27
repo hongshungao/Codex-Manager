@@ -62,7 +62,7 @@ pub(super) fn try_openai_fallback(
     let resp = match build_request(client).send() {
         Ok(resp) => resp,
         Err(first_err) => {
-            let fresh = super::fresh_upstream_client();
+            let fresh = super::fresh_upstream_client_for_account(account.id.as_str());
             match build_request(&fresh).send() {
                 Ok(resp) => resp,
                 Err(second_err) => {

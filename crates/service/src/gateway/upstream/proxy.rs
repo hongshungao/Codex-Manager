@@ -112,7 +112,6 @@ pub(in super::super) fn proxy_validated_request(
     let upstream_fallback_base = super::super::resolve_upstream_fallback_base_url(base);
     let (url, url_alt) = super::super::request_rewrite::compute_upstream_url(base, &path);
 
-    let client = super::super::upstream_client();
     let upstream_cookie = super::super::upstream_cookie();
 
     let candidate_count = candidates.len();
@@ -262,7 +261,6 @@ pub(in super::super) fn proxy_validated_request(
         let mut last_attempt_error: Option<String> = None;
 
         let decision = process_candidate_upstream_flow(
-            &client,
             &storage,
             &method,
             request_ref,

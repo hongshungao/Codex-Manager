@@ -1,6 +1,7 @@
 use codexmanager_core::storage::{Account, Token};
+use super::route_quality::route_health_score;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 const ROUTE_STRATEGY_ENV: &str = "CODEXMANAGER_ROUTE_STRATEGY";
@@ -8,14 +9,26 @@ const ROUTE_MODE_ORDERED: u8 = 0;
 const ROUTE_MODE_BALANCED_ROUND_ROBIN: u8 = 1;
 const ROUTE_STRATEGY_ORDERED: &str = "ordered";
 const ROUTE_STRATEGY_BALANCED: &str = "balanced";
+const ROUTE_HEALTH_P2C_ENABLED_ENV: &str = "CODEXMANAGER_ROUTE_HEALTH_P2C_ENABLED";
+const ROUTE_HEALTH_P2C_ORDERED_WINDOW_ENV: &str = "CODEXMANAGER_ROUTE_HEALTH_P2C_ORDERED_WINDOW";
+const ROUTE_HEALTH_P2C_BALANCED_WINDOW_ENV: &str = "CODEXMANAGER_ROUTE_HEALTH_P2C_BALANCED_WINDOW";
+const DEFAULT_ROUTE_HEALTH_P2C_ENABLED: bool = true;
+const DEFAULT_ROUTE_HEALTH_P2C_ORDERED_WINDOW: usize = 3;
+const DEFAULT_ROUTE_HEALTH_P2C_BALANCED_WINDOW: usize = 6;
 
 static ROUTE_MODE: AtomicU8 = AtomicU8::new(ROUTE_MODE_ORDERED);
+static ROUTE_HEALTH_P2C_ENABLED: AtomicBool = AtomicBool::new(DEFAULT_ROUTE_HEALTH_P2C_ENABLED);
+static ROUTE_HEALTH_P2C_ORDERED_WINDOW: AtomicUsize =
+    AtomicUsize::new(DEFAULT_ROUTE_HEALTH_P2C_ORDERED_WINDOW);
+static ROUTE_HEALTH_P2C_BALANCED_WINDOW: AtomicUsize =
+    AtomicUsize::new(DEFAULT_ROUTE_HEALTH_P2C_BALANCED_WINDOW);
 static ROUTE_STATE: OnceLock<Mutex<RouteRoundRobinState>> = OnceLock::new();
 static ROUTE_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
 
 #[derive(Default)]
 struct RouteRoundRobinState {
     next_start_by_key_model: HashMap<String, usize>,
+    p2c_nonce_by_key_model: HashMap<String, u64>,
     manual_preferred_account_id: Option<String>,
 }
 
@@ -33,14 +46,15 @@ pub(crate) fn apply_route_strategy(
         return;
     }
 
-    if route_mode() != ROUTE_MODE_BALANCED_ROUND_ROBIN {
-        return;
+    let mode = route_mode();
+    if mode == ROUTE_MODE_BALANCED_ROUND_ROBIN {
+        let start = next_start_index(key_id, model, candidates.len());
+        if start > 0 {
+            candidates.rotate_left(start);
+        }
     }
 
-    let start = next_start_index(key_id, model, candidates.len());
-    if start > 0 {
-        candidates.rotate_left(start);
-    }
+    apply_health_p2c(candidates, key_id, model, mode);
 }
 
 fn rotate_to_manual_preferred_account(candidates: &mut [(Account, Token)]) -> bool {
@@ -100,6 +114,7 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
     if let Some(lock) = ROUTE_STATE.get() {
         if let Ok(mut state) = lock.lock() {
             state.next_start_by_key_model.clear();
+            state.p2c_nonce_by_key_model.clear();
         }
     }
     Ok(route_mode_label(mode))
@@ -168,6 +183,73 @@ fn next_start_index(key_id: &str, model: Option<&str>, candidate_count: usize) -
     start
 }
 
+fn apply_health_p2c(
+    candidates: &mut [(Account, Token)],
+    key_id: &str,
+    model: Option<&str>,
+    mode: u8,
+) {
+    if !route_health_p2c_enabled() {
+        return;
+    }
+    let window = route_health_window(mode).min(candidates.len());
+    if window <= 1 {
+        return;
+    }
+    let Some(challenger_idx) = p2c_challenger_index(key_id, model, window) else {
+        return;
+    };
+    let current_score = route_health_score(candidates[0].0.id.as_str());
+    let challenger_score = route_health_score(candidates[challenger_idx].0.id.as_str());
+    if challenger_score > current_score {
+        // 中文注释：只交换头部候选，避免“整段 rotate”过度扰动既有顺序与轮询语义。
+        candidates.swap(0, challenger_idx);
+    }
+}
+
+fn p2c_challenger_index(
+    key_id: &str,
+    model: Option<&str>,
+    candidate_count: usize,
+) -> Option<usize> {
+    if candidate_count < 2 {
+        return None;
+    }
+    let lock = ROUTE_STATE.get_or_init(|| Mutex::new(RouteRoundRobinState::default()));
+    let Ok(mut state) = lock.lock() else {
+        return None;
+    };
+    let key = key_model_key(key_id, model);
+    let nonce = state.p2c_nonce_by_key_model.entry(key.clone()).or_insert(0);
+    let seed = stable_hash_u64(format!("{key}|{nonce}").as_bytes());
+    *nonce = nonce.wrapping_add(1);
+    // 中文注释：当前候选列表已有顺序（ordered / round-robin 后），P2C 只从前 window 内挑一个挑战者
+    // 与“当前头部候选”对比，避免完全打乱轮询/排序语义。
+    let offset = (seed as usize) % (candidate_count - 1);
+    Some(offset + 1)
+}
+
+fn stable_hash_u64(input: &[u8]) -> u64 {
+    let mut hash = 14695981039346656037_u64;
+    for byte in input {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
+}
+
+fn route_health_p2c_enabled() -> bool {
+    ROUTE_HEALTH_P2C_ENABLED.load(Ordering::Relaxed)
+}
+
+fn route_health_window(mode: u8) -> usize {
+    if mode == ROUTE_MODE_BALANCED_ROUND_ROBIN {
+        ROUTE_HEALTH_P2C_BALANCED_WINDOW.load(Ordering::Relaxed)
+    } else {
+        ROUTE_HEALTH_P2C_ORDERED_WINDOW.load(Ordering::Relaxed)
+    }
+}
+
 fn key_model_key(key_id: &str, model: Option<&str>) -> String {
     format!(
         "{}|{}",
@@ -180,10 +262,29 @@ pub(super) fn reload_from_env() {
     let raw = std::env::var(ROUTE_STRATEGY_ENV).unwrap_or_default();
     let mode = parse_route_mode(raw.as_str()).unwrap_or(ROUTE_MODE_ORDERED);
     ROUTE_MODE.store(mode, Ordering::Relaxed);
+    ROUTE_HEALTH_P2C_ENABLED.store(
+        env_bool_or(ROUTE_HEALTH_P2C_ENABLED_ENV, DEFAULT_ROUTE_HEALTH_P2C_ENABLED),
+        Ordering::Relaxed,
+    );
+    ROUTE_HEALTH_P2C_ORDERED_WINDOW.store(
+        env_usize_or(
+            ROUTE_HEALTH_P2C_ORDERED_WINDOW_ENV,
+            DEFAULT_ROUTE_HEALTH_P2C_ORDERED_WINDOW,
+        ),
+        Ordering::Relaxed,
+    );
+    ROUTE_HEALTH_P2C_BALANCED_WINDOW.store(
+        env_usize_or(
+            ROUTE_HEALTH_P2C_BALANCED_WINDOW_ENV,
+            DEFAULT_ROUTE_HEALTH_P2C_BALANCED_WINDOW,
+        ),
+        Ordering::Relaxed,
+    );
 
     if let Some(lock) = ROUTE_STATE.get() {
         if let Ok(mut state) = lock.lock() {
             state.next_start_by_key_model.clear();
+            state.p2c_nonce_by_key_model.clear();
             state.manual_preferred_account_id = None;
         }
     }
@@ -193,11 +294,32 @@ fn ensure_route_config_loaded() {
     let _ = ROUTE_CONFIG_LOADED.get_or_init(|| reload_from_env());
 }
 
+fn env_bool_or(name: &str, default: bool) -> bool {
+    let Ok(raw) = std::env::var(name) else {
+        return default;
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    }
+}
+
+fn env_usize_or(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 fn clear_route_state_for_tests() {
+    super::route_quality::clear_route_quality_for_tests();
     if let Some(lock) = ROUTE_STATE.get() {
         if let Ok(mut state) = lock.lock() {
             state.next_start_by_key_model.clear();
+            state.p2c_nonce_by_key_model.clear();
+            state.manual_preferred_account_id = None;
         }
     }
 }
@@ -393,5 +515,31 @@ mod tests {
         );
         assert_eq!(current_route_strategy(), "balanced");
         assert!(set_route_strategy("unsupported").is_err());
+    }
+
+    #[test]
+    fn health_p2c_promotes_healthier_candidate_in_ordered_mode() {
+        let _guard = route_strategy_test_guard();
+        super::super::route_quality::clear_route_quality_for_tests();
+        std::env::set_var(ROUTE_HEALTH_P2C_ENABLED_ENV, "1");
+        // 中文注释：窗口=2 时挑战者固定为 index=1，确保测试稳定可复现。
+        std::env::set_var(ROUTE_HEALTH_P2C_ORDERED_WINDOW_ENV, "2");
+        std::env::set_var(ROUTE_STRATEGY_ENV, "ordered");
+        reload_from_env();
+        clear_route_state_for_tests();
+
+        for _ in 0..4 {
+            super::super::route_quality::record_route_quality("acc-a", 429);
+            super::super::route_quality::record_route_quality("acc-b", 200);
+        }
+
+        let mut candidates = candidate_list();
+        apply_route_strategy(&mut candidates, "gk-health-1", Some("gpt-5.3-codex"));
+        assert_eq!(account_ids(&candidates)[0], "acc-b");
+
+        std::env::remove_var(ROUTE_HEALTH_P2C_ENABLED_ENV);
+        std::env::remove_var(ROUTE_HEALTH_P2C_ORDERED_WINDOW_ENV);
+        std::env::remove_var(ROUTE_STRATEGY_ENV);
+        reload_from_env();
     }
 }

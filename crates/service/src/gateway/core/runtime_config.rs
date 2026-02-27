@@ -1,10 +1,12 @@
 use codexmanager_core::auth::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
 use reqwest::blocking::Client;
+use reqwest::Proxy;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 static UPSTREAM_CLIENT: OnceLock<Client> = OnceLock::new();
+static UPSTREAM_CLIENT_POOL: OnceLock<UpstreamClientPool> = OnceLock::new();
 static RUNTIME_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
 static REQUEST_GATE_WAIT_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS);
 static TRACE_BODY_PREVIEW_MAX_BYTES: AtomicUsize =
@@ -27,6 +29,7 @@ const DEFAULT_ACCOUNT_MAX_INFLIGHT: usize = 0;
 const DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS: u64 = 300;
 const DEFAULT_TRACE_BODY_PREVIEW_MAX_BYTES: usize = 0;
 const DEFAULT_FRONT_PROXY_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+const MAX_UPSTREAM_PROXY_POOL_SIZE: usize = 5;
 
 const ENV_REQUEST_GATE_WAIT_TIMEOUT_MS: &str = "CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS";
 const ENV_TRACE_BODY_PREVIEW_MAX_BYTES: &str = "CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES";
@@ -37,6 +40,25 @@ const ENV_UPSTREAM_STREAM_TIMEOUT_MS: &str = "CODEXMANAGER_UPSTREAM_STREAM_TIMEO
 const ENV_ACCOUNT_MAX_INFLIGHT: &str = "CODEXMANAGER_ACCOUNT_MAX_INFLIGHT";
 const ENV_TOKEN_EXCHANGE_CLIENT_ID: &str = "CODEXMANAGER_CLIENT_ID";
 const ENV_TOKEN_EXCHANGE_ISSUER: &str = "CODEXMANAGER_ISSUER";
+const ENV_PROXY_LIST: &str = "CODEXMANAGER_PROXY_LIST";
+
+#[derive(Default)]
+struct UpstreamClientPool {
+    proxies: Vec<String>,
+    clients: Vec<Client>,
+}
+
+impl UpstreamClientPool {
+    fn client_for_account(&self, account_id: &str) -> Option<&Client> {
+        let idx = stable_proxy_index(account_id, self.clients.len())?;
+        self.clients.get(idx)
+    }
+
+    fn proxy_for_account(&self, account_id: &str) -> Option<&str> {
+        let idx = stable_proxy_index(account_id, self.proxies.len())?;
+        self.proxies.get(idx).map(String::as_str)
+    }
+}
 
 pub(crate) fn upstream_client() -> &'static Client {
     UPSTREAM_CLIENT.get_or_init(|| {
@@ -50,22 +72,57 @@ pub(crate) fn fresh_upstream_client() -> Client {
     build_upstream_client()
 }
 
+pub(crate) fn upstream_client_for_account(account_id: &str) -> &'static Client {
+    ensure_runtime_config_loaded();
+    let pool = upstream_client_pool();
+    pool.client_for_account(account_id).unwrap_or_else(upstream_client)
+}
+
+pub(crate) fn fresh_upstream_client_for_account(account_id: &str) -> Client {
+    ensure_runtime_config_loaded();
+    let pool = upstream_client_pool();
+    if let Some(proxy_url) = pool.proxy_for_account(account_id) {
+        return build_upstream_client_with_proxy(Some(proxy_url));
+    }
+    build_upstream_client()
+}
+
 fn upstream_connect_timeout() -> Duration {
     ensure_runtime_config_loaded();
     Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS.load(Ordering::Relaxed))
 }
 
 fn build_upstream_client() -> Client {
-    Client::builder()
+    build_upstream_client_with_proxy(None)
+}
+
+fn build_upstream_client_with_proxy(proxy_url: Option<&str>) -> Client {
+    let mut builder = Client::builder()
         // 中文注释：显式关闭总超时，避免长时流式响应在客户端层被误判超时中断。
         .timeout(None::<Duration>)
         // 中文注释：连接阶段设置超时，避免网络异常时线程长期卡死占满并发槽位。
         .connect_timeout(upstream_connect_timeout())
         .pool_max_idle_per_host(32)
         .pool_idle_timeout(Some(Duration::from_secs(90)))
-        .tcp_keepalive(Some(Duration::from_secs(30)))
-        .build()
-        .unwrap_or_else(|_| Client::new())
+        .tcp_keepalive(Some(Duration::from_secs(30)));
+    if let Some(proxy_url) = proxy_url {
+        let proxy = match Proxy::all(proxy_url) {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                log::warn!(
+                    "event=gateway_proxy_pool_invalid_proxy proxy={} err={}",
+                    proxy_url,
+                    err
+                );
+                return build_upstream_client();
+            }
+        };
+        builder = builder.proxy(proxy);
+    }
+    builder.build().unwrap_or_else(|err| {
+        log::warn!("event=gateway_upstream_client_build_failed err={}", err);
+        Client::new()
+    })
 }
 
 pub(crate) fn upstream_total_timeout() -> Option<Duration> {
@@ -192,6 +249,39 @@ fn ensure_runtime_config_loaded() {
     let _ = RUNTIME_CONFIG_LOADED.get_or_init(|| reload_from_env());
 }
 
+fn upstream_client_pool() -> &'static UpstreamClientPool {
+    UPSTREAM_CLIENT_POOL.get_or_init(build_upstream_client_pool)
+}
+
+fn build_upstream_client_pool() -> UpstreamClientPool {
+    ensure_runtime_config_loaded();
+    let raw_proxies = parse_proxy_list_env();
+    if raw_proxies.is_empty() {
+        return UpstreamClientPool::default();
+    }
+    let mut proxies = Vec::with_capacity(raw_proxies.len());
+    let mut clients = Vec::with_capacity(raw_proxies.len());
+    for proxy in raw_proxies.into_iter() {
+        if let Err(err) = Proxy::all(proxy.as_str()) {
+            log::warn!(
+                "event=gateway_proxy_pool_invalid_proxy proxy={} err={}",
+                proxy,
+                err
+            );
+            continue;
+        }
+        let client = build_upstream_client_with_proxy(Some(proxy.as_str()));
+        proxies.push(proxy);
+        clients.push(client);
+    }
+    if clients.is_empty() {
+        UpstreamClientPool::default()
+    } else {
+        log::info!("event=gateway_proxy_pool_initialized size={}", clients.len());
+        UpstreamClientPool { proxies, clients }
+    }
+}
+
 fn upstream_cookie_cell() -> &'static RwLock<Option<String>> {
     UPSTREAM_COOKIE.get_or_init(|| RwLock::new(None))
 }
@@ -221,6 +311,39 @@ fn env_usize_or(name: &str, default: usize) -> usize {
     env_non_empty(name)
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(default)
+}
+
+fn parse_proxy_list_env() -> Vec<String> {
+    let Some(raw) = env_non_empty(ENV_PROXY_LIST) else {
+        return Vec::new();
+    };
+    raw.split(|ch| ch == ',' || ch == ';' || ch == '\n' || ch == '\r')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .take(MAX_UPSTREAM_PROXY_POOL_SIZE)
+        .map(str::to_string)
+        .collect()
+}
+
+fn stable_proxy_index(account_id: &str, size: usize) -> Option<usize> {
+    if size == 0 {
+        return None;
+    }
+    if size == 1 {
+        return Some(0);
+    }
+    let hash = stable_account_hash(account_id);
+    Some((hash as usize) % size)
+}
+
+fn stable_account_hash(account_id: &str) -> u64 {
+    // 中文注释：FNV-1a 保证跨进程稳定，不受 std 默认随机种子影响。
+    let mut hash = 14695981039346656037_u64;
+    for byte in account_id.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
 }
 
 #[cfg(test)]
@@ -268,5 +391,25 @@ mod tests {
             token_exchange_default_issuer(),
             "https://issuer.example".to_string()
         );
+    }
+
+    #[test]
+    fn parse_proxy_list_env_limits_to_five_entries() {
+        let _guard = EnvGuard::set(
+            ENV_PROXY_LIST,
+            "http://p1:8080,http://p2:8080;http://p3:8080\nhttp://p4:8080\rhttp://p5:8080,http://p6:8080",
+        );
+        let parsed = parse_proxy_list_env();
+        assert_eq!(parsed.len(), MAX_UPSTREAM_PROXY_POOL_SIZE);
+        assert_eq!(parsed.first().map(String::as_str), Some("http://p1:8080"));
+        assert_eq!(parsed.last().map(String::as_str), Some("http://p5:8080"));
+    }
+
+    #[test]
+    fn stable_proxy_index_is_deterministic() {
+        let idx1 = stable_proxy_index("account-42", 5);
+        let idx2 = stable_proxy_index("account-42", 5);
+        assert_eq!(idx1, idx2);
+        assert!(idx1.expect("index") < 5);
     }
 }

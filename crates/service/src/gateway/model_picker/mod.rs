@@ -19,7 +19,6 @@ pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
     let upstream_fallback_base = super::resolve_upstream_fallback_base_url(base);
     let path = super::normalize_models_path("/v1/models");
     let method = Method::GET;
-    let client = super::upstream_client();
     let upstream_cookie = super::upstream_cookie();
     candidates.sort_by_key(|(account, _)| {
         (
@@ -29,8 +28,9 @@ pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
     });
     let mut last_error = "models request failed".to_string();
     for (account, mut token) in candidates {
+        let client = super::upstream_client_for_account(account.id.as_str());
         match send_models_request(
-            &client,
+            client,
             &storage,
             &method,
             &upstream_base,
@@ -45,7 +45,7 @@ pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
                 if err.contains("text/html") || err.contains("cloudflare") {
                     if let Some(fallback_base) = upstream_fallback_base.as_deref() {
                         if let Ok(response_body) = send_models_request(
-                            &client,
+                            client,
                             &storage,
                             &method,
                             fallback_base,

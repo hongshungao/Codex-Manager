@@ -89,7 +89,7 @@ pub(super) fn send_upstream_request(
         Err(first_err) => {
             // 中文注释：进程启动后才开启系统代理时，旧单例 client 可能仍走旧网络路径；
             // 这里用 fresh client 立刻重试一次，避免必须手动重连服务。
-            let fresh = super::super::fresh_upstream_client();
+            let fresh = super::super::fresh_upstream_client_for_account(account.id.as_str());
             match build_request(&fresh).send() {
                 Ok(resp) => Ok(resp),
                 Err(_) => Err(first_err),
