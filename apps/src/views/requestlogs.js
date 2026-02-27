@@ -9,7 +9,7 @@ const REQUEST_LOG_DOM_RECYCLE_TO = 180;
 const REQUEST_LOG_SCROLL_BUFFER = 180;
 const REQUEST_LOG_FALLBACK_ROW_HEIGHT = 54;
 const REQUEST_LOG_COLUMN_COUNT = 9;
-const REQUEST_LOG_NEAR_BOTTOM_MAX_BATCHES = 4;
+const REQUEST_LOG_NEAR_BOTTOM_MAX_BATCHES = 1;
 
 const requestLogWindowState = {
   filter: "all",
@@ -87,18 +87,16 @@ function matchesStatusFilter(item, filter) {
 }
 
 function buildRequestLogIdentity(item, fallbackIndex) {
+  if (item && typeof item === "object" && item.id != null && String(item.id).trim()) {
+    return String(item.id);
+  }
+  // 中文注释：identity 用于“增量追加”判断，避免把 error/path 等长字段拼进 key 导致大量分配与 GC。
   return [
-    item?.id ?? "",
     item?.createdAt ?? "",
-    item?.accountLabel ?? "",
+    item?.method ?? "",
+    item?.statusCode ?? "",
     item?.accountId ?? "",
     item?.keyId ?? "",
-    item?.method ?? "",
-    item?.requestPath ?? "",
-    item?.model ?? "",
-    item?.reasoningEffort ?? "",
-    item?.statusCode ?? "",
-    item?.error ?? "",
     fallbackIndex,
   ].join("|");
 }
@@ -226,6 +224,7 @@ function createRequestLogRow(item, index) {
   const pathText = document.createElement("span");
   pathText.className = "request-path";
   pathText.textContent = item.requestPath || "-";
+  pathText.title = item.requestPath || "-";
   const copyBtn = document.createElement("button");
   copyBtn.className = "ghost path-copy";
   copyBtn.type = "button";
@@ -271,7 +270,14 @@ function createRequestLogRow(item, index) {
 
   const cellError = document.createElement("td");
   cellError.className = "requestlog-col requestlog-col-error";
-  cellError.textContent = item.error || "-";
+  const errorText = item.error ? String(item.error) : "-";
+  const errorSpan = document.createElement("span");
+  errorSpan.className = "request-error";
+  errorSpan.textContent = errorText;
+  if (item.error) {
+    errorSpan.title = String(item.error);
+  }
+  cellError.appendChild(errorSpan);
   row.appendChild(cellError);
   return row;
 }
@@ -338,16 +344,13 @@ function recycleLogRowsIfNeeded() {
     return;
   }
   const removeCount = rows.length - REQUEST_LOG_DOM_RECYCLE_TO;
-  let measuredHeight = 0;
-  for (let i = 0; i < removeCount; i += 1) {
-    measuredHeight += getRowHeight(rows[i]);
+  // 中文注释：避免对每一行调用 getBoundingClientRect/offsetHeight（强制同步布局，滚动时很容易卡顿）。
+  // 这里抽样一行高度来估算回收高度即可；配合 error/path 的摘要展示，行高波动很小。
+  const sampleHeight = getRowHeight(rows[0]);
+  if (Number.isFinite(sampleHeight) && sampleHeight > 0) {
+    requestLogWindowState.recycledRowHeight = sampleHeight;
   }
-  if (measuredHeight > 0) {
-    requestLogWindowState.recycledRowHeight = measuredHeight / removeCount;
-  }
-  const removedHeight = measuredHeight > 0
-    ? measuredHeight
-    : requestLogWindowState.recycledRowHeight * removeCount;
+  const removedHeight = requestLogWindowState.recycledRowHeight * removeCount;
   for (let i = 0; i < removeCount; i += 1) {
     rows[i].remove();
   }

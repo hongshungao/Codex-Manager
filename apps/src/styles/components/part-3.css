@@ -33,7 +33,6 @@
 .requestlog-table tbody td:nth-child(5),
 .requestlog-table tbody td:nth-child(9) {
   max-width: 360px;
-  word-break: break-word;
 }
 
 .requestlog-col-account .cell-stack {
@@ -60,10 +59,15 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .request-path {
-  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .path-copy {
@@ -72,6 +76,14 @@
   font-size: 11px;
   line-height: 1.2;
   flex: 0 0 auto;
+}
+
+.request-error {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .data-table tbody td:first-child {
