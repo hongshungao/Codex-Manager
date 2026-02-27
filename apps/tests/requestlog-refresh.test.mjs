@@ -65,7 +65,9 @@ test("requestlog refresh reuses in-flight request for same query", async () => {
     pending.resolve({ items: [{ id: "one" }] });
     assert.equal(await first, true);
     assert.equal(await second, true);
-    assert.deepEqual(state.requestLogList, [{ id: "one" }]);
+    assert.equal(state.requestLogList.length, 1);
+    assert.equal(state.requestLogList[0].id, "one");
+    assert.equal(state.requestLogList[0].__identity, "one");
   } finally {
     restore();
   }
@@ -96,11 +98,15 @@ test("requestlog refresh keeps latest request effective", async () => {
 
     newPending.resolve({ items: [{ id: "newest" }] });
     assert.equal(await newRequest, true);
-    assert.deepEqual(state.requestLogList, [{ id: "newest" }]);
+    assert.equal(state.requestLogList.length, 1);
+    assert.equal(state.requestLogList[0].id, "newest");
+    assert.equal(state.requestLogList[0].__identity, "newest");
 
     oldPending.resolve({ items: [{ id: "stale" }] });
     assert.equal(await oldRequest, false);
-    assert.deepEqual(state.requestLogList, [{ id: "newest" }]);
+    assert.equal(state.requestLogList.length, 1);
+    assert.equal(state.requestLogList[0].id, "newest");
+    assert.equal(state.requestLogList[0].__identity, "newest");
   } finally {
     restore();
   }

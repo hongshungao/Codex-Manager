@@ -25,7 +25,7 @@ env:
   TAURI_CLI_VERSION: 2.9.6
 
 concurrency:
-  group: ${{ format('tag-{0}', startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag)) }}
+  group: ${{ format('{0}-tag-{1}', github.workflow, startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag)) }}
   cancel-in-progress: false
 
 jobs:
@@ -329,9 +329,14 @@ jobs:
             gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA"
             gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
           else
+            CREATE_ARGS=(--repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes)
             if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
-              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes --prerelease
-            else
-              gh release create "$TAG" "${FILES[@]}" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes
+              CREATE_ARGS+=(--prerelease)
+            fi
+            # 中文注释：多平台 workflow 可能并行写同一个 tag；create 失败时降级为 edit+upload。
+            if ! gh release create "$TAG" "${FILES[@]}" "${CREATE_ARGS[@]}"; then
+              echo "release create failed, retrying as edit+upload..."
+              gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA"
+              gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
             fi
           fi
