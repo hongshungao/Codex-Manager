@@ -54,17 +54,16 @@ export function bindFilterEvents({
       return;
     }
     accountRenderTaskScheduled = true;
-    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(() => {
-        accountRenderTaskScheduled = false;
-        renderAccountsView();
-      });
-      return;
-    }
-    setTimeout(() => {
+    const flush = () => {
       accountRenderTaskScheduled = false;
       renderAccountsView();
-    }, 0);
+    };
+    // 中文注释：renderAccountsView 内部已做“合帧渲染”调度；这里用微任务去重即可，避免额外 rAF 带来多一帧延迟。
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(flush);
+      return;
+    }
+    Promise.resolve().then(flush);
   };
 
   if (dom.refreshRequestLogs) {

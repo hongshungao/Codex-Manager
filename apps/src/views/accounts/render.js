@@ -17,10 +17,13 @@ let accountRowsEventsBound = false;
 let accountRowHandlers = null;
 let accountLookupById = new Map();
 let accountRowNodesById = new Map();
-let groupOptionsCacheKey = "";
+let groupOptionsAccountsRef = null;
 let groupOptionsCache = [];
-let groupSelectRenderedKey = "";
+let groupSelectRenderedKey = null;
 let refreshProgressNode = null;
+let derivedCacheAccountsRef = null;
+let derivedCacheUsageRef = null;
+let derivedCacheMap = new Map();
 
 function ensureRefreshProgressNode() {
   if (refreshProgressNode?.isConnected) {
@@ -61,23 +64,16 @@ export function renderAccountsRefreshProgress(progress = getRefreshAllProgress()
   node.textContent = lastTaskLabel ? `${primaryText} · 最近完成：${lastTaskLabel}` : primaryText;
 }
 
-function getGroupOptionsCacheKey(accounts) {
-  const list = Array.isArray(accounts) ? accounts : [];
-  return list
-    .map((account) => `${account.id || ""}:${normalizeGroupName(account.groupName)}`)
-    .join("|");
-}
-
 function getGroupOptions(accounts) {
-  const nextKey = getGroupOptionsCacheKey(accounts);
-  if (nextKey !== groupOptionsCacheKey) {
-    groupOptionsCacheKey = nextKey;
-    groupOptionsCache = buildGroupFilterOptions(accounts);
+  const list = Array.isArray(accounts) ? accounts : [];
+  if (groupOptionsAccountsRef !== accounts) {
+    groupOptionsAccountsRef = accounts;
+    groupOptionsCache = buildGroupFilterOptions(list);
   } else if (Array.isArray(groupOptionsCache) && groupOptionsCache.length > 0) {
     // 保持“全部分组”计数与当前账号数量一致。
     groupOptionsCache[0] = {
       ...groupOptionsCache[0],
-      count: Array.isArray(accounts) ? accounts.length : 0,
+      count: list.length,
     };
   }
   return groupOptionsCache;
@@ -115,6 +111,16 @@ function syncGroupFilterSelect(options, optionsKey) {
   if (!nextValues.has(state.accountGroupFilter)) {
     select.value = "all";
   }
+}
+
+function getAccountDerivedMapCached(accounts, usageSource) {
+  if (derivedCacheAccountsRef === accounts && derivedCacheUsageRef === usageSource) {
+    return derivedCacheMap;
+  }
+  derivedCacheAccountsRef = accounts;
+  derivedCacheUsageRef = usageSource;
+  derivedCacheMap = buildAccountDerivedMap(accounts, usageSource);
+  return derivedCacheMap;
 }
 
 function renderMiniUsageLine(label, remain, secondary) {
@@ -488,8 +494,8 @@ export function renderAccounts({ onUpdateSort, onOpenUsage, onSetCurrentAccount,
   ensureAccountRowsEventsBound();
   renderAccountsRefreshProgress();
   accountRowHandlers = { onUpdateSort, onOpenUsage, onSetCurrentAccount, onDelete };
-  syncGroupFilterSelect(getGroupOptions(state.accountList), groupOptionsCacheKey);
-  const accountDerivedMap = buildAccountDerivedMap(state.accountList, state.usageList);
+  syncGroupFilterSelect(getGroupOptions(state.accountList), state.accountList);
+  const accountDerivedMap = getAccountDerivedMapCached(state.accountList, state.usageList);
 
   const filtered = filterAccounts(
     state.accountList,

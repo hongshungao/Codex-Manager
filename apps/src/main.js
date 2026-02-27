@@ -53,7 +53,7 @@ import {
 import { renderApiKeys, openApiKeyModal, closeApiKeyModal, populateApiKeyModelSelect } from "./views/apikeys";
 import { openUsageModal, closeUsageModal, renderUsageSnapshot } from "./views/usage";
 import { renderRequestLogs } from "./views/requestlogs";
-import { renderAllViews, renderAccountsOnly, renderCurrentView } from "./views/renderers";
+import { renderAccountsOnly, renderCurrentView } from "./views/renderers";
 import { buildRenderActions } from "./views/render-actions";
 import { createNavigationHandlers } from "./views/navigation";
 import { bindMainEvents } from "./views/event-bindings";
@@ -1023,7 +1023,7 @@ function bootstrap() {
   serviceLifecycle.restoreServiceAddr();
   serviceLifecycle.updateServiceToggle();
   bindEvents();
-  renderAllViews(buildMainRenderActions());
+  renderCurrentPageView();
   updateRequestLogFilterButtons();
   scheduleStartupUpdateCheck();
   void serviceLifecycle.autoStartService().finally(() => {
