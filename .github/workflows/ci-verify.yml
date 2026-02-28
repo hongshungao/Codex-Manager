@@ -56,3 +56,6 @@ jobs:
       - name: Frontend build
         working-directory: apps
         run: pnpm run build
+
+      - name: Build web (embedded-ui)
+        run: cargo build -p codexmanager-web --features embedded-ui

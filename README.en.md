@@ -59,6 +59,7 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 ├─ crates/              # Rust core/service
 │  ├─ core
 │  ├─ service
+│  ├─ start              # Service edition starter (launches service + web)
 │  └─ web                # Service edition Web UI (optional embedded assets + /api/rpc proxy)
 ├─ scripts/             # build/release scripts
 ├─ portable/            # portable output
@@ -118,6 +119,7 @@ pnpm -C apps run build
 cargo test --workspace
 cargo build -p codexmanager-service --release
 cargo build -p codexmanager-web --release
+cargo build -p codexmanager-start --release
 
 # Release/containers: embed frontend assets into codexmanager-web (single binary)
 pnpm -C apps run build
@@ -165,12 +167,24 @@ All workflows are `workflow_dispatch` only.
 - `release-service-windows.yml`
   - Purpose: Windows Service edition packaging and release publishing (zip)
   - Trigger: manual only
+  - Inputs:
+    - `tag` (required)
+    - `ref` (default: `main`)
+    - `run_verify` (default: `true`)
 - `release-service-linux.yml`
   - Purpose: Linux Service edition packaging and release publishing (zip)
   - Trigger: manual only
+  - Inputs:
+    - `tag` (required)
+    - `ref` (default: `main`)
+    - `run_verify` (default: `true`)
 - `release-service-macos.yml`
   - Purpose: macOS Service edition packaging and release publishing (zip)
   - Trigger: manual only
+  - Inputs:
+    - `tag` (required)
+    - `ref` (default: `main`)
+    - `run_verify` (default: `true`)
 
 ## Script Reference
 ### `scripts/rebuild.ps1` (Windows)

@@ -59,6 +59,7 @@
 ├─ crates/              # Rust core/service
 │  ├─ core
 │  ├─ service
+│  ├─ start              # Service 版本一键启动器（拉起 service + web）
 │  └─ web                # Service 版本 Web UI（可内嵌静态资源 + /api/rpc 代理）
 ├─ scripts/             # 构建与发布脚本
 ├─ portable/            # 便携版输出目录
@@ -118,6 +119,7 @@ pnpm -C apps run build
 cargo test --workspace
 cargo build -p codexmanager-service --release
 cargo build -p codexmanager-web --release
+cargo build -p codexmanager-start --release
 
 # 发行物/容器：将前端静态资源打进 codexmanager-web（二进制单文件）
 pnpm -C apps run build
@@ -165,12 +167,24 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 -Bundle nsis -CleanDist -Porta
 - `release-service-windows.yml`
   - 用途：Windows Service 版本打包与 release 发布（zip）
   - 触发：手动
+  - 输入：
+    - `tag`（必填）
+    - `ref`（默认 `main`）
+    - `run_verify`（默认 `true`，可关闭）
 - `release-service-linux.yml`
   - 用途：Linux Service 版本打包与 release 发布（zip）
   - 触发：手动
+  - 输入：
+    - `tag`（必填）
+    - `ref`（默认 `main`）
+    - `run_verify`（默认 `true`，可关闭）
 - `release-service-macos.yml`
   - 用途：macOS Service 版本打包与 release 发布（zip）
   - 触发：手动
+  - 输入：
+    - `tag`（必填）
+    - `ref`（默认 `main`）
+    - `run_verify`（默认 `true`，可关闭）
 
 ## 脚本说明
 ### `scripts/rebuild.ps1`（Windows）
