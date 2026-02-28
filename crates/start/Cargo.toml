@@ -7,3 +7,5 @@ edition = "2021"
 ctrlc = "3"
 webbrowser = "0.8"
 
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
