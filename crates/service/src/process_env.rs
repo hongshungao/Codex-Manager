@@ -2,6 +2,7 @@ use rand::RngCore;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::fs::OpenOptions;
 
 const ENV_CANDIDATES: [&str; 3] = ["codexmanager.env", "CodexManager.env", ".env"];
 const DEFAULT_DB_FILENAME: &str = "codexmanager.db";
@@ -158,23 +159,54 @@ pub(crate) fn read_rpc_token_from_env_or_file() -> Option<String> {
     read_rpc_token_from_file(&rpc_token_file_path())
 }
 
-fn write_text_file(path: &Path, contents: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut f = fs::File::create(path)?;
-    f.write_all(contents.as_bytes())?;
-    Ok(())
-}
-
-pub(crate) fn persist_rpc_token_best_effort(token: &str) {
+/// 尝试把 token 写入 token file（仅在文件不存在或为空时）。
+///
+/// - 成功写入返回 `None`
+/// - 若检测到文件已存在且可读（可能是并发进程刚创建），返回 `Some(existing_token)`，
+///   调用方应优先使用返回的 token 以避免多进程启动时 token 不一致。
+pub(crate) fn persist_rpc_token_if_missing(token: &str) -> Option<String> {
     let path = rpc_token_file_path();
-    if let Err(err) = write_text_file(&path, token) {
-        log::warn!(
-            "persist rpc token failed: {} ({})",
-            path.to_string_lossy(),
-            err
-        );
+
+    // 快路径：文件已存在且非空
+    if let Some(existing) = read_rpc_token_from_file(&path) {
+        return Some(existing);
+    }
+
+    if let Some(parent) = path.parent() {
+        if let Err(err) = fs::create_dir_all(parent) {
+            log::warn!(
+                "persist rpc token failed: {} ({})",
+                path.to_string_lossy(),
+                err
+            );
+            return None;
+        }
+    }
+
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            if let Err(err) = f.write_all(token.as_bytes()) {
+                log::warn!(
+                    "persist rpc token failed: {} ({})",
+                    path.to_string_lossy(),
+                    err
+                );
+            }
+            None
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => read_rpc_token_from_file(&path),
+        Err(err) => {
+            log::warn!(
+                "persist rpc token failed: {} ({})",
+                path.to_string_lossy(),
+                err
+            );
+            None
+        }
     }
 }
 

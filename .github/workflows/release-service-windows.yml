@@ -148,7 +148,7 @@ jobs:
         run: cargo build -p codexmanager-service --release
 
       - name: Build web binary
-        run: cargo build -p codexmanager-web --release
+        run: cargo build -p codexmanager-web --release --features embedded-ui
 
       - name: Stage service package
         shell: pwsh
@@ -165,30 +165,7 @@ jobs:
           $pkgDir = Join-Path $stageRoot $pkgName
 
           Remove-Item -Recurse -Force $pkgDir -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force (Join-Path $pkgDir "web") | Out-Null
-
-          if (-not (Test-Path "apps/dist" -PathType Container)) {
-            throw "apps/dist not found; did frontend build run?"
-          }
-          Copy-Item -Recurse -Force "apps/dist/*" (Join-Path $pkgDir "web")
-
-          @"
-          CodexManager Service 版本（Windows）
-
-          1) 先启动：codexmanager-service.exe
-          2) 再启动：codexmanager-web.exe（会自动打开浏览器）
-
-          可选：在同目录创建 codexmanager.env 设置环境变量（不会覆盖系统环境变量）。
-          "@ | Set-Content -Encoding UTF8 (Join-Path $pkgDir "SERVICE-README.txt")
-
-          @"
-          # 文件名候选（优先级）：codexmanager.env -> CodexManager.env -> .env
-          # CODEXMANAGER_SERVICE_ADDR=localhost:48760
-          # CODEXMANAGER_WEB_ADDR=localhost:48761
-          # CODEXMANAGER_DB_PATH=./codexmanager.db
-          # 固定 /rpc token（否则自动生成并落盘到 codexmanager.rpc-token）
-          # CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
-          "@ | Set-Content -Encoding UTF8 (Join-Path $pkgDir "codexmanager.env.sample")
+          New-Item -ItemType Directory -Force $pkgDir | Out-Null
 
           $serviceBin = "target/release/codexmanager-service.exe"
           if (-not (Test-Path $serviceBin -PathType Leaf)) { throw "service binary not found: $serviceBin" }

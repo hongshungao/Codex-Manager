@@ -150,10 +150,16 @@ fn build_rpc_auth_token() -> String {
         return token;
     }
 
-    let token = process_env::generate_rpc_token_hex_32bytes();
-    std::env::set_var("CODEXMANAGER_RPC_TOKEN", &token);
-    process_env::persist_rpc_token_best_effort(&token);
-    token
+    let generated = process_env::generate_rpc_token_hex_32bytes();
+    std::env::set_var(process_env::ENV_RPC_TOKEN, &generated);
+
+    // 中文注释：多进程启动（例如 docker compose）时，避免两个进程同时生成不同 token 并互相覆盖。
+    if let Some(existing) = process_env::persist_rpc_token_if_missing(&generated) {
+        std::env::set_var(process_env::ENV_RPC_TOKEN, &existing);
+        return existing;
+    }
+
+    generated
 }
 
 pub fn rpc_auth_token() -> &'static str {

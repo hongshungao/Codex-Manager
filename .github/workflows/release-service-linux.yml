@@ -151,7 +151,7 @@ jobs:
         run: cargo build -p codexmanager-service --release
 
       - name: Build web binary
-        run: cargo build -p codexmanager-web --release
+        run: cargo build -p codexmanager-web --release --features embedded-ui
 
       - name: Stage service package
         shell: bash
@@ -170,28 +170,7 @@ jobs:
           pkg_dir="${stage_root}/${pkg_name}"
 
           rm -rf "$pkg_dir"
-          mkdir -p "$pkg_dir/web"
-
-          test -d "apps/dist" || { echo "apps/dist not found; did frontend build run?"; exit 1; }
-          cp -R "apps/dist/." "$pkg_dir/web/"
-
-          cat > "${pkg_dir}/SERVICE-README.txt" <<'EOF'
-          CodexManager Service 版本（Linux）
-
-          1) 先启动：./codexmanager-service
-          2) 再启动：./codexmanager-web（会自动打开浏览器）
-
-          可选：在同目录创建 codexmanager.env 设置环境变量（不会覆盖系统环境变量）。
-          EOF
-
-          cat > "${pkg_dir}/codexmanager.env.sample" <<'EOF'
-          # 文件名候选（优先级）：codexmanager.env -> CodexManager.env -> .env
-          # CODEXMANAGER_SERVICE_ADDR=localhost:48760
-          # CODEXMANAGER_WEB_ADDR=localhost:48761
-          # CODEXMANAGER_DB_PATH=./codexmanager.db
-          # 固定 /rpc token（否则自动生成并落盘到 codexmanager.rpc-token）
-          # CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
-          EOF
+          mkdir -p "$pkg_dir"
 
           service_bin="target/release/codexmanager-service"
           web_bin="target/release/codexmanager-web"

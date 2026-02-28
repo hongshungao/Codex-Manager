@@ -3,12 +3,17 @@ name = "codexmanager-web"
 version.workspace = true
 edition = "2021"
 
+[features]
+# 发行物/容器内使用：将前端静态资源（apps/dist）打进二进制，做到“单文件启动”。
+embedded-ui = ["dep:include_dir", "dep:mime_guess"]
+
 [dependencies]
 codexmanager-service = { path = "../service" }
 axum = "0.8"
 bytes = "1"
+include_dir = { version = "0.7", optional = true }
+mime_guess = { version = "2", optional = true }
 reqwest = { version = "0.12", features = ["rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
 tower-http = { version = "0.6", features = ["fs"] }
 webbrowser = "0.8"
-
