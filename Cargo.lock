@@ -238,6 +238,7 @@ dependencies = [
  "tokio",
  "tower-http",
  "webbrowser",
+ "winres",
 ]
 
 [[package]]

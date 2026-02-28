@@ -17,3 +17,6 @@ reqwest = { version = "0.12", features = ["rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
 tower-http = { version = "0.6", features = ["fs"] }
 webbrowser = "0.8"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

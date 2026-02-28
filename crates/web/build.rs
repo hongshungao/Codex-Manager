@@ -1,8 +1,6 @@
 #[cfg(windows)]
 fn main() {
-    // 关键：本 crate 既作为独立二进制发布（service 版），也会被桌面端（Tauri）作为依赖引用。
-    // 若在依赖构建时也注入 Windows 资源，可能导致链接阶段资源冲突/损坏（例如 LNK1123）。
-    // 仅在“主包构建”（`cargo build -p codexmanager-service` / workflow 打包）时才嵌入图标。
+    // 仅在主包构建时嵌入图标，避免作为依赖参与其它目标（例如桌面端）链接时引入资源冲突风险。
     if std::env::var_os("CARGO_PRIMARY_PACKAGE").is_none() {
         return;
     }
@@ -24,3 +22,4 @@ fn main() {
 
 #[cfg(not(windows))]
 fn main() {}
+
