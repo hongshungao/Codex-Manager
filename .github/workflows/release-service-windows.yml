@@ -100,12 +100,22 @@ jobs:
             throw "tag must look like vX.Y.Z or vX.Y.Z-suffix, got: $normalizedTag"
           }
           $tagVersion = $Matches[1]
-
-          $cargoToml = Get-Content 'Cargo.toml' -Raw
-          if ($cargoToml -notmatch '(?ms)\[workspace\\.package\\].*?^\\s*version\\s*=\\s*\"([^\"]+)\"') {
+          $workspaceVersion = $null
+          $inSection = $false
+          foreach ($line in Get-Content 'Cargo.toml') {
+            $trim = $line.Trim()
+            if ($trim -match '^\\[') {
+              $inSection = ($trim -eq '[workspace.package]')
+              continue
+            }
+            if ($inSection -and $trim -match '^version\\s*=\\s*\"([^\"]+)\"') {
+              $workspaceVersion = $Matches[1]
+              break
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($workspaceVersion)) {
             throw "failed to read [workspace.package].version from Cargo.toml"
           }
-          $workspaceVersion = $Matches[1]
 
           if ($workspaceVersion -ne $tagVersion) {
             throw "tag/version mismatch: tag=$normalizedTag expects $tagVersion, but workspace version is $workspaceVersion"

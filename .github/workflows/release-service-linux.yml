@@ -101,15 +101,16 @@ jobs:
             exit 1
           fi
           TAG_VERSION="$(echo "$TAG" | sed -E 's/^v([0-9]+\\.[0-9]+\\.[0-9]+).*/\\1/')"
-          WORKSPACE_VERSION="$(python3 - <<'PY'
-          import re
-          text=open("Cargo.toml","r",encoding="utf-8").read()
-          m=re.search(r"(?ms)^\\[workspace\\.package\\].*?^\\s*version\\s*=\\s*\\\"([^\\\"]+)\\\"", text)
-          if not m:
-            raise SystemExit("failed to read [workspace.package].version from Cargo.toml")
-          print(m.group(1))
-          PY
-          )"
+          WORKSPACE_VERSION="$(awk -F'\"' '
+            BEGIN { in_section=0 }
+            /^\[workspace\.package\]$/ { in_section=1; next }
+            /^\[/ { in_section=0 }
+            in_section && $1 ~ /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }
+          ' Cargo.toml)"
+          if [[ -z "$WORKSPACE_VERSION" ]]; then
+            echo "failed to read [workspace.package].version from Cargo.toml"
+            exit 1
+          fi
           if [[ "$WORKSPACE_VERSION" != "$TAG_VERSION" ]]; then
             echo "tag/version mismatch: tag=$TAG expects $TAG_VERSION, but workspace version is $WORKSPACE_VERSION"
             exit 1
