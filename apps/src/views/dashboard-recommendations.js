@@ -1,5 +1,5 @@
 import { dom } from "../ui/dom.js";
-import { remainingPercent } from "../utils/format.js";
+import { calcAvailability, remainingPercent } from "../utils/format.js";
 
 export function renderRecommendations(accounts, usageMap) {
   if (!dom.recommendations) return;
@@ -43,6 +43,11 @@ export function pickBestRecommendations(accounts, usageMap) {
 
   (accounts || []).forEach((account) => {
     const usage = usageMap.get(account.id);
+    const status = calcAvailability(usage);
+    // 中文注释：不可用账号不参与推荐（与网关候选池保持一致）。
+    if (status.level === "warn" || status.level === "bad") {
+      return;
+    }
     const primaryRemain = remainingPercent(usage ? usage.usedPercent : null);
     const secondaryRemain = remainingPercent(
       usage ? usage.secondaryUsedPercent : null,

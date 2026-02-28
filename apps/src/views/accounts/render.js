@@ -243,6 +243,16 @@ function createActionsCell(isDeletable) {
   return cellActions;
 }
 
+function syncSetCurrentButton(actionsWrap, status) {
+  if (!actionsWrap) return;
+  const btn = actionsWrap.querySelector(`button[data-action="${ACCOUNT_ACTION_SET_CURRENT}"]`);
+  if (!btn) return;
+  const level = status?.level;
+  const disabled = level === "warn" || level === "bad";
+  btn.disabled = disabled;
+  btn.title = disabled ? `账号当前不可用（${status?.text || "不可用"}），不参与网关选路` : "锁定为当前账号（异常前持续优先使用）";
+}
+
 function renderEmptyRow(message) {
   const emptyRow = document.createElement("tr");
   const emptyCell = document.createElement("td");
@@ -271,7 +281,9 @@ function renderAccountRow(account, accountDerivedMap, { onDelete }) {
   row.appendChild(cellStatus);
 
   row.appendChild(createUpdatedCell(accountDerived.usage));
-  row.appendChild(createActionsCell(Boolean(onDelete)));
+  const actionsCell = createActionsCell(Boolean(onDelete));
+  row.appendChild(actionsCell);
+  syncSetCurrentButton(actionsCell.querySelector(".cell-actions"), accountDerived.status);
   return row;
 }
 
@@ -385,6 +397,7 @@ function updateAccountRow(row, account, accountDerivedMap, { onDelete }) {
   // Column 5: actions
   const actionsWrap = row.children[5]?.querySelector?.(".cell-actions");
   syncDeleteButton(actionsWrap, Boolean(onDelete));
+  syncSetCurrentButton(actionsWrap, accountDerived.status);
   return row;
 }
 

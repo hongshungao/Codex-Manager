@@ -1,4 +1,5 @@
 import * as api from "../../api.js";
+import { calcAvailability } from "../../utils/format.js";
 
 const EMPTY_REFRESH_PROGRESS = Object.freeze({
   active: false,
@@ -144,7 +145,18 @@ export function createAccountActions({
     const ok = await ensureConnected();
     if (!ok) return;
     await enqueueAccountOp(async () => {
-      await api.serviceGatewayManualAccountSet(account.id);
+      const usageList = Array.isArray(state?.usageList) ? state.usageList : [];
+      const usage = usageList.find((item) => item && item.accountId === account.id) || null;
+      const status = calcAvailability(usage);
+      if (status.level === "warn" || status.level === "bad") {
+        showToast(`账号当前不可用（${status.text}），无法锁定`, "error");
+        return;
+      }
+      const res = await api.serviceGatewayManualAccountSet(account.id);
+      if (res && res.ok === false) {
+        showToast(res.error || "锁定当前账号失败", "error");
+        return;
+      }
       if (state && typeof state === "object") {
         state.manualPreferredAccountId = account.id;
       }

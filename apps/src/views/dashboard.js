@@ -108,14 +108,23 @@ export function renderDashboard() {
   renderRecommendations(state.accountList, usageMap);
 }
 
-function pickCurrentAccount(accounts, requestLogs, manualPreferredAccountId) {
+function canParticipateInRouting(level) {
+  // 中文注释：warn/bad 都属于“当前不可用”，不应参与网关选路（顺序优先/均衡轮询）。
+  return level !== "warn" && level !== "bad";
+}
+
+function pickCurrentAccount(accounts, usageMap, requestLogs, manualPreferredAccountId) {
   const accountList = Array.isArray(accounts) ? accounts : [];
   if (!accountList.length) return null;
+
   const preferredId = String(manualPreferredAccountId || "").trim();
   if (preferredId) {
     const preferred = accountList.find((item) => item.id === preferredId);
     if (preferred) {
-      return preferred;
+      const status = calcAvailability(usageMap.get(preferred.id));
+      if (canParticipateInRouting(status.level)) {
+        return preferred;
+      }
     }
   }
 
@@ -128,6 +137,30 @@ function pickCurrentAccount(accounts, requestLogs, manualPreferredAccountId) {
     if (!latestHit || Number(item?.createdAt || 0) > Number(latestHit?.createdAt || 0)) {
       latestHit = item;
     }
+  }
+  if (latestHit) {
+    const found = accountList.find((item) => item.id === latestHit.accountId);
+    if (found) {
+      const status = calcAvailability(usageMap.get(found.id));
+      if (canParticipateInRouting(status.level)) {
+        return found;
+      }
+    }
+  }
+
+  // 中文注释：优先展示“参与网关选路”的账号，避免仪表盘显示不可用账号造成误解。
+  const firstParticipating = accountList.find((item) => {
+    const status = calcAvailability(usageMap.get(item.id));
+    return canParticipateInRouting(status.level);
+  });
+  if (firstParticipating) {
+    return firstParticipating;
+  }
+
+  // 中文注释：全部不可用时回退到原逻辑，至少保证有内容展示。
+  if (preferredId) {
+    const preferred = accountList.find((item) => item.id === preferredId);
+    if (preferred) return preferred;
   }
   if (latestHit) {
     const found = accountList.find((item) => item.id === latestHit.accountId);
@@ -146,7 +179,7 @@ function renderCurrentAccount(accounts, usageMap, requestLogs, manualPreferredAc
     dom.currentAccountCard.appendChild(empty);
     return;
   }
-  const account = pickCurrentAccount(accounts, requestLogs, manualPreferredAccountId);
+  const account = pickCurrentAccount(accounts, usageMap, requestLogs, manualPreferredAccountId);
   if (!account) return;
   const usage = usageMap.get(account.id);
   const status = calcAvailability(usage);

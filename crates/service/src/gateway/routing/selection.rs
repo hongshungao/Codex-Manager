@@ -62,24 +62,6 @@ fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account
         out.push((account.clone(), token));
     }
     if out.is_empty() {
-        let mut fallback = Vec::new();
-        for account in &accounts {
-            let token = match token_map.get(&account.id) {
-                Some(token) => token.clone(),
-                None => continue,
-            };
-            let usage = snap_map.get(&account.id);
-            if !fallback_allowed(usage) {
-                continue;
-            }
-            fallback.push((account.clone(), token));
-        }
-        if !fallback.is_empty() {
-            log::warn!("gateway fallback: no active accounts, using {} candidates", fallback.len());
-            return Ok(fallback);
-        }
-    }
-    if out.is_empty() {
         log_no_candidates(&accounts, &token_map, &snap_map);
     }
     Ok(out)
@@ -141,22 +123,6 @@ fn candidate_cache_ttl() -> Duration {
 fn current_db_path() -> String {
     ensure_selection_config_loaded();
     crate::lock_utils::read_recover(current_db_path_cell(), "current_db_path").clone()
-}
-
-fn fallback_allowed(usage: Option<&UsageSnapshotRecord>) -> bool {
-    if let Some(record) = usage {
-        if let Some(value) = record.used_percent {
-            if value >= 100.0 {
-                return false;
-            }
-        }
-        if let Some(value) = record.secondary_used_percent {
-            if value >= 100.0 {
-                return false;
-            }
-        }
-    }
-    true
 }
 
 fn log_no_candidates(

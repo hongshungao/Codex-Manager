@@ -142,7 +142,17 @@ pub(crate) fn manual_preferred_account() -> Option<String> {
 }
 
 pub(crate) fn set_manual_preferred_account(account_id: &str) -> Result<(), String> {
-    route_hint::set_manual_preferred_account(account_id)
+    let id = account_id.trim();
+    if id.is_empty() {
+        return Err("accountId is required".to_string());
+    }
+    let storage = open_storage().ok_or_else(|| "storage not initialized".to_string())?;
+    let candidates = collect_gateway_candidates(&storage)?;
+    let found = candidates.iter().any(|(account, _)| account.id == id);
+    if !found {
+        return Err("account is not available for routing".to_string());
+    }
+    route_hint::set_manual_preferred_account(id)
 }
 
 pub(crate) fn clear_manual_preferred_account() {

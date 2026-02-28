@@ -269,10 +269,10 @@ function routeStrategyLabel(strategy) {
 function updateRouteStrategyHint(strategy) {
   if (!dom.routeStrategyHint) return;
   if (normalizeRouteStrategy(strategy) === ROUTE_STRATEGY_BALANCED) {
-    dom.routeStrategyHint.textContent = "按 Key + 模型 均衡轮询起点，降低单账号热点。";
+    dom.routeStrategyHint.textContent = "按 Key + 模型 均衡轮询起点，优先使用可用账号（不可用账号不会参与选路）。";
     return;
   }
-  dom.routeStrategyHint.textContent = "按账号顺序优先请求，失败后再切换到下一个账号。";
+  dom.routeStrategyHint.textContent = "按账号顺序优先请求，优先使用可用账号（不可用账号不会参与选路）。";
 }
 
 function readRouteStrategySetting() {
