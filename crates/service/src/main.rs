@@ -1,6 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 fn main() {
+    codexmanager_service::portable::bootstrap_current_process();
     let addr = std::env::var("CODEXMANAGER_SERVICE_ADDR")
         .unwrap_or_else(|_| codexmanager_service::DEFAULT_ADDR.to_string());
     println!("codexmanager-service listening on {addr}");

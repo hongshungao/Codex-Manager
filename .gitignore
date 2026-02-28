@@ -33,6 +33,7 @@ docs/*
 *.log
 *.db
 *.sqlite
+codexmanager.rpc-token
 codex resume*.txt
 
 # OS files

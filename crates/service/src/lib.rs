@@ -1,5 +1,4 @@
 use codexmanager_core::rpc::types::{JsonRpcRequest, JsonRpcResponse};
-use rand::RngCore;
 use std::io::{self, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,6 +8,7 @@ use std::time::Duration;
 
 mod lock_utils;
 mod http;
+pub mod process_env;
 #[path = "storage/storage_helpers.rs"]
 mod storage_helpers;
 #[path = "account/account_availability.rs"]
@@ -80,6 +80,16 @@ pub const DEFAULT_ADDR: &str = "localhost:48760";
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static RPC_AUTH_TOKEN: OnceLock<String> = OnceLock::new();
 
+pub mod portable {
+    // 中文注释：service/web 发行物使用“同目录可选 env 文件 + 默认 DB + token 文件”机制，做到解压即用。
+    pub fn bootstrap_current_process() {
+        crate::process_env::load_env_from_exe_dir();
+        crate::process_env::ensure_default_db_path();
+        // 提前生成并落库 token，便于 web 进程/外部工具复用同一 token。
+        let _ = crate::rpc_auth_token();
+    }
+}
+
 pub struct ServerHandle {
     pub addr: String,
     join: thread::JoinHandle<()>,
@@ -92,6 +102,7 @@ impl ServerHandle {
 }
 
 pub fn start_one_shot_server() -> std::io::Result<ServerHandle> {
+    portable::bootstrap_current_process();
     gateway::reload_runtime_config_from_env();
     // 中文注释：one-shot 入口也先尝试建表，避免未初始化数据库在首个 RPC 就触发读写失败。
     if let Err(err) = storage_helpers::initialize_storage() {
@@ -113,6 +124,7 @@ pub fn start_one_shot_server() -> std::io::Result<ServerHandle> {
 }
 
 pub fn start_server(addr: &str) -> std::io::Result<()> {
+    portable::bootstrap_current_process();
     gateway::reload_runtime_config_from_env();
     // 中文注释：启动阶段先做一次显式初始化；不放在每次 open_storage 里是为避免高频 RPC 重复执行迁移检查。
     if let Err(err) = storage_helpers::initialize_storage() {
@@ -133,20 +145,14 @@ pub fn clear_shutdown_flag() {
 }
 
 fn build_rpc_auth_token() -> String {
-    if let Ok(raw) = std::env::var("CODEXMANAGER_RPC_TOKEN") {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
+    if let Some(token) = process_env::read_rpc_token_from_env_or_file() {
+        std::env::set_var(process_env::ENV_RPC_TOKEN, &token);
+        return token;
     }
 
-    let mut bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    let mut token = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        token.push_str(&format!("{byte:02x}"));
-    }
+    let token = process_env::generate_rpc_token_hex_32bytes();
     std::env::set_var("CODEXMANAGER_RPC_TOKEN", &token);
+    process_env::persist_rpc_token_best_effort(&token);
     token
 }
 
@@ -174,7 +180,11 @@ pub fn request_shutdown(addr: &str) {
     SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
     // Best-effort wakeups for both IPv4 and IPv6 loopback so whichever listener is active exits.
     let _ = send_shutdown_request(addr);
-    if let Some(port) = addr.trim().strip_prefix("localhost:") {
+    let addr_trimmed = addr.trim();
+    if addr_trimmed.len() > "localhost:".len()
+        && addr_trimmed[..("localhost:".len())].eq_ignore_ascii_case("localhost:")
+    {
+        let port = &addr_trimmed["localhost:".len()..];
         let _ = send_shutdown_request(&format!("127.0.0.1:{port}"));
         let _ = send_shutdown_request(&format!("[::1]:{port}"));
     }
