@@ -115,6 +115,27 @@ function isTauriRuntime() {
   return Boolean(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
 }
 
+function applyBrowserModeUi() {
+  if (isTauriRuntime()) {
+    return false;
+  }
+  if (typeof document !== "undefined" && document.body) {
+    document.body.classList.add("cm-browser");
+  }
+
+  // 中文注释：浏览器模式不支持桌面端启停与更新，隐藏相关 UI，避免误操作。
+  const serviceSetup = dom.serviceAddrInput ? dom.serviceAddrInput.closest(".service-setup") : null;
+  if (serviceSetup) {
+    serviceSetup.style.display = "none";
+  }
+  const updateCard = dom.checkUpdate ? dom.checkUpdate.closest(".settings-card") : null;
+  if (updateCard) {
+    updateCard.style.display = "none";
+  }
+
+  return true;
+}
+
 function readUpdateAutoCheckSetting() {
   if (typeof localStorage === "undefined") {
     return true;
@@ -1123,7 +1144,8 @@ function bindEvents() {
 function bootstrap() {
   setStartupMask(true, "正在初始化界面...");
   setStatus("", false);
-  setServiceHint("请输入端口并点击启动", false);
+  const browserMode = applyBrowserModeUi();
+  setServiceHint(browserMode ? "浏览器模式：请先启动 codexmanager-service" : "请输入端口并点击启动", false);
   renderThemeButtons();
   restoreTheme();
   initLowTransparencySetting();

@@ -1,0 +1,341 @@
+name: release-service-windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.2)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref/branch/sha to build"
+        required: false
+        default: "main"
+        type: string
+      run_verify:
+        description: "Run quality gate before building artifacts"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ format('{0}-tag-{1}', github.workflow, startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag)) }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: ${{ github.event.inputs.run_verify != 'false' }}
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-service-windows-rust-stable-v1
+          workspaces: |
+            . -> target
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Frontend unit tests
+        working-directory: apps
+        run: pnpm run test
+
+      - name: Frontend structure tests
+        working-directory: apps
+        run: pnpm run test:ui
+
+      - name: Frontend build
+        working-directory: apps
+        run: pnpm run build
+
+  build_windows:
+    needs: verify
+    if: ${{ always() && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Validate tag/version consistency
+        shell: pwsh
+        run: |
+          $tagInput = "${{ github.event.inputs.tag }}"
+          if ([string]::IsNullOrWhiteSpace($tagInput)) { throw "release tag is required" }
+
+          $normalizedTag = if ($tagInput.StartsWith("v")) { $tagInput } else { "v$tagInput" }
+          if ($normalizedTag -notmatch '^v(\d+\.\d+\.\d+)(?:[-+].*)?$') {
+            throw "tag must look like vX.Y.Z or vX.Y.Z-suffix, got: $normalizedTag"
+          }
+          $tagVersion = $Matches[1]
+
+          $cargoToml = Get-Content 'Cargo.toml' -Raw
+          if ($cargoToml -notmatch '(?ms)\[workspace\\.package\\].*?^\\s*version\\s*=\\s*\"([^\"]+)\"') {
+            throw "failed to read [workspace.package].version from Cargo.toml"
+          }
+          $workspaceVersion = $Matches[1]
+
+          if ($workspaceVersion -ne $tagVersion) {
+            throw "tag/version mismatch: tag=$normalizedTag expects $tagVersion, but workspace version is $workspaceVersion"
+          }
+
+          Write-Host "Version OK: $workspaceVersion (tag $normalizedTag)"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-service-windows-rust-stable-v1
+          workspaces: |
+            . -> target
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: apps
+        run: pnpm run build
+
+      - name: Build service binary
+        run: cargo build -p codexmanager-service --release
+
+      - name: Build web binary
+        run: cargo build -p codexmanager-web --release
+
+      - name: Stage service package
+        shell: pwsh
+        run: |
+          $arch = "${{ runner.arch }}"
+          $archSlug = switch ($arch) {
+            "X64" { "x86_64" }
+            "ARM64" { "arm64" }
+            Default { $arch.ToLowerInvariant() }
+          }
+
+          $stageRoot = "stage"
+          $pkgName = "CodexManager-service-windows-$archSlug"
+          $pkgDir = Join-Path $stageRoot $pkgName
+
+          Remove-Item -Recurse -Force $pkgDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force (Join-Path $pkgDir "web") | Out-Null
+
+          if (-not (Test-Path "apps/dist" -PathType Container)) {
+            throw "apps/dist not found; did frontend build run?"
+          }
+          Copy-Item -Recurse -Force "apps/dist/*" (Join-Path $pkgDir "web")
+
+          @"
+          CodexManager Service 版本（Windows）
+
+          1) 先启动：codexmanager-service.exe
+          2) 再启动：codexmanager-web.exe（会自动打开浏览器）
+
+          可选：在同目录创建 codexmanager.env 设置环境变量（不会覆盖系统环境变量）。
+          "@ | Set-Content -Encoding UTF8 (Join-Path $pkgDir "SERVICE-README.txt")
+
+          @"
+          # 文件名候选（优先级）：codexmanager.env -> CodexManager.env -> .env
+          # CODEXMANAGER_SERVICE_ADDR=localhost:48760
+          # CODEXMANAGER_WEB_ADDR=localhost:48761
+          # CODEXMANAGER_DB_PATH=./codexmanager.db
+          # 固定 /rpc token（否则自动生成并落盘到 codexmanager.rpc-token）
+          # CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
+          "@ | Set-Content -Encoding UTF8 (Join-Path $pkgDir "codexmanager.env.sample")
+
+          $serviceBin = "target/release/codexmanager-service.exe"
+          if (-not (Test-Path $serviceBin -PathType Leaf)) { throw "service binary not found: $serviceBin" }
+          Copy-Item -Force $serviceBin (Join-Path $pkgDir "codexmanager-service.exe")
+
+          $webBin = "target/release/codexmanager-web.exe"
+          if (-not (Test-Path $webBin -PathType Leaf)) { throw "web binary not found: $webBin" }
+          Copy-Item -Force $webBin (Join-Path $pkgDir "codexmanager-web.exe")
+
+          $zipPath = Join-Path $stageRoot "$pkgName.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path $pkgDir -DestinationPath $zipPath
+
+          Write-Host "service package: $zipPath"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexmanager-service-windows
+          path: stage/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    needs: build_windows
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: codexmanager-service-windows
+          merge-multiple: true
+          path: release-assets
+
+      - name: List release assets
+        run: find release-assets -type f | sort
+
+      - name: Resolve release meta
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          REF="${{ github.event.inputs.ref || 'main' }}"
+
+          if [[ -z "$TAG" ]]; then
+            echo "release tag is required"
+            exit 1
+          fi
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
+          fi
+
+          TARGET_SHA="$(gh api "repos/$GH_REPO/commits/$REF" --jq .sha)"
+          if [[ -z "$TARGET_SHA" ]]; then
+            echo "failed to resolve ref to commit: $REF"
+            exit 1
+          fi
+
+          if [[ "$TAG" == *-* ]]; then
+            PRERELEASE="true"
+          else
+            PRERELEASE="false"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SHA256SUMS and manifest
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          cd release-assets
+
+          # Checksums for assets only (exclude checksum/manifest files themselves).
+          find . -type f ! -name 'SHA256SUMS-service-windows' ! -name 'manifest-service-windows.json' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's|  \./|  |' \
+            > SHA256SUMS-service-windows
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(".")
+          sums_path = root / "SHA256SUMS-service-windows"
+          entries = []
+
+          for line in sums_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+              continue
+            sha, rel = line.split(maxsplit=1)
+            rel = rel.strip()
+            p = root / rel
+            if not p.is_file():
+              raise SystemExit(f"SHA256SUMS refers to missing file: {rel}")
+            entries.append({"path": rel.replace("\\\\", "/"), "sha256": sha, "bytes": p.stat().st_size})
+
+          manifest = {
+            "tag": os.environ.get("RELEASE_TAG", ""),
+            "files": sorted(entries, key=lambda x: x["path"]),
+          }
+
+          (root / "manifest-service-windows.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          TARGET_SHA="${{ steps.meta.outputs.target_sha }}"
+          TITLE="CodexManager $TAG"
+
+          mapfile -t FILES < <(find release-assets -type f \( \
+            -name '*.zip' -o -name 'SHA256SUMS-service-windows' -o -name 'manifest-service-windows.json' \
+          \) | sort)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA"
+            gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
+          else
+            CREATE_ARGS=(--repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA" --generate-notes)
+            if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+              CREATE_ARGS+=(--prerelease)
+            fi
+            # 中文注释：多平台 workflow 可能并行写同一个 tag；create 失败时降级为 edit+upload。
+            if ! gh release create "$TAG" "${FILES[@]}" "${CREATE_ARGS[@]}"; then
+              echo "release create failed, retrying as edit+upload..."
+              gh release edit "$TAG" --repo "$GH_REPO" --title "$TITLE" --target "$TARGET_SHA"
+              gh release upload "$TAG" "${FILES[@]}" --repo "$GH_REPO" --clobber
+            fi
+          fi

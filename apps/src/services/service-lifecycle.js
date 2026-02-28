@@ -12,6 +12,10 @@ export function createServiceLifecycle({
   stopAutoRefreshTimer,
   onStartupState,
 }) {
+  function isTauriRuntime() {
+    return Boolean(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
+  }
+
   function notifyStartupState(loading, message) {
     if (typeof onStartupState !== "function") return;
     onStartupState(loading, message);
@@ -123,6 +127,11 @@ export function createServiceLifecycle({
 
   async function handleServiceToggle() {
     if (state.serviceBusy) return;
+    if (!isTauriRuntime()) {
+      setServiceHint("浏览器模式不支持启停 service，请手动启动 codexmanager-service", true);
+      updateServiceToggle();
+      return;
+    }
     if (state.serviceConnected) {
       await handleStopService();
     } else {
@@ -157,6 +166,12 @@ export function createServiceLifecycle({
       });
       notifyStartupState(false);
       return true;
+    }
+    if (!isTauriRuntime()) {
+      notifyStartupState(false);
+      updateServiceToggle();
+      setServiceHint("未检测到服务，请先启动 codexmanager-service", true);
+      return false;
     }
     return handleStartService({ fromBootstrap: true });
   }

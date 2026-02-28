@@ -58,7 +58,8 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 │  └─ dist/
 ├─ crates/              # Rust core/service
 │  ├─ core
-│  └─ service
+│  ├─ service
+│  └─ web                # Service edition Web UI (static assets + /api/rpc proxy)
 ├─ scripts/             # build/release scripts
 ├─ portable/            # portable output
 └─ README.en.md
@@ -69,6 +70,11 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 2. Add accounts in Account Management and finish OAuth.
 3. If callback fails, paste callback URL into manual parser.
 4. Refresh usage and verify account status.
+
+## Service Edition (Headless service + Web UI, no desktop runtime)
+1. Download `CodexManager-service-<platform>-<arch>.zip` from the Release page and unzip.
+2. Start `codexmanager-service` first, then start `codexmanager-web` (it will auto-open your browser).
+3. Default addresses: service `localhost:48760`, Web UI `http://localhost:48761/`.
 
 ## Development & Build
 ### Frontend
@@ -84,6 +90,7 @@ pnpm -C apps run build
 ```bash
 cargo test --workspace
 cargo build -p codexmanager-service --release
+cargo build -p codexmanager-web --release
 ```
 
 ### Tauri Packaging (Windows)
@@ -124,6 +131,15 @@ All workflows are `workflow_dispatch` only.
     - `tag` (required)
     - `ref` (default: `main`)
     - `run_verify` (default: `true`)
+- `release-service-windows.yml`
+  - Purpose: Windows Service edition packaging and release publishing (zip)
+  - Trigger: manual only
+- `release-service-linux.yml`
+  - Purpose: Linux Service edition packaging and release publishing (zip)
+  - Trigger: manual only
+- `release-service-macos.yml`
+  - Purpose: macOS Service edition packaging and release publishing (zip)
+  - Trigger: manual only
 
 ## Script Reference
 ### `scripts/rebuild.ps1` (Windows)
@@ -179,45 +195,49 @@ It updates:
 
 ## Environment Variables
 ### Load Rules and Precedence
-- Desktop app loads env files from executable directory in this order:
+- Desktop / `codexmanager-service` / `codexmanager-web` load env files from executable directory in this order:
   - `codexmanager.env` -> `CodexManager.env` -> `.env` (first hit wins)
 - Existing process/system env vars are not overridden by env-file values.
-- Most vars are optional. `CODEXMANAGER_DB_PATH` is conditionally required when running `codexmanager-service` standalone.
+- Most vars are optional. If the run directory is not writable (for example an install directory), set `CODEXMANAGER_DB_PATH` to a writable path.
 - The tables below are split into common vs advanced knobs. For the full list, search `CODEXMANAGER_` in the source code as the source of truth.
 
 ### Common Variables (`CODEXMANAGER_*`)
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | Optional | Service bind address and default RPC target used by desktop app. |
-| `CODEXMANAGER_DB_PATH` | None | Conditionally required | SQLite path. Desktop sets `app_data_dir/codexmanager.db`; set explicitly for standalone service runs. |
-| `CODEXMANAGER_RPC_TOKEN` | Auto-generated random 64-hex string | Optional | `/rpc` auth token. Generated at runtime if missing or empty. |
-| `CODEXMANAGER_NO_SERVICE` | Unset | Optional | If present (any value), desktop app does not auto-start embedded service. |
-| `CODEXMANAGER_ISSUER` | `https://auth.openai.com` | Optional | OAuth issuer. |
-| `CODEXMANAGER_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | Optional | OAuth client id. |
-| `CODEXMANAGER_ORIGINATOR` | `codex_cli_rs` | Optional | OAuth authorize `originator` value. |
-| `CODEXMANAGER_REDIRECT_URI` | `http://localhost:1455/auth/callback` (or dynamic login-server port) | Optional | OAuth redirect URI. |
-| `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | Optional | Local login callback listener address. |
-| `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | Optional | Allows non-loopback login callback address when set to `1/true/TRUE/yes/YES`. |
-| `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | Optional | Base URL for usage requests. |
-| `CODEXMANAGER_DISABLE_POLLING` | Unset (polling enabled) | Optional | If present (any value), disables usage polling thread. |
-| `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | Optional | Usage polling interval in seconds, minimum `30`. Invalid values fall back to default. |
-| `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | Optional | Gateway keepalive interval in seconds, minimum `30`. |
-| `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | Optional | Primary upstream base URL. Bare ChatGPT host values are normalized to backend-api/codex. |
-| `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | Auto-inferred | Optional | Explicit fallback upstream. If unset and primary is ChatGPT backend, fallback defaults to `https://api.openai.com/v1`. |
-| `CODEXMANAGER_UPSTREAM_COOKIE` | Unset | Optional | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
-| `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | Optional | Gateway account routing strategy: default `ordered` (follow account order, fail over to next on failure); set `balanced`/`round_robin`/`rr` to enable key+model-based balanced round-robin starts. |
-| `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | Optional | Upstream connect timeout in seconds. |
-| `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` | `120000` | Optional | Upstream total timeout per request in milliseconds. Set `0` to disable. |
-| `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS` | `300000` | Optional | Upstream stream timeout in milliseconds. Set `0` to disable. |
-| `CODEXMANAGER_PROXY_LIST` | Unset | Optional | Upstream proxy pool (max 5 entries, separated by comma/semicolon/newlines). Each account is stably hash-mapped to one proxy to avoid proxy drift. |
-| `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | Optional | Request-gate wait budget in milliseconds. |
-| `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | Optional | Per-account soft inflight cap. `0` means unlimited. |
-| `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Optional | Max bytes for trace body preview. `0` disables body preview. |
-| `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | Optional | Max accepted request body size for front proxy (16 MiB default). |
-| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | Optional | Backend worker factor; workers = `max(cpu * factor, worker_min)`. |
-| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | Optional | Minimum backend workers. |
-| `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | Optional | Backend queue factor; queue = `max(worker * factor, queue_min)`. |
-| `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | Optional | Minimum backend queue size. |
+| Variable | Default | Description |
+|---|---|---|
+| `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | Service bind address and default RPC target used by desktop app. |
+| `CODEXMANAGER_WEB_ADDR` | `localhost:48761` | Service edition Web UI bind address (used by `codexmanager-web` only). |
+| `CODEXMANAGER_WEB_ROOT` | `web/` next to executable | Web static assets directory (used by `codexmanager-web` only). |
+| `CODEXMANAGER_WEB_NO_OPEN` | Unset | If set, `codexmanager-web` will not auto-open the browser. |
+| `CODEXMANAGER_DB_PATH` | `codexmanager.db` next to executable (Service/Web); desktop auto-sets | SQLite path. Desktop sets `app_data_dir/codexmanager.db`. |
+| `CODEXMANAGER_RPC_TOKEN` | Auto-generated random 64-hex string | `/rpc` auth token. Auto-generated if missing, and persisted to `codexmanager.rpc-token` by default for cross-process reuse. |
+| `CODEXMANAGER_RPC_TOKEN_FILE` | `codexmanager.rpc-token` next to DB | Custom `/rpc` token file path (relative paths are resolved from DB directory). |
+| `CODEXMANAGER_NO_SERVICE` | Unset | If present (any value), desktop app does not auto-start embedded service. |
+| `CODEXMANAGER_ISSUER` | `https://auth.openai.com` | OAuth issuer. |
+| `CODEXMANAGER_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | OAuth client id. |
+| `CODEXMANAGER_ORIGINATOR` | `codex_cli_rs` | OAuth authorize `originator` value. |
+| `CODEXMANAGER_REDIRECT_URI` | `http://localhost:1455/auth/callback` (or dynamic login-server port) | OAuth redirect URI. |
+| `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | Local login callback listener address. |
+| `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | Allows non-loopback login callback address when set to `1/true/TRUE/yes/YES`. |
+| `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | Base URL for usage requests. |
+| `CODEXMANAGER_DISABLE_POLLING` | Unset (polling enabled) | If present (any value), disables usage polling thread. |
+| `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | Usage polling interval in seconds, minimum `30`. Invalid values fall back to default. |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | Gateway keepalive interval in seconds, minimum `30`. |
+| `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | Primary upstream base URL. Bare ChatGPT host values are normalized to backend-api/codex. |
+| `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | Auto-inferred | Explicit fallback upstream. If unset and primary is ChatGPT backend, fallback defaults to `https://api.openai.com/v1`. |
+| `CODEXMANAGER_UPSTREAM_COOKIE` | Unset | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
+| `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | Gateway account routing strategy: default `ordered` (follow account order, fail over to next on failure); set `balanced`/`round_robin`/`rr` to enable key+model-based balanced round-robin starts. |
+| `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | Upstream connect timeout in seconds. |
+| `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` | `120000` | Upstream total timeout per request in milliseconds. Set `0` to disable. |
+| `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS` | `300000` | Upstream stream timeout in milliseconds. Set `0` to disable. |
+| `CODEXMANAGER_PROXY_LIST` | Unset | Upstream proxy pool (max 5 entries, separated by comma/semicolon/newlines). Each account is stably hash-mapped to one proxy to avoid proxy drift. |
+| `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | Request-gate wait budget in milliseconds. |
+| `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | Per-account soft inflight cap. `0` means unlimited. |
+| `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Max bytes for trace body preview. `0` disables body preview. |
+| `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | Max accepted request body size for front proxy (16 MiB default). |
+| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | Backend worker factor; workers = `max(cpu * factor, worker_min)`. |
+| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | Minimum backend workers. |
+| `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | Backend queue factor; queue = `max(worker * factor, queue_min)`. |
+| `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | Minimum backend queue size. |
 
 ### Advanced Variables (Optional)
 | Variable | Default | Description |
@@ -260,6 +280,7 @@ It updates:
 ```dotenv
 # codexmanager.env / CodexManager.env / .env
 CODEXMANAGER_SERVICE_ADDR=localhost:48760
+CODEXMANAGER_WEB_ADDR=localhost:48761
 CODEXMANAGER_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
 CODEXMANAGER_USAGE_POLL_INTERVAL_SECS=600
 CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
@@ -268,13 +289,14 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 ```
 
 Notes:
-- Env files are loaded **once when the desktop app starts**. After editing the file, you must **fully quit and relaunch** CodexManager for changes to take effect (stopping/starting the embedded service alone will not reload env files).
+- Env files are loaded **once when the desktop/service/web process starts**. After editing the file, restart the corresponding process for changes to take effect.
+- The desktop app persists the service port in local storage; env vars mainly affect the initial default value (to force-reset, change it in UI or clear local storage and relaunch).
 - Env-file values only apply to variables that are not already defined in the current process. If you set the same `CODEXMANAGER_*` in system/user env vars, those take precedence.
 
 ## Troubleshooting
 - OAuth callback failures: check `CODEXMANAGER_LOGIN_ADDR` conflicts, or use manual callback parsing in UI.
 - Model list/request blocked by challenge: try `CODEXMANAGER_UPSTREAM_COOKIE` or explicit `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`.
-- Standalone service reports storage unavailable: set `CODEXMANAGER_DB_PATH` to a writable path first.
+- Standalone service/Web: if the run directory is not writable, set `CODEXMANAGER_DB_PATH` to a writable path.
 - macOS with a system proxy: ensure loopback requests (`localhost/127.0.0.1`) are `DIRECT`, and use lowercase `localhost:<port>` (for example `localhost:48760`).
 
 ## Account Hit Rules 

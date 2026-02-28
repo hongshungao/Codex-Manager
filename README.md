@@ -58,7 +58,8 @@
 │  └─ dist/
 ├─ crates/              # Rust core/service
 │  ├─ core
-│  └─ service
+│  ├─ service
+│  └─ web                # Service 版本 Web UI（静态资源 + /api/rpc 代理）
 ├─ scripts/             # 构建与发布脚本
 ├─ portable/            # 便携版输出目录
 └─ README.md
@@ -69,6 +70,11 @@
 2. 进入“账号管理”，添加账号并完成授权。
 3. 如回调失败，粘贴回调链接手动完成解析。
 4. 刷新用量并确认账号状态。
+
+## Service 版本（后台服务 + Web UI，无桌面环境）
+1. 下载 Release 中的 `CodexManager-service-<platform>-<arch>.zip` 并解压。
+2. 先启动 `codexmanager-service`，再启动 `codexmanager-web`（会自动打开浏览器）。
+3. 默认地址：service `localhost:48760`，Web UI `http://localhost:48761/`。
 
 ## 开发与构建
 ### 前端
@@ -84,6 +90,7 @@ pnpm -C apps run build
 ```bash
 cargo test --workspace
 cargo build -p codexmanager-service --release
+cargo build -p codexmanager-web --release
 ```
 
 ### Tauri 打包（Windows）
@@ -124,6 +131,15 @@ pwsh -NoLogo -NoProfile -File scripts/rebuild.ps1 -Bundle nsis -CleanDist -Porta
     - `tag`（必填）
     - `ref`（默认 `main`）
     - `run_verify`（默认 `true`，可关闭）
+- `release-service-windows.yml`
+  - 用途：Windows Service 版本打包与 release 发布（zip）
+  - 触发：手动
+- `release-service-linux.yml`
+  - 用途：Linux Service 版本打包与 release 发布（zip）
+  - 触发：手动
+- `release-service-macos.yml`
+  - 用途：macOS Service 版本打包与 release 发布（zip）
+  - 触发：手动
 
 ## 脚本说明
 ### `scripts/rebuild.ps1`（Windows）
@@ -178,44 +194,48 @@ pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
 
 ## 环境变量说明
 ### 加载与优先级
-- 桌面端会在可执行文件同目录按顺序查找环境文件：`codexmanager.env` -> `CodexManager.env` -> `.env`（命中第一个即停止）。
+- 桌面端 / `codexmanager-service` / `codexmanager-web` 均会在可执行文件同目录按顺序查找环境文件：`codexmanager.env` -> `CodexManager.env` -> `.env`（命中第一个即停止）。
 - 环境文件中只会注入“当前进程尚未定义”的变量，已有系统/用户变量不会被覆盖。
-- 绝大多数变量均为可选；`CODEXMANAGER_DB_PATH` 在“独立运行 service 二进制”场景下属于必填。
+- 绝大多数变量均为可选；若运行目录不可写（如安装目录），可用 `CODEXMANAGER_DB_PATH` 指向可写路径。
 - 下表按“常用/高级”拆分；若需要完整列表，可在源码中搜索 `CODEXMANAGER_` 作为最终准入标准。
 
 ### 常用变量（`CODEXMANAGER_*`）
-| 变量 | 默认值 | 是否必填 | 说明 |
-|---|---|---|---|
-| `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | 可选 | service 监听地址；桌面端也会用它作为默认 RPC 目标地址。 |
-| `CODEXMANAGER_DB_PATH` | 无 | 条件必填 | 数据库路径。桌面端会自动设为 `app_data_dir/codexmanager.db`；独立运行 `codexmanager-service` 时建议显式设置。 |
-| `CODEXMANAGER_RPC_TOKEN` | 自动生成 64 位十六进制随机串 | 可选 | `/rpc` 鉴权 token。未设置时进程启动后自动生成，仅当前进程有效。 |
-| `CODEXMANAGER_NO_SERVICE` | 未设置 | 可选 | 只要变量存在（值可为空）就不自动拉起内嵌 service。 |
-| `CODEXMANAGER_ISSUER` | `https://auth.openai.com` | 可选 | OAuth issuer。 |
-| `CODEXMANAGER_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | 可选 | OAuth client id。 |
-| `CODEXMANAGER_ORIGINATOR` | `codex_cli_rs` | 可选 | OAuth authorize 请求中的 `originator`。 |
-| `CODEXMANAGER_REDIRECT_URI` | `http://localhost:1455/auth/callback`（或登录服务动态端口） | 可选 | OAuth 回调地址。 |
-| `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | 可选 | 本地登录回调监听地址。 |
-| `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | 可选 | 是否允许非 loopback 回调地址。仅 `1/true/TRUE/yes/YES` 视为开启。 |
-| `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | 可选 | 用量接口 base URL。 |
-| `CODEXMANAGER_DISABLE_POLLING` | 未设置（即开启轮询） | 可选 | 只要变量存在（值可为空）就禁用后台用量轮询线程。 |
-| `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | 可选 | 用量轮询间隔（秒），最小 `30`。非法值回退默认。 |
-| `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | 可选 | Gateway keepalive 间隔（秒），最小 `30`。 |
-| `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | 可选 | 主上游地址。若填 `https://chatgpt.com`/`https://chat.openai.com` 会自动归一化到 backend-api/codex。 |
-| `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | 自动推断 | 可选 | 明确指定 fallback 上游。若未设置且主上游是 ChatGPT backend，则默认 fallback 到 `https://api.openai.com/v1`。 |
-| `CODEXMANAGER_UPSTREAM_COOKIE` | 未设置 | 可选 | 上游 Cookie（主要用于 Cloudflare/WAF challenge 场景）。 |
-| `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | 可选 | 网关账号选路策略：默认 `ordered`（按账号顺序优先，失败再下一个）；可设 `balanced`/`round_robin`/`rr` 启用按 `Key+模型` 的均衡轮询起点。 |
-| `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | 可选 | 上游连接阶段超时（秒）。 |
-| `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` | `120000` | 可选 | 上游单次请求总超时（毫秒）。设为 `0` 表示关闭总超时。 |
-| `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS` | `300000` | 可选 | 上游流式请求超时（毫秒）。设为 `0` 表示关闭流式超时。 |
-| `CODEXMANAGER_PROXY_LIST` | 未设置 | 可选 | 上游代理池（最多 5 条，逗号/分号/换行分隔）。按 `account_id` 稳定哈希绑定到某个代理，避免同账号跨代理漂移。 |
-| `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | 可选 | 请求闸门等待预算（毫秒）。 |
-| `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | 可选 | 单账号并发软上限。`0` 表示不限制。 |
-| `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | 可选 | Trace body 预览最大字节数。`0` 表示关闭 body 预览。 |
-| `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | 可选 | 前置代理允许的请求体最大字节数（默认 16 MiB）。 |
-| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | 可选 | backend worker 数量系数，worker = `max(cpu * factor, worker_min)`。 |
-| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | 可选 | backend worker 最小值。 |
-| `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | 可选 | backend 请求队列系数，queue = `max(worker * factor, queue_min)`。 |
-| `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | 可选 | backend 请求队列最小值。 |
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | service 监听地址；桌面端也会用它作为默认 RPC 目标地址。 |
+| `CODEXMANAGER_WEB_ADDR` | `localhost:48761` | Service 版本 Web UI 监听地址（仅 `codexmanager-web` 使用）。 |
+| `CODEXMANAGER_WEB_ROOT` | 同目录 `web/` | Web 静态资源目录（仅 `codexmanager-web` 使用）。 |
+| `CODEXMANAGER_WEB_NO_OPEN` | 未设置 | 若设置则 `codexmanager-web` 不会自动打开浏览器。 |
+| `CODEXMANAGER_DB_PATH` | 同目录 `codexmanager.db`（Service/Web）；桌面端自动设置 | SQLite 数据库路径。桌面端会自动设为 `app_data_dir/codexmanager.db`。 |
+| `CODEXMANAGER_RPC_TOKEN` | 自动生成 64 位十六进制随机串 | `/rpc` 鉴权 token。未设置时自动生成，并默认落盘到 `codexmanager.rpc-token` 便于跨进程复用。 |
+| `CODEXMANAGER_RPC_TOKEN_FILE` | 同目录 `codexmanager.rpc-token` | 指定 `/rpc` token 文件路径（相对路径以 DB 所在目录为基准）。 |
+| `CODEXMANAGER_NO_SERVICE` | 未设置 | 只要变量存在（值可为空）就不自动拉起内嵌 service。 |
+| `CODEXMANAGER_ISSUER` | `https://auth.openai.com` | OAuth issuer。 |
+| `CODEXMANAGER_CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` | OAuth client id。 |
+| `CODEXMANAGER_ORIGINATOR` | `codex_cli_rs` | OAuth authorize 请求中的 `originator`。 |
+| `CODEXMANAGER_REDIRECT_URI` | `http://localhost:1455/auth/callback`（或登录服务动态端口） | OAuth 回调地址。 |
+| `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | 本地登录回调监听地址。 |
+| `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | 是否允许非 loopback 回调地址。仅 `1/true/TRUE/yes/YES` 视为开启。 |
+| `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | 用量接口 base URL。 |
+| `CODEXMANAGER_DISABLE_POLLING` | 未设置（即开启轮询） | 只要变量存在（值可为空）就禁用后台用量轮询线程。 |
+| `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | 用量轮询间隔（秒），最小 `30`。非法值回退默认。 |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | Gateway keepalive 间隔（秒），最小 `30`。 |
+| `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | 主上游地址。若填 `https://chatgpt.com`/`https://chat.openai.com` 会自动归一化到 backend-api/codex。 |
+| `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | 自动推断 | 明确指定 fallback 上游。若未设置且主上游是 ChatGPT backend，则默认 fallback 到 `https://api.openai.com/v1`。 |
+| `CODEXMANAGER_UPSTREAM_COOKIE` | 未设置 | 上游 Cookie（主要用于 Cloudflare/WAF challenge 场景）。 |
+| `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | 网关账号选路策略：默认 `ordered`（按账号顺序优先，失败再下一个）；可设 `balanced`/`round_robin`/`rr` 启用按 `Key+模型` 的均衡轮询起点。 |
+| `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | 上游连接阶段超时（秒）。 |
+| `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` | `120000` | 上游单次请求总超时（毫秒）。设为 `0` 表示关闭总超时。 |
+| `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS` | `300000` | 上游流式请求超时（毫秒）。设为 `0` 表示关闭流式超时。 |
+| `CODEXMANAGER_PROXY_LIST` | 未设置 | 上游代理池（最多 5 条，逗号/分号/换行分隔）。按 `account_id` 稳定哈希绑定到某个代理，避免同账号跨代理漂移。 |
+| `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | 请求闸门等待预算（毫秒）。 |
+| `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | 单账号并发软上限。`0` 表示不限制。 |
+| `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Trace body 预览最大字节数。`0` 表示关闭 body 预览。 |
+| `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | 前置代理允许的请求体最大字节数（默认 16 MiB）。 |
+| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | backend worker 数量系数，worker = `max(cpu * factor, worker_min)`。 |
+| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | backend worker 最小值。 |
+| `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | backend 请求队列系数，queue = `max(worker * factor, queue_min)`。 |
+| `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | backend 请求队列最小值。 |
 
 ### 高级变量（可选）
 | 变量 | 默认值 | 说明 |
@@ -258,6 +278,7 @@ pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
 ```dotenv
 # codexmanager.env / CodexManager.env / .env
 CODEXMANAGER_SERVICE_ADDR=localhost:48760
+CODEXMANAGER_WEB_ADDR=localhost:48761
 CODEXMANAGER_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
 CODEXMANAGER_USAGE_POLL_INTERVAL_SECS=600
 CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
@@ -266,13 +287,14 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 ```
 
 说明：
-- 环境文件仅在**桌面端进程启动时**读取一次；修改文件后需要**完全退出并重新打开** CodexManager 才会生效（仅停止/启动内置 service 不会重新加载环境文件）。
+- 环境文件在**桌面端 / service / web 进程启动时**读取一次；修改文件后需要重启对应进程才会生效。
+- 桌面端会把 service 端口保存到本地存储；环境变量更多用于首次默认值（若需强制按环境变量重置，请在 UI 手动修改端口，或清理本地存储后重启）。
 - 环境文件只会注入“当前进程尚未定义”的变量；若你已在系统环境变量中设置了同名 `CODEXMANAGER_*`，则系统环境变量优先生效。
 
 ## 常见问题
 - 授权回调失败：优先检查 `CODEXMANAGER_LOGIN_ADDR` 是否被占用，或在 UI 使用手动回调解析。
 - 模型列表/请求被挑战拦截：可尝试设置 `CODEXMANAGER_UPSTREAM_COOKIE`，或显式配置 `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`。
-- 独立运行 service 报存储不可用：先设置 `CODEXMANAGER_DB_PATH` 到可写路径。
+- 独立运行 service/Web：若所在目录不可写（如安装目录），请设置 `CODEXMANAGER_DB_PATH` 到可写路径。
 - macOS 代理环境下请求 `502/503`：优先确认系统代理未接管本地回环请求（`localhost/127.0.0.1` 走 `DIRECT`），并确保地址使用小写 `localhost:<port>`（例如 `localhost:48760`）。
 
 ## 账号命中规则
