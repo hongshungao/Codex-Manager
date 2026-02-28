@@ -1,0 +1,14 @@
+[package]
+name = "codexmanager-web"
+version.workspace = true
+edition = "2021"
+
+[dependencies]
+codexmanager-service = { path = "../service" }
+axum = "0.8"
+bytes = "1"
+reqwest = { version = "0.12", features = ["rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
+tower-http = { version = "0.6", features = ["fs"] }
+webbrowser = "0.8"
+
