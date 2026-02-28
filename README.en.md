@@ -73,10 +73,11 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 
 ## Service Edition (Headless service + Web UI, no desktop runtime)
 1. Download `CodexManager-service-<platform>-<arch>.zip` from the Release page and unzip.
-2. Recommended: start `codexmanager-web` directly (it will auto-spawn `codexmanager-service` from the same directory and open the browser).
-3. Optional: start `codexmanager-service` first (shows console logs), then start `codexmanager-web`.
-4. Default addresses: service `localhost:48760`, Web UI `http://localhost:48761/`.
-5. Quit: open `http://localhost:48761/__quit` (stops web; if web auto-spawned the service, it will try to stop the service as well).
+2. Recommended: start `codexmanager-start` (one process that launches both service + web, and you can Ctrl+C to stop).
+3. You can also start `codexmanager-web` directly (it will auto-spawn `codexmanager-service` from the same directory and open the browser).
+4. Or start `codexmanager-service` first (shows console logs), then start `codexmanager-web`.
+5. Default addresses: service `localhost:48760`, Web UI `http://localhost:48761/`.
+6. Quit: open `http://localhost:48761/__quit` (stops web; if web auto-spawned the service, it will try to stop the service as well).
 
 ## Docker Deployment
 ### Option 1: docker compose (Recommended)

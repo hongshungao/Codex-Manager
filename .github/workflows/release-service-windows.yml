@@ -150,6 +150,9 @@ jobs:
       - name: Build web binary
         run: cargo build -p codexmanager-web --release --features embedded-ui
 
+      - name: Build start binary
+        run: cargo build -p codexmanager-start --release
+
       - name: Stage service package
         shell: pwsh
         run: |
@@ -174,6 +177,10 @@ jobs:
           $webBin = "target/release/codexmanager-web.exe"
           if (-not (Test-Path $webBin -PathType Leaf)) { throw "web binary not found: $webBin" }
           Copy-Item -Force $webBin (Join-Path $pkgDir "codexmanager-web.exe")
+
+          $startBin = "target/release/codexmanager-start.exe"
+          if (-not (Test-Path $startBin -PathType Leaf)) { throw "start binary not found: $startBin" }
+          Copy-Item -Force $startBin (Join-Path $pkgDir "codexmanager-start.exe")
 
           $zipPath = Join-Path $stageRoot "$pkgName.zip"
           if (Test-Path $zipPath) { Remove-Item -Force $zipPath }

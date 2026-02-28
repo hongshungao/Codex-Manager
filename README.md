@@ -73,10 +73,11 @@
 
 ## Service 版本（后台服务 + Web UI，无桌面环境）
 1. 下载 Release 中的 `CodexManager-service-<platform>-<arch>.zip` 并解压。
-2. 推荐：直接启动 `codexmanager-web`（会自动拉起同目录的 `codexmanager-service`，并打开浏览器）。
-3. 可选：先启动 `codexmanager-service`（会显示控制台日志），再启动 `codexmanager-web`。
-4. 默认地址：service `localhost:48760`，Web UI `http://localhost:48761/`。
-5. 关闭：访问 `http://localhost:48761/__quit`（会关闭 web；若 web 自动拉起过 service，会尝试一并关闭 service）。
+2. 推荐：启动 `codexmanager-start`（一个进程拉起 service + web，且可在控制台 Ctrl+C 关闭）。
+3. 也可以只启动 `codexmanager-web`（会自动拉起同目录的 `codexmanager-service`，并打开浏览器）。
+4. 或者先启动 `codexmanager-service`（会显示控制台日志），再启动 `codexmanager-web`。
+5. 默认地址：service `localhost:48760`，Web UI `http://localhost:48761/`。
+6. 关闭：访问 `http://localhost:48761/__quit`（会关闭 web；若 web 自动拉起过 service，会尝试一并关闭 service）。
 
 ## Docker 部署
 ### 方式 1：docker compose（推荐）

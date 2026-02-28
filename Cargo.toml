@@ -2,6 +2,7 @@
 members = [
   "crates/core",
   "crates/service",
+  "crates/start",
   "crates/web"
 ]
 exclude = [

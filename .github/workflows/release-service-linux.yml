@@ -153,6 +153,9 @@ jobs:
       - name: Build web binary
         run: cargo build -p codexmanager-web --release --features embedded-ui
 
+      - name: Build start binary
+        run: cargo build -p codexmanager-start --release
+
       - name: Stage service package
         shell: bash
         run: |
@@ -174,12 +177,15 @@ jobs:
 
           service_bin="target/release/codexmanager-service"
           web_bin="target/release/codexmanager-web"
+          start_bin="target/release/codexmanager-start"
           test -f "$service_bin" || { echo "service binary not found: $service_bin"; exit 1; }
           test -f "$web_bin" || { echo "web binary not found: $web_bin"; exit 1; }
+          test -f "$start_bin" || { echo "start binary not found: $start_bin"; exit 1; }
 
           cp -f "$service_bin" "$pkg_dir/codexmanager-service"
           cp -f "$web_bin" "$pkg_dir/codexmanager-web"
-          chmod +x "$pkg_dir/codexmanager-service" "$pkg_dir/codexmanager-web"
+          cp -f "$start_bin" "$pkg_dir/codexmanager-start"
+          chmod +x "$pkg_dir/codexmanager-service" "$pkg_dir/codexmanager-web" "$pkg_dir/codexmanager-start"
 
           mkdir -p "$stage_root"
           (cd "$stage_root" && zip -q -r "${pkg_name}.zip" "${pkg_name}")

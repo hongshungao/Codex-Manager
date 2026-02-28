@@ -1,0 +1,9 @@
+[package]
+name = "codexmanager-start"
+version.workspace = true
+edition = "2021"
+
+[dependencies]
+ctrlc = "3"
+webbrowser = "0.8"
+
