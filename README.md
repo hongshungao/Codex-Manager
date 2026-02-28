@@ -59,7 +59,7 @@
 ├─ crates/              # Rust core/service
 │  ├─ core
 │  ├─ service
-│  └─ web                # Service 版本 Web UI（静态资源 + /api/rpc 代理）
+│  └─ web                # Service 版本 Web UI（可内嵌静态资源 + /api/rpc 代理）
 ├─ scripts/             # 构建与发布脚本
 ├─ portable/            # 便携版输出目录
 └─ README.md
@@ -73,8 +73,34 @@
 
 ## Service 版本（后台服务 + Web UI，无桌面环境）
 1. 下载 Release 中的 `CodexManager-service-<platform>-<arch>.zip` 并解压。
-2. 先启动 `codexmanager-service`，再启动 `codexmanager-web`（会自动打开浏览器）。
-3. 默认地址：service `localhost:48760`，Web UI `http://localhost:48761/`。
+2. 推荐：直接启动 `codexmanager-web`（会自动拉起同目录的 `codexmanager-service`，并打开浏览器）。
+3. 可选：先启动 `codexmanager-service`（会显示控制台日志），再启动 `codexmanager-web`。
+4. 默认地址：service `localhost:48760`，Web UI `http://localhost:48761/`。
+5. 关闭：访问 `http://localhost:48761/__quit`（会关闭 web；若 web 自动拉起过 service，会尝试一并关闭 service）。
+
+## Docker 部署
+### 方式 1：docker compose（推荐）
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+浏览器打开：`http://localhost:48761/`
+
+### 方式 2：分别构建/运行
+```bash
+# service
+docker build -f docker/Dockerfile.service -t codexmanager-service .
+docker run --rm -p 48760:48760 -v codexmanager-data:/data \
+  -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
+  codexmanager-service
+
+# web（需要能访问到 service）
+docker build -f docker/Dockerfile.web -t codexmanager-web .
+docker run --rm -p 48761:48761 \
+  -e CODEXMANAGER_WEB_NO_SPAWN_SERVICE=1 \
+  -e CODEXMANAGER_SERVICE_ADDR=host.docker.internal:48760 \
+  -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
+  codexmanager-web
+```
 
 ## 开发与构建
 ### 前端
@@ -91,6 +117,10 @@ pnpm -C apps run build
 cargo test --workspace
 cargo build -p codexmanager-service --release
 cargo build -p codexmanager-web --release
+
+# 发行物/容器：将前端静态资源打进 codexmanager-web（二进制单文件）
+pnpm -C apps run build
+cargo build -p codexmanager-web --release --features embedded-ui
 ```
 
 ### Tauri 打包（Windows）
@@ -204,8 +234,9 @@ pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
 |---|---|---|
 | `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | service 监听地址；桌面端也会用它作为默认 RPC 目标地址。 |
 | `CODEXMANAGER_WEB_ADDR` | `localhost:48761` | Service 版本 Web UI 监听地址（仅 `codexmanager-web` 使用）。 |
-| `CODEXMANAGER_WEB_ROOT` | 同目录 `web/` | Web 静态资源目录（仅 `codexmanager-web` 使用）。 |
+| `CODEXMANAGER_WEB_ROOT` | 同目录 `web/` | Web 静态资源目录（仅 `codexmanager-web` 使用；若使用内嵌前端资源则无需该目录）。 |
 | `CODEXMANAGER_WEB_NO_OPEN` | 未设置 | 若设置则 `codexmanager-web` 不会自动打开浏览器。 |
+| `CODEXMANAGER_WEB_NO_SPAWN_SERVICE` | 未设置 | 若设置则 `codexmanager-web` 不会尝试自动拉起同目录的 `codexmanager-service`。 |
 | `CODEXMANAGER_DB_PATH` | 同目录 `codexmanager.db`（Service/Web）；桌面端自动设置 | SQLite 数据库路径。桌面端会自动设为 `app_data_dir/codexmanager.db`。 |
 | `CODEXMANAGER_RPC_TOKEN` | 自动生成 64 位十六进制随机串 | `/rpc` 鉴权 token。未设置时自动生成，并默认落盘到 `codexmanager.rpc-token` 便于跨进程复用。 |
 | `CODEXMANAGER_RPC_TOKEN_FILE` | 同目录 `codexmanager.rpc-token` | 指定 `/rpc` token 文件路径（相对路径以 DB 所在目录为基准）。 |

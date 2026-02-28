@@ -1,0 +1,14 @@
+**/target
+**/node_modules
+apps/dist
+apps/.vite
+apps/.turbo
+.git
+.github
+portable
+docs
+specs
+.worktrees
+*.db
+*.sqlite
+*.log

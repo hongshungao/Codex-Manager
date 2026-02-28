@@ -1,0 +1,26 @@
+FROM rust:1-bookworm AS builder
+
+WORKDIR /src
+
+# 先拷贝 manifests，尽量利用 Docker layer cache
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+RUN cargo build -p codexmanager-service --release
+
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /src/target/release/codexmanager-service /usr/local/bin/codexmanager-service
+
+ENV CODEXMANAGER_SERVICE_ADDR=0.0.0.0:48760
+ENV CODEXMANAGER_DB_PATH=/data/codexmanager.db
+
+VOLUME ["/data"]
+EXPOSE 48760
+
+CMD ["codexmanager-service"]
+

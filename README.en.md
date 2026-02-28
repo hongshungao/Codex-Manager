@@ -59,7 +59,7 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 ├─ crates/              # Rust core/service
 │  ├─ core
 │  ├─ service
-│  └─ web                # Service edition Web UI (static assets + /api/rpc proxy)
+│  └─ web                # Service edition Web UI (optional embedded assets + /api/rpc proxy)
 ├─ scripts/             # build/release scripts
 ├─ portable/            # portable output
 └─ README.en.md
@@ -73,8 +73,34 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 
 ## Service Edition (Headless service + Web UI, no desktop runtime)
 1. Download `CodexManager-service-<platform>-<arch>.zip` from the Release page and unzip.
-2. Start `codexmanager-service` first, then start `codexmanager-web` (it will auto-open your browser).
-3. Default addresses: service `localhost:48760`, Web UI `http://localhost:48761/`.
+2. Recommended: start `codexmanager-web` directly (it will auto-spawn `codexmanager-service` from the same directory and open the browser).
+3. Optional: start `codexmanager-service` first (shows console logs), then start `codexmanager-web`.
+4. Default addresses: service `localhost:48760`, Web UI `http://localhost:48761/`.
+5. Quit: open `http://localhost:48761/__quit` (stops web; if web auto-spawned the service, it will try to stop the service as well).
+
+## Docker Deployment
+### Option 1: docker compose (Recommended)
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+Open in browser: `http://localhost:48761/`
+
+### Option 2: Build/Run separately
+```bash
+# service
+docker build -f docker/Dockerfile.service -t codexmanager-service .
+docker run --rm -p 48760:48760 -v codexmanager-data:/data \
+  -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
+  codexmanager-service
+
+# web (must reach the service)
+docker build -f docker/Dockerfile.web -t codexmanager-web .
+docker run --rm -p 48761:48761 \
+  -e CODEXMANAGER_WEB_NO_SPAWN_SERVICE=1 \
+  -e CODEXMANAGER_SERVICE_ADDR=host.docker.internal:48760 \
+  -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
+  codexmanager-web
+```
 
 ## Development & Build
 ### Frontend
@@ -91,6 +117,10 @@ pnpm -C apps run build
 cargo test --workspace
 cargo build -p codexmanager-service --release
 cargo build -p codexmanager-web --release
+
+# Release/containers: embed frontend assets into codexmanager-web (single binary)
+pnpm -C apps run build
+cargo build -p codexmanager-web --release --features embedded-ui
 ```
 
 ### Tauri Packaging (Windows)
@@ -206,8 +236,9 @@ It updates:
 |---|---|---|
 | `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | Service bind address and default RPC target used by desktop app. |
 | `CODEXMANAGER_WEB_ADDR` | `localhost:48761` | Service edition Web UI bind address (used by `codexmanager-web` only). |
-| `CODEXMANAGER_WEB_ROOT` | `web/` next to executable | Web static assets directory (used by `codexmanager-web` only). |
+| `CODEXMANAGER_WEB_ROOT` | `web/` next to executable | Web static assets directory (used by `codexmanager-web` only; not needed when using embedded UI assets). |
 | `CODEXMANAGER_WEB_NO_OPEN` | Unset | If set, `codexmanager-web` will not auto-open the browser. |
+| `CODEXMANAGER_WEB_NO_SPAWN_SERVICE` | Unset | If set, `codexmanager-web` will not try to auto-spawn `codexmanager-service` from the same directory. |
 | `CODEXMANAGER_DB_PATH` | `codexmanager.db` next to executable (Service/Web); desktop auto-sets | SQLite path. Desktop sets `app_data_dir/codexmanager.db`. |
 | `CODEXMANAGER_RPC_TOKEN` | Auto-generated random 64-hex string | `/rpc` auth token. Auto-generated if missing, and persisted to `codexmanager.rpc-token` by default for cross-process reuse. |
 | `CODEXMANAGER_RPC_TOKEN_FILE` | `codexmanager.rpc-token` next to DB | Custom `/rpc` token file path (relative paths are resolved from DB directory). |

@@ -1,0 +1,33 @@
+services:
+  codexmanager-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+    environment:
+      CODEXMANAGER_SERVICE_ADDR: 0.0.0.0:48760
+      CODEXMANAGER_DB_PATH: /data/codexmanager.db
+      CODEXMANAGER_RPC_TOKEN_FILE: /data/codexmanager.rpc-token
+    volumes:
+      - codexmanager-data:/data
+    ports:
+      - "48760:48760"
+
+  codexmanager-web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    depends_on:
+      - codexmanager-service
+    environment:
+      CODEXMANAGER_WEB_ADDR: 0.0.0.0:48761
+      CODEXMANAGER_WEB_NO_SPAWN_SERVICE: "1"
+      CODEXMANAGER_SERVICE_ADDR: codexmanager-service:48760
+      CODEXMANAGER_RPC_TOKEN_FILE: /data/codexmanager.rpc-token
+      CODEXMANAGER_WEB_NO_OPEN: "1"
+    volumes:
+      - codexmanager-data:/data
+    ports:
+      - "48761:48761"
+
+volumes:
+  codexmanager-data:
