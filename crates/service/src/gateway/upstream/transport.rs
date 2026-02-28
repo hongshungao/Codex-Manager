@@ -23,7 +23,7 @@ pub(super) fn send_upstream_request(
     method: &reqwest::Method,
     target_url: &str,
     request_deadline: Option<Instant>,
-    _request: &Request,
+    request: &Request,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
     body: &Bytes,
     is_stream: bool,
@@ -34,14 +34,21 @@ pub(super) fn send_upstream_request(
 ) -> Result<reqwest::blocking::Response, reqwest::Error> {
     let attempt_started_at = Instant::now();
     let incoming_session_id = incoming_headers.session_id();
+    let remote = request.remote_addr();
     let mut derived_session_id = if !strip_session_affinity && incoming_session_id.is_none() {
-        super::header_profile::derive_sticky_session_id_from_headers(incoming_headers)
+        super::header_profile::derive_sticky_session_id_from_headers_with_remote(
+            incoming_headers,
+            remote.copied(),
+        )
     } else {
         None
     };
     let incoming_conversation_id = incoming_headers.conversation_id();
     let mut derived_conversation_id = if !strip_session_affinity && incoming_conversation_id.is_none() {
-        super::header_profile::derive_sticky_conversation_id_from_headers(incoming_headers)
+        super::header_profile::derive_sticky_conversation_id_from_headers_with_remote(
+            incoming_headers,
+            remote.copied(),
+        )
     } else {
         None
     };

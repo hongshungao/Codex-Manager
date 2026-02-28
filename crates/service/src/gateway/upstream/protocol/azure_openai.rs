@@ -310,21 +310,32 @@ pub(in super::super) fn proxy_azure_request(
         None
     };
     let inflight_guard = super::super::super::acquire_account_inflight(key_id);
-    let usage = super::super::super::respond_with_upstream(
+    let bridge = super::super::super::respond_with_upstream(
         request,
         upstream,
         inflight_guard,
         response_adapter,
         is_stream,
     )?;
+    let bridge_ok = bridge.is_ok(is_stream);
+    let bridge_error = bridge.error_message(is_stream);
+    let usage = bridge.usage;
+    let mut final_status_code = status_code;
+    let mut final_error_text: Option<String> = error_text.map(|v| v.to_string());
+    if status_code < 400 && !bridge_ok {
+        final_status_code = 502;
+        final_error_text = bridge_error.or(final_error_text);
+    } else if status_code >= 400 && final_error_text.is_none() {
+        final_error_text = bridge_error;
+    }
 
-    super::super::super::record_gateway_request_outcome(path, status_code, Some(PROTOCOL_AZURE_OPENAI));
+    super::super::super::record_gateway_request_outcome(path, final_status_code, Some(PROTOCOL_AZURE_OPENAI));
     super::super::super::trace_log::log_request_final(
         trace_id,
-        status_code,
+        final_status_code,
         Some(key_id),
         Some(url.as_str()),
-        error_text,
+        final_error_text.as_deref(),
         started_at.elapsed().as_millis(),
     );
     super::super::super::write_request_log(
@@ -336,7 +347,7 @@ pub(in super::super) fn proxy_azure_request(
         model_for_log,
         reasoning_for_log,
         Some(url.as_str()),
-        Some(status_code),
+        Some(final_status_code),
         super::super::super::request_log::RequestLogUsage {
             input_tokens: usage.input_tokens,
             cached_input_tokens: usage.cached_input_tokens,
@@ -344,7 +355,7 @@ pub(in super::super) fn proxy_azure_request(
             total_tokens: usage.total_tokens,
             reasoning_output_tokens: usage.reasoning_output_tokens,
         },
-        error_text,
+        final_error_text.as_deref(),
     );
     Ok(())
 }

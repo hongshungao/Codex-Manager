@@ -25,6 +25,48 @@ pub(super) struct UpstreamResponseUsage {
     pub output_text: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(super) struct UpstreamResponseBridgeResult {
+    pub usage: UpstreamResponseUsage,
+    // For streaming responses: whether we observed a terminal marker such as `data: [DONE]`
+    // or `type/event: response.completed|response.failed`.
+    pub stream_terminal_seen: bool,
+    // For streaming responses: terminal error message (e.g. `response.failed` or error payload).
+    pub stream_terminal_error: Option<String>,
+    // Any IO error while writing the response back to the downstream client.
+    pub delivery_error: Option<String>,
+}
+
+impl UpstreamResponseBridgeResult {
+    pub(super) fn is_ok(&self, is_stream: bool) -> bool {
+        if self.delivery_error.is_some() {
+            return false;
+        }
+        if is_stream {
+            if !self.stream_terminal_seen {
+                return false;
+            }
+            if self.stream_terminal_error.is_some() {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub(super) fn error_message(&self, is_stream: bool) -> Option<String> {
+        if let Some(err) = self.stream_terminal_error.as_ref() {
+            return Some(err.clone());
+        }
+        if is_stream && !self.stream_terminal_seen {
+            return Some("stream disconnected before completion".to_string());
+        }
+        if let Some(err) = self.delivery_error.as_ref() {
+            return Some(format!("response write failed: {err}"));
+        }
+        None
+    }
+}
+
 fn merge_usage(target: &mut UpstreamResponseUsage, source: UpstreamResponseUsage) {
     if source.input_tokens.is_some() {
         target.input_tokens = source.input_tokens;
@@ -290,6 +332,7 @@ fn parse_usage_from_json(value: &Value) -> UpstreamResponseUsage {
     usage
 }
 
+#[cfg(test)]
 fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage> {
     let mut data_lines = Vec::new();
     for line in lines {
@@ -334,13 +377,162 @@ fn parse_usage_from_sse_frame(lines: &[String]) -> Option<UpstreamResponseUsage>
     Some(usage)
 }
 
+#[derive(Debug, Clone)]
+enum SseTerminal {
+    Ok,
+    Err(String),
+}
+
+#[derive(Debug, Clone, Default)]
+struct SseFrameInspection {
+    saw_data: bool,
+    usage: Option<UpstreamResponseUsage>,
+    terminal: Option<SseTerminal>,
+}
+
+fn classify_terminal_event_name(name: &str) -> Option<SseTerminal> {
+    let normalized = name.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized == "done" || normalized == "response.completed" || normalized.ends_with(".completed") {
+        return Some(SseTerminal::Ok);
+    }
+    if normalized == "error"
+        || normalized == "response.failed"
+        || normalized.ends_with(".failed")
+        || normalized.ends_with(".error")
+        || normalized.ends_with(".canceled")
+        || normalized.ends_with(".cancelled")
+        || normalized.ends_with(".incomplete")
+    {
+        return Some(SseTerminal::Err(normalized));
+    }
+    None
+}
+
+fn extract_error_message_from_json(value: &Value) -> Option<String> {
+    // OpenAI style: { "error": { "message": "..." } }
+    if let Some(err_obj) = value.get("error").and_then(Value::as_object) {
+        if let Some(message) = err_obj.get("message").and_then(Value::as_str) {
+            let msg = message.trim();
+            if !msg.is_empty() {
+                return Some(msg.to_string());
+            }
+        }
+        if let Some(message) = err_obj.get("error").and_then(Value::as_str) {
+            let msg = message.trim();
+            if !msg.is_empty() {
+                return Some(msg.to_string());
+            }
+        }
+        // Fall back to compact JSON if needed.
+        if let Ok(text) = serde_json::to_string(err_obj) {
+            if !text.trim().is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    // Some providers emit: { "type": "error", "message": "..." }
+    if value
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|t| t.eq_ignore_ascii_case("error"))
+    {
+        if let Some(message) = value.get("message").and_then(Value::as_str) {
+            let msg = message.trim();
+            if !msg.is_empty() {
+                return Some(msg.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn inspect_sse_frame(lines: &[String]) -> SseFrameInspection {
+    let mut inspection = SseFrameInspection::default();
+    let mut data_lines = Vec::new();
+    let mut event_name: Option<String> = None;
+
+    for line in lines {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if let Some(rest) = trimmed.strip_prefix("event:") {
+            if event_name.is_none() {
+                let v = rest.trim();
+                if !v.is_empty() {
+                    event_name = Some(v.to_string());
+                }
+            }
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("data:") {
+            inspection.saw_data = true;
+            data_lines.push(rest.trim_start().to_string());
+        }
+    }
+
+    if let Some(name) = event_name.as_deref() {
+        inspection.terminal = classify_terminal_event_name(name);
+    }
+
+    if data_lines.is_empty() {
+        return inspection;
+    }
+
+    let data = data_lines.join("\n");
+    if data.trim() == "[DONE]" {
+        inspection.terminal = Some(SseTerminal::Ok);
+        return inspection;
+    }
+
+    if let Ok(value) = serde_json::from_str::<Value>(&data) {
+        if let Some(message) = extract_error_message_from_json(&value) {
+            inspection.terminal = Some(SseTerminal::Err(message));
+        } else if let Some(kind) = value.get("type").and_then(Value::as_str) {
+            // OpenAI Responses API streaming uses `type` as event name.
+            if let Some(terminal) = classify_terminal_event_name(kind) {
+                inspection.terminal = Some(terminal);
+            }
+        }
+
+        // Always attempt to parse usage; some terminal/error frames also include usage.
+        inspection.usage = parse_usage_from_json(&value).into();
+        // For compatibility with chat-completions delta frames, augment output_text like the existing parser does.
+        if let Some(choices) = value.get("choices").and_then(Value::as_array) {
+            let mut text_out = String::new();
+            for choice in choices {
+                if let Some(delta) = choice
+                    .get("delta")
+                    .and_then(Value::as_object)
+                    .and_then(|delta| delta.get("content"))
+                {
+                    collect_response_output_text(delta, &mut text_out);
+                }
+            }
+            if !text_out.trim().is_empty() {
+                let usage = inspection.usage.get_or_insert_with(UpstreamResponseUsage::default);
+                let target = usage.output_text.get_or_insert_with(String::new);
+                append_output_text(target, text_out.as_str());
+            }
+        } else if let Some(delta) = value.get("delta").and_then(Value::as_str) {
+            if !delta.is_empty() {
+                let usage = inspection.usage.get_or_insert_with(UpstreamResponseUsage::default);
+                let target = usage.output_text.get_or_insert_with(String::new);
+                append_output_text(target, delta);
+            }
+        }
+    }
+
+    inspection
+}
+
 pub(super) fn respond_with_upstream(
     request: Request,
     upstream: reqwest::blocking::Response,
     _inflight_guard: AccountInFlightGuard,
     response_adapter: super::ResponseAdapter,
     is_stream: bool,
-) -> Result<UpstreamResponseUsage, String> {
+) -> Result<UpstreamResponseBridgeResult, String> {
     match response_adapter {
         super::ResponseAdapter::Passthrough => {
             let upstream_content_type = upstream
@@ -386,11 +578,16 @@ pub(super) fn respond_with_upstream(
                     len,
                     None,
                 );
-                let _ = request.respond(response);
-                return Ok(usage);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                return Ok(UpstreamResponseBridgeResult {
+                    usage,
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                });
             }
             if is_sse || is_stream {
-                let usage_collector = Arc::new(Mutex::new(UpstreamResponseUsage::default()));
+                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
                 let response = Response::new(
                     status,
                     headers,
@@ -398,17 +595,24 @@ pub(super) fn respond_with_upstream(
                     None,
                     None,
                 );
-                let _ = request.respond(response);
-                let usage = usage_collector
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                return Ok(usage);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                let collector = usage_collector.lock().map(|guard| guard.clone()).unwrap_or_default();
+                return Ok(UpstreamResponseBridgeResult {
+                    usage: collector.usage,
+                    stream_terminal_seen: collector.saw_terminal,
+                    stream_terminal_error: collector.terminal_error,
+                    delivery_error,
+                });
             }
             let len = upstream.content_length().map(|v| v as usize);
             let response = Response::new(status, headers, upstream, len, None);
-            let _ = request.respond(response);
-            Ok(UpstreamResponseUsage::default())
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            Ok(UpstreamResponseBridgeResult {
+                usage: UpstreamResponseUsage::default(),
+                stream_terminal_seen: true,
+                stream_terminal_error: None,
+                delivery_error,
+            })
         }
         super::ResponseAdapter::AnthropicJson | super::ResponseAdapter::AnthropicSse => {
             let status = StatusCode(upstream.status().as_u16());
@@ -453,12 +657,17 @@ pub(super) fn respond_with_upstream(
                     None,
                     None,
                 );
-                let _ = request.respond(response);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
                 let usage = usage_collector
                     .lock()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
-                return Ok(usage);
+                return Ok(UpstreamResponseBridgeResult {
+                    usage,
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                });
             }
 
             let upstream_body = upstream
@@ -490,24 +699,36 @@ pub(super) fn respond_with_upstream(
 
             let len = Some(body.len());
             let response = Response::new(status, headers, std::io::Cursor::new(body), len, None);
-            let _ = request.respond(response);
-            Ok(usage)
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            Ok(UpstreamResponseBridgeResult {
+                usage,
+                stream_terminal_seen: true,
+                stream_terminal_error: None,
+                delivery_error,
+            })
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+struct PassthroughSseCollector {
+    usage: UpstreamResponseUsage,
+    saw_terminal: bool,
+    terminal_error: Option<String>,
 }
 
 struct PassthroughSseUsageReader {
     upstream: BufReader<reqwest::blocking::Response>,
     pending_frame_lines: Vec<String>,
     out_cursor: Cursor<Vec<u8>>,
-    usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
+    usage_collector: Arc<Mutex<PassthroughSseCollector>>,
     finished: bool,
 }
 
 impl PassthroughSseUsageReader {
     fn new(
         upstream: reqwest::blocking::Response,
-        usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
+        usage_collector: Arc<Mutex<PassthroughSseCollector>>,
     ) -> Self {
         Self {
             upstream: BufReader::new(upstream),
@@ -519,11 +740,20 @@ impl PassthroughSseUsageReader {
     }
 
     fn update_usage_from_frame(&self, lines: &[String]) {
-        let Some(parsed) = parse_usage_from_sse_frame(lines) else {
+        let inspection = inspect_sse_frame(lines);
+        if inspection.usage.is_none() && inspection.terminal.is_none() {
             return;
-        };
-        if let Ok(mut usage) = self.usage_collector.lock() {
-            merge_usage(&mut usage, parsed);
+        }
+        if let Ok(mut collector) = self.usage_collector.lock() {
+            if let Some(parsed) = inspection.usage {
+                merge_usage(&mut collector.usage, parsed);
+            }
+            if let Some(terminal) = inspection.terminal {
+                collector.saw_terminal = true;
+                if let SseTerminal::Err(message) = terminal {
+                    collector.terminal_error = Some(message);
+                }
+            }
         }
     }
 
@@ -534,6 +764,13 @@ impl PassthroughSseUsageReader {
             if !self.pending_frame_lines.is_empty() {
                 let frame = std::mem::take(&mut self.pending_frame_lines);
                 self.update_usage_from_frame(&frame);
+            }
+            if let Ok(mut collector) = self.usage_collector.lock() {
+                if !collector.saw_terminal {
+                    collector.terminal_error.get_or_insert_with(|| {
+                        "stream disconnected before completion".to_string()
+                    });
+                }
             }
             self.finished = true;
             return Ok(Vec::new());
@@ -998,7 +1235,7 @@ fn tool_input_partial_json(value: Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_usage_from_json, parse_usage_from_sse_frame};
+    use super::{inspect_sse_frame, parse_usage_from_json, parse_usage_from_sse_frame};
     use serde_json::json;
 
     #[test]
@@ -1125,5 +1362,36 @@ mod tests {
             text.len()
         );
         assert!(text.ends_with(super::OUTPUT_TEXT_TRUNCATED_MARKER));
+    }
+
+    #[test]
+    fn inspect_sse_frame_recognizes_done_marker() {
+        let frame_lines = vec![
+            "event: message\n".to_string(),
+            "data: [DONE]\n".to_string(),
+            "\n".to_string(),
+        ];
+        let inspection = inspect_sse_frame(&frame_lines);
+        assert!(inspection.terminal.is_some());
+    }
+
+    #[test]
+    fn inspect_sse_frame_recognizes_response_failed_as_terminal_error() {
+        let frame_lines = vec![
+            "event: response.failed\n".to_string(),
+            r#"data: {"type":"response.failed","error":{"message":"Internal server error"}}"#
+                .to_string(),
+            "\n".to_string(),
+        ];
+        let inspection = inspect_sse_frame(&frame_lines);
+        let err = inspection
+            .terminal
+            .as_ref()
+            .and_then(|t| match t {
+                super::SseTerminal::Ok => None,
+                super::SseTerminal::Err(msg) => Some(msg.as_str()),
+            })
+            .unwrap_or("");
+        assert!(err.contains("Internal server error"));
     }
 }

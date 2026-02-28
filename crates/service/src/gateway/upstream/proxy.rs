@@ -14,6 +14,17 @@ fn respond_terminal(request: Request, status_code: u16, message: String) -> Resu
     Ok(())
 }
 
+fn is_client_disconnect_error(message: &str) -> bool {
+    let normalized = message.trim().to_ascii_lowercase();
+    normalized.contains("broken pipe")
+        || normalized.contains("connection reset")
+        || normalized.contains("connection aborted")
+        || normalized.contains("connection was forcibly closed")
+        || normalized.contains("os error 32")
+        || normalized.contains("os error 54")
+        || normalized.contains("os error 104")
+}
+
 fn respond_total_timeout(
     request: Request,
     context: &GatewayUpstreamExecutionContext<'_>,
@@ -318,11 +329,8 @@ pub(in super::super) fn proxy_validated_request(
                 if status_code >= 400 {
                     let _ = super::super::clear_manual_preferred_account_if(&account.id);
                 }
-                let final_error = if status_code >= 400 {
-                    last_attempt_error.as_deref()
-                } else {
-                    None
-                };
+                let mut final_error: Option<String> =
+                    if status_code >= 400 { last_attempt_error.clone() } else { None };
                 let elapsed_ms = started_at.elapsed().as_millis();
                 let request = request
                     .take()
@@ -330,17 +338,70 @@ pub(in super::super) fn proxy_validated_request(
                 let guard = inflight_guard
                     .take()
                     .expect("inflight guard should be available before terminal response");
-                let usage = super::super::respond_with_upstream(
+                let bridge = super::super::respond_with_upstream(
                     request,
                     resp,
                     guard,
                     response_adapter,
                     is_stream,
                 )?;
+                let bridge_ok = bridge.is_ok(is_stream);
+                let bridge_error_message = if bridge_ok {
+                    None
+                } else {
+                    Some(
+                        bridge
+                            .error_message(is_stream)
+                            .unwrap_or_else(|| "upstream response incomplete".to_string()),
+                    )
+                };
+                if !bridge_ok {
+                    let bridge_error = bridge_error_message
+                        .as_deref()
+                        .unwrap_or("upstream response incomplete");
+                    match final_error.as_deref() {
+                        Some(existing) if existing != bridge_error => {
+                            final_error = Some(format!("{existing}; {bridge_error}"));
+                        }
+                        None => {
+                            final_error = Some(bridge_error.to_string());
+                        }
+                        _ => {}
+                    }
+                }
+
+                // 中文注释：流式响应可能以 200 开始，但在未收到终止事件时提前断流（上游 5xx/网络抖动）。
+                // 这种情况对客户端等同失败，日志里也应标记为 5xx（或 499 客户端断开）。
+                let upstream_stream_failed = is_stream
+                    && (!bridge.stream_terminal_seen || bridge.stream_terminal_error.is_some());
+                let client_delivery_failed = bridge
+                    .delivery_error
+                    .as_deref()
+                    .is_some_and(is_client_disconnect_error);
+                let status_for_log = if status_code >= 400 {
+                    status_code
+                } else if upstream_stream_failed {
+                    502
+                } else if bridge_ok {
+                    status_code
+                } else if client_delivery_failed {
+                    499
+                } else {
+                    502
+                };
+
+                if upstream_stream_failed {
+                    // 下次请求尽量避开该账号，避免连续断流造成体验很差。
+                    let _ = super::super::clear_manual_preferred_account_if(&account.id);
+                    super::super::mark_account_cooldown(&account.id, super::super::CooldownReason::Network);
+                    super::super::record_route_quality(&account.id, 502);
+                }
+
+                let usage = bridge.usage;
                 context.log_final_result(
                     Some(&account.id),
                     last_attempt_url.as_deref(),
-                    status_code,
+                    status_for_log,
                     RequestLogUsage {
                         input_tokens: usage.input_tokens,
                         cached_input_tokens: usage.cached_input_tokens,
@@ -348,7 +409,7 @@ pub(in super::super) fn proxy_validated_request(
                         total_tokens: usage.total_tokens,
                         reasoning_output_tokens: usage.reasoning_output_tokens,
                     },
-                    final_error,
+                    final_error.as_deref(),
                     elapsed_ms,
                 );
                 return Ok(());

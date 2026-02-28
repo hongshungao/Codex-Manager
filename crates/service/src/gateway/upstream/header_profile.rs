@@ -1,5 +1,6 @@
 use rand::RngCore;
 use sha2::{Digest, Sha256};
+use std::net::SocketAddr;
 use tiny_http::Request;
 
 use super::super::IncomingHeaderSnapshot;
@@ -56,6 +57,28 @@ pub(crate) fn derive_sticky_conversation_id_from_headers(
     incoming_headers: &IncomingHeaderSnapshot,
 ) -> Option<String> {
     derive_sticky_id_from_material(incoming_headers.sticky_key_material(), "conversation")
+}
+
+pub(crate) fn derive_sticky_session_id_from_headers_with_remote(
+    incoming_headers: &IncomingHeaderSnapshot,
+    remote: Option<SocketAddr>,
+) -> Option<String> {
+    derive_sticky_id_from_material_with_remote(
+        incoming_headers.sticky_key_material(),
+        remote,
+        "session",
+    )
+}
+
+pub(crate) fn derive_sticky_conversation_id_from_headers_with_remote(
+    incoming_headers: &IncomingHeaderSnapshot,
+    remote: Option<SocketAddr>,
+) -> Option<String> {
+    derive_sticky_id_from_material_with_remote(
+        incoming_headers.sticky_key_material(),
+        remote,
+        "conversation",
+    )
 }
 
 pub(crate) fn build_codex_upstream_headers(
@@ -155,6 +178,20 @@ fn stable_session_id_from_material(value: &str) -> String {
 fn derive_sticky_id_from_material(key_material: Option<&str>, salt: &str) -> Option<String> {
     let key_material = key_material?;
     Some(stable_session_id_from_material(&format!("{salt}:{key_material}")))
+}
+
+fn derive_sticky_id_from_material_with_remote(
+    key_material: Option<&str>,
+    remote: Option<SocketAddr>,
+    salt: &str,
+) -> Option<String> {
+    let key_material = key_material?;
+    if let Some(remote) = remote {
+        return Some(stable_session_id_from_material(&format!(
+            "{salt}:{key_material}:{remote}"
+        )));
+    }
+    derive_sticky_id_from_material(Some(key_material), salt)
 }
 
 fn random_session_id() -> String {
