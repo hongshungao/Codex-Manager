@@ -27,11 +27,11 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 - Request logs responsive optimization: narrow screens hide secondary columns by priority while preserving core fields (account/path/model/status).
 - Button and layout consistency: unified sizing for page buttons, row action buttons, and modal buttons; Accounts and Dashboard content widths are aligned.
 - Gateway observability: capped `http_bridge` output accumulation; added `/metrics` to expose DB busy, HTTP queue depth, upstream attempt latency, etc.
-- Release flow speed & safety: manual-only workflows across platforms; unified Tauri CLI version; tag/version consistency checks; release assets include `SHA256SUMS`/`manifest.json`; upload-artifact compression disabled; per-tag concurrency to avoid release write races.
+- Release flow speed & safety: manual-only workflows across platforms; unified Tauri CLI version; tag/version consistency checks; release assets include `SHA256SUMS`/`manifest.json`; upload-artifact compression disabled; concurrency is scoped by `workflow+tag` to avoid cross-workflow cancellations; release-create races automatically fall back to `edit + upload`.
 
 ## Features
 - Account pool management: group, tag, sort, note
-- Usage dashboard: 5-hour + 7-day snapshots
+- Usage dashboard: supports 5-hour + 7-day dual windows, and accounts that only return a 7-day single window (for example free weekly quota)
 - OAuth login: browser flow + manual callback parsing
 - Platform keys: create, disable, delete, bind model
 - Local service: auto-start with configurable port
@@ -111,7 +111,7 @@ All workflows are `workflow_dispatch` only.
     - `ref` (default: `main`)
     - `run_verify` (default: `true`)
 - `release-linux.yml`
-  - Purpose: Linux packaging and release publishing (AppImage/deb + portable)
+  - Purpose: Linux packaging and release publishing (AppImage/deb/rpm + portable)
   - Trigger: manual only
   - Inputs:
     - `tag` (required)
@@ -177,14 +177,15 @@ It updates:
 - `apps/src-tauri/Cargo.toml`
 - `apps/src-tauri/tauri.conf.json`
 
-## Environment Variables (Complete)
+## Environment Variables
 ### Load Rules and Precedence
 - Desktop app loads env files from executable directory in this order:
   - `codexmanager.env` -> `CodexManager.env` -> `.env` (first hit wins)
 - Existing process/system env vars are not overridden by env-file values.
 - Most vars are optional. `CODEXMANAGER_DB_PATH` is conditionally required when running `codexmanager-service` standalone.
+- The tables below are split into common vs advanced knobs. For the full list, search `CODEXMANAGER_` in the source code as the source of truth.
 
-### Runtime Variables (`CODEXMANAGER_*`)
+### Common Variables (`CODEXMANAGER_*`)
 | Variable | Default | Required | Description |
 |---|---|---|---|
 | `CODEXMANAGER_SERVICE_ADDR` | `localhost:48760` | Optional | Service bind address and default RPC target used by desktop app. |
@@ -206,6 +207,9 @@ It updates:
 | `CODEXMANAGER_UPSTREAM_COOKIE` | Unset | Optional | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
 | `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | Optional | Gateway account routing strategy: default `ordered` (follow account order, fail over to next on failure); set `balanced`/`round_robin`/`rr` to enable key+model-based balanced round-robin starts. |
 | `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | Optional | Upstream connect timeout in seconds. |
+| `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` | `120000` | Optional | Upstream total timeout per request in milliseconds. Set `0` to disable. |
+| `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS` | `300000` | Optional | Upstream stream timeout in milliseconds. Set `0` to disable. |
+| `CODEXMANAGER_PROXY_LIST` | Unset | Optional | Upstream proxy pool (max 5 entries, separated by comma/semicolon/newlines). Each account is stably hash-mapped to one proxy to avoid proxy drift. |
 | `CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS` | `300` | Optional | Request-gate wait budget in milliseconds. |
 | `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | Optional | Per-account soft inflight cap. `0` means unlimited. |
 | `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Optional | Max bytes for trace body preview. `0` disables body preview. |
@@ -214,6 +218,37 @@ It updates:
 | `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | Optional | Minimum backend workers. |
 | `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | Optional | Backend queue factor; queue = `max(worker * factor, queue_min)`. |
 | `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | Optional | Minimum backend queue size. |
+
+### Advanced Variables (Optional)
+| Variable | Default | Description |
+|---|---|---|
+| `CODEXMANAGER_ACCOUNT_IMPORT_BATCH_SIZE` | `200` | Import batch size for auth.json bulk imports. |
+| `CODEXMANAGER_TRACE_QUEUE_CAPACITY` | `2048` | Gateway trace async queue capacity (too small may drop traces; too large may increase memory). |
+| `CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR` | `1` | Backend stream worker factor (SSE/long-lived responses). |
+| `CODEXMANAGER_HTTP_STREAM_WORKER_MIN` | `2` | Minimum backend stream workers. |
+| `CODEXMANAGER_HTTP_STREAM_QUEUE_FACTOR` | `2` | Backend stream queue factor. |
+| `CODEXMANAGER_HTTP_STREAM_QUEUE_MIN` | `16` | Minimum backend stream queue size. |
+| `CODEXMANAGER_POLL_JITTER_SECS` | Unset | Common polling jitter in seconds; can be overridden by module-specific jitter envs. |
+| `CODEXMANAGER_POLL_FAILURE_BACKOFF_MAX_SECS` | Unset | Common failure backoff cap in seconds; can be overridden by module-specific backoff envs. |
+| `CODEXMANAGER_USAGE_POLL_JITTER_SECS` | `5` | Usage polling jitter in seconds. |
+| `CODEXMANAGER_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS` | `1800` | Usage polling failure backoff cap in seconds. |
+| `CODEXMANAGER_USAGE_REFRESH_WORKERS` | `4` | Usage refresh worker count. |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_JITTER_SECS` | `5` | Keepalive jitter in seconds. |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS` | `900` | Keepalive failure backoff cap in seconds. |
+| `CODEXMANAGER_USAGE_REFRESH_FAILURE_EVENT_WINDOW_SECS` | `60` | Dedupe window (seconds) for inserting usage refresh failure events, to avoid spamming the event table on transient failures. |
+| `CODEXMANAGER_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT` | `200` | Usage snapshots retained per account (0 disables pruning). |
+| `CODEXMANAGER_CANDIDATE_CACHE_TTL_MS` | `500` | Gateway candidate snapshot cache TTL in ms (reduces DB pressure on high-QPS). Set `0` to disable. |
+| `CODEXMANAGER_PROMPT_CACHE_TTL_SECS` | `3600` | Prompt cache TTL in seconds. |
+| `CODEXMANAGER_PROMPT_CACHE_CLEANUP_INTERVAL_SECS` | `60` | Prompt cache cleanup interval in seconds. |
+| `CODEXMANAGER_PROMPT_CACHE_CAPACITY` | `4096` | Prompt cache capacity (0 disables capacity limit). |
+| `CODEXMANAGER_HTTP_BRIDGE_OUTPUT_TEXT_LIMIT_BYTES` | `131072` | Cap accumulated `output_text` bytes extracted from upstream responses (0 disables limit). |
+| `CODEXMANAGER_ROUTE_HEALTH_P2C_ENABLED` | `true` | Enable candidate health-based P2C (Power of Two Choices) routing. |
+| `CODEXMANAGER_ROUTE_HEALTH_P2C_ORDERED_WINDOW` | `3` | P2C window size in `ordered` mode. |
+| `CODEXMANAGER_ROUTE_HEALTH_P2C_BALANCED_WINDOW` | `6` | P2C window size in `balanced` mode. |
+| `CODEXMANAGER_ROUTE_STATE_TTL_SECS` | `21600` | Route-state TTL in seconds to cap key/model state growth. |
+| `CODEXMANAGER_ROUTE_STATE_CAPACITY` | `4096` | Route-state capacity cap. |
+| `CODEXMANAGER_UPDATE_REPO` | `qxcnm/Codex-Manager` | GitHub repo (`owner/name`) used by the in-app updater. |
+| `CODEXMANAGER_GITHUB_TOKEN` | Unset | GitHub token for in-app one-click update (falls back to `GITHUB_TOKEN`/`GH_TOKEN`). Leaving it unset may hit API rate limits and degrade asset metadata lookup. |
 
 ### Release-Script Related Variables
 | Variable | Default | Required | Description |
@@ -232,10 +267,15 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 # CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
 ```
 
+Notes:
+- Env files are loaded **once when the desktop app starts**. After editing the file, you must **fully quit and relaunch** CodexManager for changes to take effect (stopping/starting the embedded service alone will not reload env files).
+- Env-file values only apply to variables that are not already defined in the current process. If you set the same `CODEXMANAGER_*` in system/user env vars, those take precedence.
+
 ## Troubleshooting
 - OAuth callback failures: check `CODEXMANAGER_LOGIN_ADDR` conflicts, or use manual callback parsing in UI.
 - Model list/request blocked by challenge: try `CODEXMANAGER_UPSTREAM_COOKIE` or explicit `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`.
 - Standalone service reports storage unavailable: set `CODEXMANAGER_DB_PATH` to a writable path first.
+- macOS with a system proxy: ensure loopback requests (`localhost/127.0.0.1`) are `DIRECT`, and use lowercase `localhost:<port>` (for example `localhost:48760`).
 
 ## Account Hit Rules 
 - In `ordered` mode, gateway candidates are built and attempted by account `sort` ascending (for example `0 -> 1 -> 2 -> 3`).
