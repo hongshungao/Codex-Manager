@@ -19,6 +19,16 @@ pub(crate) fn candidate_skip_reason_for_proxy(
     candidate_count: usize,
     account_max_inflight: usize,
 ) -> Option<CandidateSkipReason> {
+    // 中文注释：当用户手动“切到当前”后，首候选应持续优先命中；
+    // 仅在真实请求失败时由上游流程自动清除手动锁定，再回退常规轮转。
+    let is_manual_preferred_head = idx == 0
+        && super::super::manual_preferred_account()
+            .as_deref()
+            .is_some_and(|manual_id| manual_id == account_id);
+    if is_manual_preferred_head {
+        return None;
+    }
+
     let has_more_candidates = idx + 1 < candidate_count;
     if super::super::is_account_in_cooldown(account_id) && has_more_candidates {
         super::super::record_gateway_failover_attempt();
