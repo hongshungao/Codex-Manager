@@ -412,26 +412,77 @@ fn classify_terminal_event_name(name: &str) -> Option<SseTerminal> {
 }
 
 fn extract_error_message_from_json(value: &Value) -> Option<String> {
-    // OpenAI style: { "error": { "message": "..." } }
-    if let Some(err_obj) = value.get("error").and_then(Value::as_object) {
-        if let Some(message) = err_obj.get("message").and_then(Value::as_str) {
-            let msg = message.trim();
-            if !msg.is_empty() {
-                return Some(msg.to_string());
+    fn extract_message_from_error_map(err_obj: &Map<String, Value>) -> Option<String> {
+        let message = err_obj
+            .get("message")
+            .and_then(Value::as_str)
+            .or_else(|| err_obj.get("error").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|msg| !msg.is_empty());
+        let code = err_obj
+            .get("code")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let kind = err_obj
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let param = err_obj
+            .get("param")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+
+        if let Some(message) = message {
+            let mut prefixes = Vec::new();
+            if let Some(code) = code {
+                prefixes.push(format!("code={code}"));
             }
-        }
-        if let Some(message) = err_obj.get("error").and_then(Value::as_str) {
-            let msg = message.trim();
-            if !msg.is_empty() {
-                return Some(msg.to_string());
+            if let Some(kind) = kind {
+                prefixes.push(format!("type={kind}"));
             }
+            if let Some(param) = param {
+                prefixes.push(format!("param={param}"));
+            }
+            return if prefixes.is_empty() {
+                Some(message.to_string())
+            } else {
+                Some(format!("{} {}", prefixes.join(" "), message))
+            };
         }
+
         // Fall back to compact JSON if needed.
-        if let Ok(text) = serde_json::to_string(err_obj) {
-            if !text.trim().is_empty() {
-                return Some(text);
+        serde_json::to_string(err_obj).ok().map(|text| text.trim().to_string()).filter(|v| !v.is_empty())
+    }
+
+    fn extract_message_from_error_value(err_value: Option<&Value>) -> Option<String> {
+        let err_value = err_value?;
+        if let Some(message) = err_value.as_str() {
+            let msg = message.trim();
+            if !msg.is_empty() {
+                return Some(msg.to_string());
             }
+            return None;
         }
+        if let Some(err_obj) = err_value.as_object() {
+            return extract_message_from_error_map(err_obj);
+        }
+        None
+    }
+
+    // OpenAI style: { "error": { "message": "..." } }
+    if let Some(message) = extract_message_from_error_value(value.get("error")) {
+        return Some(message);
+    }
+    // Responses API streaming often nests the error under response.error for `response.failed`.
+    if let Some(message) = extract_message_from_error_value(value.pointer("/response/error")) {
+        return Some(message);
+    }
+    // Some providers nest details under response.status_details.error.
+    if let Some(message) = extract_message_from_error_value(value.pointer("/response/status_details/error")) {
+        return Some(message);
     }
     // Some providers emit: { "type": "error", "message": "..." }
     if value
@@ -1393,5 +1444,26 @@ mod tests {
             })
             .unwrap_or("");
         assert!(err.contains("Internal server error"));
+    }
+
+    #[test]
+    fn inspect_sse_frame_recognizes_nested_response_error_message() {
+        let frame_lines = vec![
+            "event: response.failed\n".to_string(),
+            r#"data: {"type":"response.failed","response":{"status":"failed","error":{"message":"Model not found","type":"invalid_request_error","code":"model_not_found"}}}"#
+                .to_string(),
+            "\n".to_string(),
+        ];
+        let inspection = inspect_sse_frame(&frame_lines);
+        let err = inspection
+            .terminal
+            .as_ref()
+            .and_then(|t| match t {
+                super::SseTerminal::Ok => None,
+                super::SseTerminal::Err(msg) => Some(msg.as_str()),
+            })
+            .unwrap_or("");
+        assert!(err.contains("Model not found"), "unexpected err: {err}");
+        assert!(err.contains("model_not_found"), "unexpected err: {err}");
     }
 }
