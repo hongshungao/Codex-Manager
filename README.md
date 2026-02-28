@@ -13,7 +13,11 @@
 本地桌面端 + 服务进程的 Codex 账号池管理器，用于统一管理账号、用量与平台 Key，并提供本地网关能力。
 
 ## 最近变更
-- `v0.1.2`（最新，包含自 `v0.1.1` 以来全部更新）
+- `v0.1.3`（最新，包含自 `v0.1.1` 以来全部更新）
+- 新增 Service 一键启动器 `codexmanager-start`：单进程拉起 `service + web`，支持 `Ctrl+C` 联动关闭，降低“多进程手工启动”成本。
+- Service 版 `codexmanager-web` 支持 `embedded-ui`：前端静态资源内嵌进二进制，解压后无需额外 `web/` 目录。
+- 新增 Service/Web Docker 独立部署与 `docker-compose` 编排，支持无桌面环境部署。
+- 优化 Windows 图标注入策略：`service/start/web` 主包构建保留图标，修复桌面端开发模式 `LNK1123` 链接失败问题。
 - 新增 Azure OpenAI 协议支持：平台 Key 可选择 `azure_openai`，支持独立 Endpoint 配置与 Azure API Key 鉴权链路。
 - 网关新增 Azure 专属转发模块（独立文件），在不破坏原有 OpenAI/Anthropic 路径的前提下完成协议分流。
 - 平台 Key 弹窗优化：Azure 配置改为 `Endpoint + API Key` 直填模式，交互更直观。

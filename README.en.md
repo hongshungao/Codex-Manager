@@ -13,7 +13,11 @@
 A local desktop + service toolkit for managing a Codex-compatible ChatGPT account pool, usage, and platform keys, with a built-in local gateway.
 
 ## Recent Changes
-- `v0.1.2` (latest, includes all updates since `v0.1.1`)
+- `v0.1.3` (latest, includes all updates since `v0.1.1`)
+- Added Service one-click launcher `codexmanager-start`: one process starts `service + web`, and supports coordinated shutdown via `Ctrl+C`.
+- Added `embedded-ui` mode for Service `codexmanager-web`: frontend static assets are embedded into the binary, so no extra `web/` folder is required after unzip.
+- Added Docker deployment for standalone Service/Web plus `docker-compose` orchestration for headless environments.
+- Improved Windows icon embedding strategy: keeps icons for primary `service/start/web` builds and fixes desktop dev-mode `LNK1123` linker failures.
 - Added Azure OpenAI protocol support: platform keys can now use `azure_openai` with dedicated endpoint configuration and Azure API key authentication flow.
 - Added an Azure-specific upstream module (separate files) to keep OpenAI/Anthropic paths stable while introducing protocol-based routing.
 - Improved Platform Key modal UX: Azure setup now uses direct `Endpoint + API Key` inputs.
