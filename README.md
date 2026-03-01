@@ -13,25 +13,16 @@
 本地桌面端 + 服务进程的 Codex 账号池管理器，用于统一管理账号、用量与平台 Key，并提供本地网关能力。
 
 ## 最近变更
-- `v0.1.3`（最新，包含自 `v0.1.1` 以来全部更新）
+### 2026-03-01（最新）
+- 设置页重构：改为单页聚合布局，新增“后台任务”配置区（轮询开关/间隔 + worker 参数），并补齐中文文案与悬浮提示。
+- 新增后台任务配置链路：前端 -> Tauri -> RPC 打通 `gateway/backgroundTasks/get|set`，可在设置页统一管理用量轮询、网关保活、令牌刷新轮询与 worker 参数。
+- 后台任务运行时行为增强：轮询类参数支持运行中热更新；`usageRefreshWorkers`、`httpWorkerFactor/httpWorkerMin`、`httpStreamWorkerFactor/httpStreamWorkerMin` 会提示“需重启 service 生效”。
+- 全量刷新提示优化：自动刷新失败不再频繁弹错误 toast（改为日志告警）；手动刷新时才提示失败项名称和示例错误，减少“后台任务一直报错”的干扰。
+- 网关兼容性修复：针对 `/v1/responses` 完成 no-cookie 场景恢复、参数白名单与非 codex 请求透传，多账号轮转 + failover 下的降级行为更稳定。
+- 选路与可用性修复：不可用账号不进入候选池；修复“手动锁定账号被预跳过导致不生效”；补强双 Codex 并发会话隔离与流式断流日志。
 - 新增 Service 一键启动器 `codexmanager-start`：单进程拉起 `service + web`，支持 `Ctrl+C` 联动关闭，降低“多进程手工启动”成本。
 - Service 版 `codexmanager-web` 支持 `embedded-ui`：前端静态资源内嵌进二进制，解压后无需额外 `web/` 目录。
 - 新增 Service/Web Docker 独立部署与 `docker-compose` 编排，支持无桌面环境部署。
-- 优化 Windows 图标注入策略：`service/start/web` 主包构建保留图标，修复桌面端开发模式 `LNK1123` 链接失败问题。
-- 新增 Azure OpenAI 协议支持：平台 Key 可选择 `azure_openai`，支持独立 Endpoint 配置与 Azure API Key 鉴权链路。
-- 网关新增 Azure 专属转发模块（独立文件），在不破坏原有 OpenAI/Anthropic 路径的前提下完成协议分流。
-- 平台 Key 弹窗优化：Azure 配置改为 `Endpoint + API Key` 直填模式，交互更直观。
-- 请求日志体验优化：当账号信息缺失时，账号列使用 Key 前缀兜底展示，避免空白。
-- 启动速度优化：启动阶段改为“本地优先加载”（账号/用量/模型先读本地），模型列表引入本地缓存与后台按需刷新（缓存为空立即拉取，随后按周期刷新），显著降低首屏等待。
-- 网关模块重构：`gateway` 按 `auth/core/request/routing/observability/upstream` 分层，代码可维护性与定位效率提升。
-- 前端交互优化：账号页与日志页显著降卡顿；刷新任务加入通用并发上限；并新增统一请求封装（`timeout/retry/取消`）提升弱网稳定性。
-- 刷新体验升级：账号页“刷新所有”支持进度展示（完成/剩余）与按钮 busy 稳定处理，避免“点了没反应”感知。
-- 账号导入增强：支持大批量导入分批处理，默认导入分组为 `IMPORT`，空分组账号自动补齐。
-- 用量状态统一：后端引入统一可用状态枚举，并透出到前端进行一致文案映射（可用/单窗口可用/不可用/未知）。
-- 请求日志体验优化：窄屏下按优先级隐藏次要列，保留账号/路径/模型/状态核心信息。
-- 按钮与布局统一：页面主按钮、操作列按钮与弹窗按钮统一尺寸规范，账号管理与仪表盘版心对齐。
-- 网关观测增强：`http_bridge` 输出累积加上限；新增 `/metrics` 暴露 DB busy、HTTP 队列深度、upstream attempt latency 等指标。
-- 发布流程提速与防错：三平台 workflow 全手动触发；统一 Tauri CLI 版本；校验 tag/version；产物附带 `SHA256SUMS`/`manifest.json`；upload-artifact 关闭压缩；concurrency 按 `workflow+tag` 隔离避免跨平台互相取消；release 创建竞态自动降级为 `edit + upload`。
 
 ## 功能概览
 - 账号池管理：分组、标签、排序、备注
@@ -267,9 +258,13 @@ pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
 | `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | 本地登录回调监听地址。 |
 | `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | 是否允许非 loopback 回调地址。仅 `1/true/TRUE/yes/YES` 视为开启。 |
 | `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | 用量接口 base URL。 |
-| `CODEXMANAGER_DISABLE_POLLING` | 未设置（即开启轮询） | 只要变量存在（值可为空）就禁用后台用量轮询线程。 |
+| `CODEXMANAGER_DISABLE_POLLING` | 未设置（即开启轮询） | 兼容旧开关：只要变量存在（值可为空）就禁用后台用量轮询线程。 |
+| `CODEXMANAGER_USAGE_POLLING_ENABLED` | `true` | 用量轮询总开关（`1/true/on/yes` 开启，`0/false/off/no` 关闭）。与 `CODEXMANAGER_DISABLE_POLLING` 同时存在时，以该值为准。 |
 | `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | 用量轮询间隔（秒），最小 `30`。非法值回退默认。 |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_ENABLED` | `true` | 网关保活轮询总开关（`1/true/on/yes` 开启，`0/false/off/no` 关闭）。 |
 | `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | Gateway keepalive 间隔（秒），最小 `30`。 |
+| `CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED` | `true` | 令牌刷新轮询总开关（`1/true/on/yes` 开启，`0/false/off/no` 关闭）。 |
+| `CODEXMANAGER_TOKEN_REFRESH_POLL_INTERVAL_SECS` | `60` | 令牌刷新轮询间隔（秒），最小 `10`。 |
 | `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | 主上游地址。若填 `https://chatgpt.com`/`https://chat.openai.com` 会自动归一化到 backend-api/codex。 |
 | `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | 自动推断 | 明确指定 fallback 上游。若未设置且主上游是 ChatGPT backend，则默认 fallback 到 `https://api.openai.com/v1`。 |
 | `CODEXMANAGER_UPSTREAM_COOKIE` | 未设置 | 上游 Cookie（主要用于 Cloudflare/WAF challenge 场景）。 |
@@ -283,8 +278,8 @@ pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
 | `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | 单账号并发软上限。`0` 表示不限制。 |
 | `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Trace body 预览最大字节数。`0` 表示关闭 body 预览。 |
 | `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | 前置代理允许的请求体最大字节数（默认 16 MiB）。 |
-| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | backend worker 数量系数，worker = `max(cpu * factor, worker_min)`。 |
-| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | backend worker 最小值。 |
+| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | backend worker 数量系数，worker = `max(cpu * factor, worker_min)`（运行中修改需重启 service 生效）。 |
+| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | backend worker 最小值（运行中修改需重启 service 生效）。 |
 | `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | backend 请求队列系数，queue = `max(worker * factor, queue_min)`。 |
 | `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | backend 请求队列最小值。 |
 
@@ -293,15 +288,15 @@ pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
 |---|---|---|
 | `CODEXMANAGER_ACCOUNT_IMPORT_BATCH_SIZE` | `200` | 账号导入分批大小（用于一次导入大量 auth.json）。 |
 | `CODEXMANAGER_TRACE_QUEUE_CAPACITY` | `2048` | gateway trace 异步写队列容量（过小可能丢 trace；过大可能占内存）。 |
-| `CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR` | `1` | backend stream worker 数量系数（SSE 等长连接请求）。 |
-| `CODEXMANAGER_HTTP_STREAM_WORKER_MIN` | `2` | backend stream worker 最小值。 |
+| `CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR` | `1` | backend stream worker 数量系数（SSE 等长连接请求，运行中修改需重启 service 生效）。 |
+| `CODEXMANAGER_HTTP_STREAM_WORKER_MIN` | `2` | backend stream worker 最小值（运行中修改需重启 service 生效）。 |
 | `CODEXMANAGER_HTTP_STREAM_QUEUE_FACTOR` | `2` | backend stream 队列系数。 |
 | `CODEXMANAGER_HTTP_STREAM_QUEUE_MIN` | `16` | backend stream 队列最小值。 |
 | `CODEXMANAGER_POLL_JITTER_SECS` | 未设置 | 通用轮询 jitter（秒），可被各模块各自的 jitter 覆盖。 |
 | `CODEXMANAGER_POLL_FAILURE_BACKOFF_MAX_SECS` | 未设置 | 通用失败退避上限（秒），可被各模块各自的 backoff 覆盖。 |
 | `CODEXMANAGER_USAGE_POLL_JITTER_SECS` | `5` | 用量轮询 jitter（秒）。 |
 | `CODEXMANAGER_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS` | `1800` | 用量轮询失败退避上限（秒）。 |
-| `CODEXMANAGER_USAGE_REFRESH_WORKERS` | `4` | 用量刷新 worker 数。 |
+| `CODEXMANAGER_USAGE_REFRESH_WORKERS` | `4` | 用量刷新 worker 数（可在设置页配置；运行中修改需重启 service 生效）。 |
 | `CODEXMANAGER_GATEWAY_KEEPALIVE_JITTER_SECS` | `5` | keepalive jitter（秒）。 |
 | `CODEXMANAGER_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS` | `900` | keepalive 失败退避上限（秒）。 |
 | `CODEXMANAGER_USAGE_REFRESH_FAILURE_EVENT_WINDOW_SECS` | `60` | 用量刷新失败事件去重窗口（秒），避免瞬时抖动刷爆事件表。 |
@@ -333,6 +328,10 @@ CODEXMANAGER_WEB_ADDR=localhost:48761
 CODEXMANAGER_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
 CODEXMANAGER_USAGE_POLL_INTERVAL_SECS=600
 CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
+# 可选：后台任务总开关
+# CODEXMANAGER_USAGE_POLLING_ENABLED=1
+# CODEXMANAGER_GATEWAY_KEEPALIVE_ENABLED=1
+# CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED=1
 # 可选：固定 RPC token 方便外部工具长期复用
 # CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
 ```
@@ -346,6 +345,7 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 - 授权回调失败：优先检查 `CODEXMANAGER_LOGIN_ADDR` 是否被占用，或在 UI 使用手动回调解析。
 - 模型列表/请求被挑战拦截：可尝试设置 `CODEXMANAGER_UPSTREAM_COOKIE`，或显式配置 `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`。
 - 仍被 Cloudflare/WAF 拦截：可在设置页开启“请求头收敛策略”，或设置 `CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE=1`。
+- “部分数据刷新失败，已展示可用数据”频繁出现：自动刷新场景已改为仅记录日志；手动刷新会提示失败项与示例错误。可优先检查设置页“后台任务”间隔/开关是否过激进，以及 service 日志中的失败任务名。
 - 独立运行 service/Web：若所在目录不可写（如安装目录），请设置 `CODEXMANAGER_DB_PATH` 到可写路径。
 - macOS 代理环境下请求 `502/503`：优先确认系统代理未接管本地回环请求（`localhost/127.0.0.1` 走 `DIRECT`），并确保地址使用小写 `localhost:<port>`（例如 `localhost:48760`）。
 

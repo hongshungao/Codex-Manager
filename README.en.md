@@ -13,23 +13,22 @@
 A local desktop + service toolkit for managing a Codex-compatible ChatGPT account pool, usage, and platform keys, with a built-in local gateway.
 
 ## Recent Changes
-- `v0.1.3` (latest, includes all updates since `v0.1.1`)
+### 2026-03-01 (latest)
+- Settings page restructure: switched to a single-sheet layout, added a dedicated "Background Tasks" section (polling toggles/intervals + worker parameters), and improved in-page hints.
+- Added background-task config chain end-to-end: frontend -> Tauri -> RPC now supports `gateway/backgroundTasks/get|set`, so usage polling, gateway keepalive, token-refresh polling, and worker parameters can be managed from Settings.
+- Improved runtime behavior for background tasks: polling parameters can be hot-updated at runtime; `usageRefreshWorkers`, `httpWorkerFactor/httpWorkerMin`, and `httpStreamWorkerFactor/httpStreamWorkerMin` now clearly indicate "service restart required".
+- Refresh error UX optimization: automatic refresh failures no longer spam error toasts (logged as warnings instead); manual refresh shows failed task names plus one sample error.
+- Gateway compatibility fixes: improved `/v1/responses` behavior for no-cookie recovery, codex parameter allowlist, and transparent passthrough for non-codex requests; multi-account rotation + failover behavior is more stable.
+- Routing and availability fixes: unavailable accounts are excluded from candidate pools; fixed manual account lock being pre-skipped; improved double-Codex session isolation and stream cutoff logging.
+
+### v0.1.3 (cumulative features)
 - Added Service one-click launcher `codexmanager-start`: one process starts `service + web`, and supports coordinated shutdown via `Ctrl+C`.
 - Added `embedded-ui` mode for Service `codexmanager-web`: frontend static assets are embedded into the binary, so no extra `web/` folder is required after unzip.
 - Added Docker deployment for standalone Service/Web plus `docker-compose` orchestration for headless environments.
-- Improved Windows icon embedding strategy: keeps icons for primary `service/start/web` builds and fixes desktop dev-mode `LNK1123` linker failures.
 - Added Azure OpenAI protocol support: platform keys can now use `azure_openai` with dedicated endpoint configuration and Azure API key authentication flow.
-- Added an Azure-specific upstream module (separate files) to keep OpenAI/Anthropic paths stable while introducing protocol-based routing.
-- Improved Platform Key modal UX: Azure setup now uses direct `Endpoint + API Key` inputs.
-- Improved Request Logs UX: when account info is missing, the account column now falls back to a key-prefix label instead of showing blank.
 - Startup speed optimization: startup now uses a local-first load path (accounts/usage/models from local storage first), with model list local cache plus background on-demand refresh (immediate pull when cache is empty, then periodic refresh), significantly reducing first-screen wait time.
 - Gateway modular refactor: `gateway` is now organized into `auth/core/request/routing/observability/upstream`, improving maintainability and troubleshooting speed.
-- Frontend interaction improvements: noticeable lag reduction in Accounts and Request Logs; refresh tasks now have a shared concurrency cap; added a unified request wrapper (`timeout/retry/cancel`) for better weak-network stability.
 - Refresh UX upgrade: “Refresh All” now shows progress (completed/remaining) with stable busy-state handling to avoid “clicked but no feedback” perception.
-- Account import enhancement: large-batch imports are processed in chunks; default import group is `IMPORT`; empty group values are auto-filled.
-- Usage status unification: backend now exposes a unified availability enum and frontend maps it to consistent labels (`Available / Single-window available / Unavailable / Unknown`).
-- Request logs responsive optimization: narrow screens hide secondary columns by priority while preserving core fields (account/path/model/status).
-- Button and layout consistency: unified sizing for page buttons, row action buttons, and modal buttons; Accounts and Dashboard content widths are aligned.
 - Gateway observability: capped `http_bridge` output accumulation; added `/metrics` to expose DB busy, HTTP queue depth, upstream attempt latency, etc.
 - Release flow speed & safety: manual-only workflows across platforms; unified Tauri CLI version; tag/version consistency checks; release assets include `SHA256SUMS`/`manifest.json`; upload-artifact compression disabled; concurrency is scoped by `workflow+tag` to avoid cross-workflow cancellations; release-create races automatically fall back to `edit + upload`.
 
@@ -269,9 +268,13 @@ It updates:
 | `CODEXMANAGER_LOGIN_ADDR` | `localhost:1455` | Local login callback listener address. |
 | `CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR` | `false` | Allows non-loopback login callback address when set to `1/true/TRUE/yes/YES`. |
 | `CODEXMANAGER_USAGE_BASE_URL` | `https://chatgpt.com` | Base URL for usage requests. |
-| `CODEXMANAGER_DISABLE_POLLING` | Unset (polling enabled) | If present (any value), disables usage polling thread. |
+| `CODEXMANAGER_DISABLE_POLLING` | Unset (polling enabled) | Legacy-compatible switch: if present (any value), disables usage polling thread. |
+| `CODEXMANAGER_USAGE_POLLING_ENABLED` | `true` | Global usage-polling switch (`1/true/on/yes` to enable, `0/false/off/no` to disable). If both this and `CODEXMANAGER_DISABLE_POLLING` are present, this one wins. |
 | `CODEXMANAGER_USAGE_POLL_INTERVAL_SECS` | `600` | Usage polling interval in seconds, minimum `30`. Invalid values fall back to default. |
+| `CODEXMANAGER_GATEWAY_KEEPALIVE_ENABLED` | `true` | Global gateway-keepalive switch (`1/true/on/yes` to enable, `0/false/off/no` to disable). |
 | `CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS` | `180` | Gateway keepalive interval in seconds, minimum `30`. |
+| `CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED` | `true` | Global token-refresh polling switch (`1/true/on/yes` to enable, `0/false/off/no` to disable). |
+| `CODEXMANAGER_TOKEN_REFRESH_POLL_INTERVAL_SECS` | `60` | Token-refresh polling interval in seconds, minimum `10`. |
 | `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | Primary upstream base URL. Bare ChatGPT host values are normalized to backend-api/codex. |
 | `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | Auto-inferred | Explicit fallback upstream. If unset and primary is ChatGPT backend, fallback defaults to `https://api.openai.com/v1`. |
 | `CODEXMANAGER_UPSTREAM_COOKIE` | Unset | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
@@ -285,8 +288,8 @@ It updates:
 | `CODEXMANAGER_ACCOUNT_MAX_INFLIGHT` | `0` | Per-account soft inflight cap. `0` means unlimited. |
 | `CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES` | `0` | Max bytes for trace body preview. `0` disables body preview. |
 | `CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES` | `16777216` | Max accepted request body size for front proxy (16 MiB default). |
-| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | Backend worker factor; workers = `max(cpu * factor, worker_min)`. |
-| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | Minimum backend workers. |
+| `CODEXMANAGER_HTTP_WORKER_FACTOR` | `4` | Backend worker factor; workers = `max(cpu * factor, worker_min)` (service restart required after runtime change). |
+| `CODEXMANAGER_HTTP_WORKER_MIN` | `8` | Minimum backend workers (service restart required after runtime change). |
 | `CODEXMANAGER_HTTP_QUEUE_FACTOR` | `4` | Backend queue factor; queue = `max(worker * factor, queue_min)`. |
 | `CODEXMANAGER_HTTP_QUEUE_MIN` | `32` | Minimum backend queue size. |
 
@@ -295,15 +298,15 @@ It updates:
 |---|---|---|
 | `CODEXMANAGER_ACCOUNT_IMPORT_BATCH_SIZE` | `200` | Import batch size for auth.json bulk imports. |
 | `CODEXMANAGER_TRACE_QUEUE_CAPACITY` | `2048` | Gateway trace async queue capacity (too small may drop traces; too large may increase memory). |
-| `CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR` | `1` | Backend stream worker factor (SSE/long-lived responses). |
-| `CODEXMANAGER_HTTP_STREAM_WORKER_MIN` | `2` | Minimum backend stream workers. |
+| `CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR` | `1` | Backend stream worker factor (SSE/long-lived responses; service restart required after runtime change). |
+| `CODEXMANAGER_HTTP_STREAM_WORKER_MIN` | `2` | Minimum backend stream workers (service restart required after runtime change). |
 | `CODEXMANAGER_HTTP_STREAM_QUEUE_FACTOR` | `2` | Backend stream queue factor. |
 | `CODEXMANAGER_HTTP_STREAM_QUEUE_MIN` | `16` | Minimum backend stream queue size. |
 | `CODEXMANAGER_POLL_JITTER_SECS` | Unset | Common polling jitter in seconds; can be overridden by module-specific jitter envs. |
 | `CODEXMANAGER_POLL_FAILURE_BACKOFF_MAX_SECS` | Unset | Common failure backoff cap in seconds; can be overridden by module-specific backoff envs. |
 | `CODEXMANAGER_USAGE_POLL_JITTER_SECS` | `5` | Usage polling jitter in seconds. |
 | `CODEXMANAGER_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS` | `1800` | Usage polling failure backoff cap in seconds. |
-| `CODEXMANAGER_USAGE_REFRESH_WORKERS` | `4` | Usage refresh worker count. |
+| `CODEXMANAGER_USAGE_REFRESH_WORKERS` | `4` | Usage refresh worker count (configurable in Settings; service restart required after runtime change). |
 | `CODEXMANAGER_GATEWAY_KEEPALIVE_JITTER_SECS` | `5` | Keepalive jitter in seconds. |
 | `CODEXMANAGER_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS` | `900` | Keepalive failure backoff cap in seconds. |
 | `CODEXMANAGER_USAGE_REFRESH_FAILURE_EVENT_WINDOW_SECS` | `60` | Dedupe window (seconds) for inserting usage refresh failure events, to avoid spamming the event table on transient failures. |
@@ -335,6 +338,10 @@ CODEXMANAGER_WEB_ADDR=localhost:48761
 CODEXMANAGER_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
 CODEXMANAGER_USAGE_POLL_INTERVAL_SECS=600
 CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
+# Optional: background task global switches
+# CODEXMANAGER_USAGE_POLLING_ENABLED=1
+# CODEXMANAGER_GATEWAY_KEEPALIVE_ENABLED=1
+# CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED=1
 # Optional: fixed RPC token for external clients
 # CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
 ```
@@ -348,6 +355,7 @@ Notes:
 - OAuth callback failures: check `CODEXMANAGER_LOGIN_ADDR` conflicts, or use manual callback parsing in UI.
 - Model list/request blocked by challenge: try `CODEXMANAGER_UPSTREAM_COOKIE` or explicit `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`.
 - Still blocked by Cloudflare/WAF: enable "Header compaction policy" in Settings, or set `CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE=1`.
+- Frequent "Partial data refresh failed, showing available data": auto-refresh now logs these as warnings instead of popping repeated toasts; manual refresh still shows failed task names and one sample error. Check Background Tasks intervals/toggles and service logs first.
 - Standalone service/Web: if the run directory is not writable, set `CODEXMANAGER_DB_PATH` to a writable path.
 - macOS with a system proxy: ensure loopback requests (`localhost/127.0.0.1`) are `DIRECT`, and use lowercase `localhost:<port>` (for example `localhost:48760`).
 
