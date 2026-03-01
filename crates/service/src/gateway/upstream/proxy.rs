@@ -194,7 +194,8 @@ pub(in super::super) fn proxy_validated_request(
     );
     let allow_openai_fallback = true;
     let disable_challenge_stateless_retry =
-        !(protocol_type == PROTOCOL_ANTHROPIC_NATIVE && body.len() <= 2 * 1024);
+        !(protocol_type == PROTOCOL_ANTHROPIC_NATIVE && body.len() <= 2 * 1024)
+            && !path.starts_with("/v1/responses");
     let request_gate_lock =
         super::super::request_gate_lock(&key_id, &path, model_for_log.as_deref());
     let request_gate_wait_timeout = super::super::request_gate_wait_timeout();
