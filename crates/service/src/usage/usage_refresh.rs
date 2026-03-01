@@ -2,8 +2,11 @@ use codexmanager_core::auth::{extract_token_exp, DEFAULT_CLIENT_ID, DEFAULT_ISSU
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use codexmanager_core::usage::parse_usage_snapshot;
 use crossbeam_channel::{unbounded, Receiver, Sender};
+use rand::Rng;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,8 +18,7 @@ use crate::usage_account_meta::{
 use crate::usage_http::fetch_usage_snapshot;
 use crate::usage_keepalive::{is_keepalive_error_ignorable, run_gateway_keepalive_once};
 use crate::usage_scheduler::{
-    parse_interval_secs, run_blocking_poll_loop,
-    DEFAULT_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS,
+    parse_interval_secs, DEFAULT_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS,
     DEFAULT_GATEWAY_KEEPALIVE_INTERVAL_SECS, DEFAULT_GATEWAY_KEEPALIVE_JITTER_SECS,
     DEFAULT_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS, DEFAULT_USAGE_POLL_INTERVAL_SECS,
     DEFAULT_USAGE_POLL_JITTER_SECS, MIN_GATEWAY_KEEPALIVE_INTERVAL_SECS,
@@ -27,26 +29,266 @@ use crate::usage_token_refresh::refresh_and_persist_access_token;
 
 mod usage_refresh_errors;
 
-static USAGE_POLLING_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-static GATEWAY_KEEPALIVE_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-static TOKEN_REFRESH_POLLING_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-static PENDING_USAGE_REFRESH_TASKS: std::sync::OnceLock<Mutex<HashSet<String>>> =
-    std::sync::OnceLock::new();
-static USAGE_REFRESH_EXECUTOR: std::sync::OnceLock<UsageRefreshExecutor> = std::sync::OnceLock::new();
+static USAGE_POLLING_STARTED: OnceLock<()> = OnceLock::new();
+static GATEWAY_KEEPALIVE_STARTED: OnceLock<()> = OnceLock::new();
+static TOKEN_REFRESH_POLLING_STARTED: OnceLock<()> = OnceLock::new();
+static PENDING_USAGE_REFRESH_TASKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static USAGE_REFRESH_EXECUTOR: OnceLock<UsageRefreshExecutor> = OnceLock::new();
+static BACKGROUND_TASKS_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
+static USAGE_POLLING_ENABLED: AtomicBool = AtomicBool::new(true);
+static USAGE_POLL_INTERVAL_SECS: AtomicU64 = AtomicU64::new(DEFAULT_USAGE_POLL_INTERVAL_SECS);
+static GATEWAY_KEEPALIVE_ENABLED: AtomicBool = AtomicBool::new(true);
+static GATEWAY_KEEPALIVE_INTERVAL_SECS: AtomicU64 =
+    AtomicU64::new(DEFAULT_GATEWAY_KEEPALIVE_INTERVAL_SECS);
+static TOKEN_REFRESH_POLLING_ENABLED: AtomicBool = AtomicBool::new(true);
+static TOKEN_REFRESH_POLL_INTERVAL_SECS_ATOMIC: AtomicU64 =
+    AtomicU64::new(DEFAULT_TOKEN_REFRESH_POLL_INTERVAL_SECS);
+static USAGE_REFRESH_WORKERS: AtomicUsize = AtomicUsize::new(DEFAULT_USAGE_REFRESH_WORKERS);
+static HTTP_WORKER_FACTOR: AtomicUsize = AtomicUsize::new(DEFAULT_HTTP_WORKER_FACTOR);
+static HTTP_WORKER_MIN: AtomicUsize = AtomicUsize::new(DEFAULT_HTTP_WORKER_MIN);
+static HTTP_STREAM_WORKER_FACTOR: AtomicUsize = AtomicUsize::new(DEFAULT_HTTP_STREAM_WORKER_FACTOR);
+static HTTP_STREAM_WORKER_MIN: AtomicUsize = AtomicUsize::new(DEFAULT_HTTP_STREAM_WORKER_MIN);
+
+const ENV_DISABLE_POLLING: &str = "CODEXMANAGER_DISABLE_POLLING";
+const ENV_USAGE_POLLING_ENABLED: &str = "CODEXMANAGER_USAGE_POLLING_ENABLED";
+const ENV_USAGE_POLL_INTERVAL_SECS: &str = "CODEXMANAGER_USAGE_POLL_INTERVAL_SECS";
+const ENV_GATEWAY_KEEPALIVE_ENABLED: &str = "CODEXMANAGER_GATEWAY_KEEPALIVE_ENABLED";
+const ENV_GATEWAY_KEEPALIVE_INTERVAL_SECS: &str = "CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS";
+const ENV_TOKEN_REFRESH_POLLING_ENABLED: &str = "CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED";
+const ENV_TOKEN_REFRESH_POLL_INTERVAL_SECS: &str = "CODEXMANAGER_TOKEN_REFRESH_POLL_INTERVAL_SECS";
 const COMMON_POLL_JITTER_ENV: &str = "CODEXMANAGER_POLL_JITTER_SECS";
 const COMMON_POLL_FAILURE_BACKOFF_MAX_ENV: &str = "CODEXMANAGER_POLL_FAILURE_BACKOFF_MAX_SECS";
 const USAGE_POLL_JITTER_ENV: &str = "CODEXMANAGER_USAGE_POLL_JITTER_SECS";
 const USAGE_POLL_FAILURE_BACKOFF_MAX_ENV: &str = "CODEXMANAGER_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS";
 const USAGE_REFRESH_WORKERS_ENV: &str = "CODEXMANAGER_USAGE_REFRESH_WORKERS";
 const DEFAULT_USAGE_REFRESH_WORKERS: usize = 4;
+const DEFAULT_HTTP_WORKER_FACTOR: usize = 4;
+const DEFAULT_HTTP_WORKER_MIN: usize = 8;
+const DEFAULT_HTTP_STREAM_WORKER_FACTOR: usize = 1;
+const DEFAULT_HTTP_STREAM_WORKER_MIN: usize = 2;
+const ENV_HTTP_WORKER_FACTOR: &str = "CODEXMANAGER_HTTP_WORKER_FACTOR";
+const ENV_HTTP_WORKER_MIN: &str = "CODEXMANAGER_HTTP_WORKER_MIN";
+const ENV_HTTP_STREAM_WORKER_FACTOR: &str = "CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR";
+const ENV_HTTP_STREAM_WORKER_MIN: &str = "CODEXMANAGER_HTTP_STREAM_WORKER_MIN";
 const GATEWAY_KEEPALIVE_JITTER_ENV: &str = "CODEXMANAGER_GATEWAY_KEEPALIVE_JITTER_SECS";
 const GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_ENV: &str =
     "CODEXMANAGER_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS";
-const TOKEN_REFRESH_POLL_INTERVAL_SECS: u64 = 60;
+const DEFAULT_TOKEN_REFRESH_POLL_INTERVAL_SECS: u64 = 60;
+const MIN_TOKEN_REFRESH_POLL_INTERVAL_SECS: u64 = 10;
 const TOKEN_REFRESH_FAILURE_BACKOFF_MAX_SECS: u64 = 300;
 const TOKEN_REFRESH_AHEAD_SECS: i64 = 600;
 const TOKEN_REFRESH_FALLBACK_AGE_SECS: i64 = 2700;
 const TOKEN_REFRESH_BATCH_LIMIT: usize = 256;
+const BACKGROUND_TASK_RESTART_REQUIRED_KEYS: [&str; 5] = [
+    "usageRefreshWorkers",
+    "httpWorkerFactor",
+    "httpWorkerMin",
+    "httpStreamWorkerFactor",
+    "httpStreamWorkerMin",
+];
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackgroundTasksSettings {
+    usage_polling_enabled: bool,
+    usage_poll_interval_secs: u64,
+    gateway_keepalive_enabled: bool,
+    gateway_keepalive_interval_secs: u64,
+    token_refresh_polling_enabled: bool,
+    token_refresh_poll_interval_secs: u64,
+    usage_refresh_workers: usize,
+    http_worker_factor: usize,
+    http_worker_min: usize,
+    http_stream_worker_factor: usize,
+    http_stream_worker_min: usize,
+    requires_restart_keys: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BackgroundTasksSettingsPatch {
+    pub usage_polling_enabled: Option<bool>,
+    pub usage_poll_interval_secs: Option<u64>,
+    pub gateway_keepalive_enabled: Option<bool>,
+    pub gateway_keepalive_interval_secs: Option<u64>,
+    pub token_refresh_polling_enabled: Option<bool>,
+    pub token_refresh_poll_interval_secs: Option<u64>,
+    pub usage_refresh_workers: Option<usize>,
+    pub http_worker_factor: Option<usize>,
+    pub http_worker_min: Option<usize>,
+    pub http_stream_worker_factor: Option<usize>,
+    pub http_stream_worker_min: Option<usize>,
+}
+
+pub(crate) fn background_tasks_settings() -> BackgroundTasksSettings {
+    ensure_background_tasks_config_loaded();
+    BackgroundTasksSettings {
+        usage_polling_enabled: USAGE_POLLING_ENABLED.load(Ordering::Relaxed),
+        usage_poll_interval_secs: USAGE_POLL_INTERVAL_SECS.load(Ordering::Relaxed),
+        gateway_keepalive_enabled: GATEWAY_KEEPALIVE_ENABLED.load(Ordering::Relaxed),
+        gateway_keepalive_interval_secs: GATEWAY_KEEPALIVE_INTERVAL_SECS.load(Ordering::Relaxed),
+        token_refresh_polling_enabled: TOKEN_REFRESH_POLLING_ENABLED.load(Ordering::Relaxed),
+        token_refresh_poll_interval_secs: TOKEN_REFRESH_POLL_INTERVAL_SECS_ATOMIC
+            .load(Ordering::Relaxed),
+        usage_refresh_workers: USAGE_REFRESH_WORKERS.load(Ordering::Relaxed),
+        http_worker_factor: HTTP_WORKER_FACTOR.load(Ordering::Relaxed),
+        http_worker_min: HTTP_WORKER_MIN.load(Ordering::Relaxed),
+        http_stream_worker_factor: HTTP_STREAM_WORKER_FACTOR.load(Ordering::Relaxed),
+        http_stream_worker_min: HTTP_STREAM_WORKER_MIN.load(Ordering::Relaxed),
+        requires_restart_keys: BACKGROUND_TASK_RESTART_REQUIRED_KEYS.to_vec(),
+    }
+}
+
+pub(crate) fn set_background_tasks_settings(
+    patch: BackgroundTasksSettingsPatch,
+) -> BackgroundTasksSettings {
+    ensure_background_tasks_config_loaded();
+
+    if let Some(enabled) = patch.usage_polling_enabled {
+        USAGE_POLLING_ENABLED.store(enabled, Ordering::Relaxed);
+        std::env::set_var(ENV_USAGE_POLLING_ENABLED, if enabled { "1" } else { "0" });
+        if enabled {
+            std::env::remove_var(ENV_DISABLE_POLLING);
+        } else {
+            std::env::set_var(ENV_DISABLE_POLLING, "1");
+        }
+    }
+    if let Some(secs) = patch.usage_poll_interval_secs {
+        let normalized = secs.max(MIN_USAGE_POLL_INTERVAL_SECS);
+        USAGE_POLL_INTERVAL_SECS.store(normalized, Ordering::Relaxed);
+        std::env::set_var(ENV_USAGE_POLL_INTERVAL_SECS, normalized.to_string());
+    }
+    if let Some(enabled) = patch.gateway_keepalive_enabled {
+        GATEWAY_KEEPALIVE_ENABLED.store(enabled, Ordering::Relaxed);
+        std::env::set_var(ENV_GATEWAY_KEEPALIVE_ENABLED, if enabled { "1" } else { "0" });
+    }
+    if let Some(secs) = patch.gateway_keepalive_interval_secs {
+        let normalized = secs.max(MIN_GATEWAY_KEEPALIVE_INTERVAL_SECS);
+        GATEWAY_KEEPALIVE_INTERVAL_SECS.store(normalized, Ordering::Relaxed);
+        std::env::set_var(ENV_GATEWAY_KEEPALIVE_INTERVAL_SECS, normalized.to_string());
+    }
+    if let Some(enabled) = patch.token_refresh_polling_enabled {
+        TOKEN_REFRESH_POLLING_ENABLED.store(enabled, Ordering::Relaxed);
+        std::env::set_var(ENV_TOKEN_REFRESH_POLLING_ENABLED, if enabled { "1" } else { "0" });
+    }
+    if let Some(secs) = patch.token_refresh_poll_interval_secs {
+        let normalized = secs.max(MIN_TOKEN_REFRESH_POLL_INTERVAL_SECS);
+        TOKEN_REFRESH_POLL_INTERVAL_SECS_ATOMIC.store(normalized, Ordering::Relaxed);
+        std::env::set_var(ENV_TOKEN_REFRESH_POLL_INTERVAL_SECS, normalized.to_string());
+    }
+    if let Some(workers) = patch.usage_refresh_workers {
+        let normalized = workers.max(1);
+        USAGE_REFRESH_WORKERS.store(normalized, Ordering::Relaxed);
+        std::env::set_var(USAGE_REFRESH_WORKERS_ENV, normalized.to_string());
+    }
+    if let Some(value) = patch.http_worker_factor {
+        let normalized = value.max(1);
+        HTTP_WORKER_FACTOR.store(normalized, Ordering::Relaxed);
+        std::env::set_var(ENV_HTTP_WORKER_FACTOR, normalized.to_string());
+    }
+    if let Some(value) = patch.http_worker_min {
+        let normalized = value.max(1);
+        HTTP_WORKER_MIN.store(normalized, Ordering::Relaxed);
+        std::env::set_var(ENV_HTTP_WORKER_MIN, normalized.to_string());
+    }
+    if let Some(value) = patch.http_stream_worker_factor {
+        let normalized = value.max(1);
+        HTTP_STREAM_WORKER_FACTOR.store(normalized, Ordering::Relaxed);
+        std::env::set_var(ENV_HTTP_STREAM_WORKER_FACTOR, normalized.to_string());
+    }
+    if let Some(value) = patch.http_stream_worker_min {
+        let normalized = value.max(1);
+        HTTP_STREAM_WORKER_MIN.store(normalized, Ordering::Relaxed);
+        std::env::set_var(ENV_HTTP_STREAM_WORKER_MIN, normalized.to_string());
+    }
+
+    background_tasks_settings()
+}
+
+fn ensure_background_tasks_config_loaded() {
+    let _ = BACKGROUND_TASKS_CONFIG_LOADED.get_or_init(|| reload_background_tasks_from_env());
+}
+
+fn reload_background_tasks_from_env() {
+    let usage_polling_default_enabled = std::env::var(ENV_DISABLE_POLLING).is_err();
+    USAGE_POLLING_ENABLED.store(
+        env_bool_or(ENV_USAGE_POLLING_ENABLED, usage_polling_default_enabled),
+        Ordering::Relaxed,
+    );
+    USAGE_POLL_INTERVAL_SECS.store(
+        parse_interval_secs(
+            std::env::var(ENV_USAGE_POLL_INTERVAL_SECS).ok().as_deref(),
+            DEFAULT_USAGE_POLL_INTERVAL_SECS,
+            MIN_USAGE_POLL_INTERVAL_SECS,
+        ),
+        Ordering::Relaxed,
+    );
+    GATEWAY_KEEPALIVE_ENABLED.store(
+        env_bool_or(ENV_GATEWAY_KEEPALIVE_ENABLED, true),
+        Ordering::Relaxed,
+    );
+    GATEWAY_KEEPALIVE_INTERVAL_SECS.store(
+        parse_interval_secs(
+            std::env::var(ENV_GATEWAY_KEEPALIVE_INTERVAL_SECS)
+                .ok()
+                .as_deref(),
+            DEFAULT_GATEWAY_KEEPALIVE_INTERVAL_SECS,
+            MIN_GATEWAY_KEEPALIVE_INTERVAL_SECS,
+        ),
+        Ordering::Relaxed,
+    );
+    TOKEN_REFRESH_POLLING_ENABLED.store(
+        env_bool_or(ENV_TOKEN_REFRESH_POLLING_ENABLED, true),
+        Ordering::Relaxed,
+    );
+    TOKEN_REFRESH_POLL_INTERVAL_SECS_ATOMIC.store(
+        parse_interval_secs(
+            std::env::var(ENV_TOKEN_REFRESH_POLL_INTERVAL_SECS)
+                .ok()
+                .as_deref(),
+            DEFAULT_TOKEN_REFRESH_POLL_INTERVAL_SECS,
+            MIN_TOKEN_REFRESH_POLL_INTERVAL_SECS,
+        ),
+        Ordering::Relaxed,
+    );
+    USAGE_REFRESH_WORKERS.store(
+        env_usize_or(USAGE_REFRESH_WORKERS_ENV, DEFAULT_USAGE_REFRESH_WORKERS).max(1),
+        Ordering::Relaxed,
+    );
+    HTTP_WORKER_FACTOR.store(
+        env_usize_or(ENV_HTTP_WORKER_FACTOR, DEFAULT_HTTP_WORKER_FACTOR).max(1),
+        Ordering::Relaxed,
+    );
+    HTTP_WORKER_MIN.store(
+        env_usize_or(ENV_HTTP_WORKER_MIN, DEFAULT_HTTP_WORKER_MIN).max(1),
+        Ordering::Relaxed,
+    );
+    HTTP_STREAM_WORKER_FACTOR.store(
+        env_usize_or(ENV_HTTP_STREAM_WORKER_FACTOR, DEFAULT_HTTP_STREAM_WORKER_FACTOR).max(1),
+        Ordering::Relaxed,
+    );
+    HTTP_STREAM_WORKER_MIN.store(
+        env_usize_or(ENV_HTTP_STREAM_WORKER_MIN, DEFAULT_HTTP_STREAM_WORKER_MIN).max(1),
+        Ordering::Relaxed,
+    );
+}
+
+fn env_usize_or(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn env_bool_or(name: &str, default: bool) -> bool {
+    let Some(raw) = std::env::var(name).ok() else {
+        return default;
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UsageAvailabilityStatus {
@@ -78,21 +320,21 @@ use self::usage_refresh_errors::{
 
 pub(crate) fn ensure_usage_polling() {
     // 启动后台用量刷新线程（只启动一次）
-    if std::env::var("CODEXMANAGER_DISABLE_POLLING").is_ok() {
-        return;
-    }
+    ensure_background_tasks_config_loaded();
     USAGE_POLLING_STARTED.get_or_init(|| {
         let _ = thread::spawn(usage_polling_loop);
     });
 }
 
 pub(crate) fn ensure_gateway_keepalive() {
+    ensure_background_tasks_config_loaded();
     GATEWAY_KEEPALIVE_STARTED.get_or_init(|| {
         let _ = thread::spawn(gateway_keepalive_loop);
     });
 }
 
 pub(crate) fn ensure_token_refresh_polling() {
+    ensure_background_tasks_config_loaded();
     TOKEN_REFRESH_POLLING_STARTED.get_or_init(|| {
         let _ = thread::spawn(token_refresh_polling_loop);
     });
@@ -113,70 +355,65 @@ pub(crate) fn enqueue_usage_refresh_for_account(account_id: &str) -> bool {
 }
 
 fn usage_polling_loop() {
-    // 按间隔循环刷新所有账号用量
-    let configured = std::env::var("CODEXMANAGER_USAGE_POLL_INTERVAL_SECS").ok();
-    let interval_secs = parse_interval_secs(
-        configured.as_deref(),
-        DEFAULT_USAGE_POLL_INTERVAL_SECS,
-        MIN_USAGE_POLL_INTERVAL_SECS,
-    );
-    let jitter_secs = parse_interval_with_fallback(
-        USAGE_POLL_JITTER_ENV,
-        COMMON_POLL_JITTER_ENV,
-        DEFAULT_USAGE_POLL_JITTER_SECS,
-        0,
-    );
-    let failure_backoff_cap_secs = parse_interval_with_fallback(
-        USAGE_POLL_FAILURE_BACKOFF_MAX_ENV,
-        COMMON_POLL_FAILURE_BACKOFF_MAX_ENV,
-        DEFAULT_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS,
-        interval_secs,
-    );
-    run_blocking_poll_loop(
+    // 按间隔循环刷新所有账号用量（运行时可变配置）
+    run_dynamic_poll_loop(
         "usage polling",
-        Duration::from_secs(interval_secs),
-        Duration::from_secs(jitter_secs),
-        Duration::from_secs(failure_backoff_cap_secs),
+        || USAGE_POLLING_ENABLED.load(Ordering::Relaxed),
+        || USAGE_POLL_INTERVAL_SECS.load(Ordering::Relaxed),
+        || {
+            parse_interval_with_fallback(
+                USAGE_POLL_JITTER_ENV,
+                COMMON_POLL_JITTER_ENV,
+                DEFAULT_USAGE_POLL_JITTER_SECS,
+                0,
+            )
+        },
+        |interval_secs| {
+            parse_interval_with_fallback(
+                USAGE_POLL_FAILURE_BACKOFF_MAX_ENV,
+                COMMON_POLL_FAILURE_BACKOFF_MAX_ENV,
+                DEFAULT_USAGE_POLL_FAILURE_BACKOFF_MAX_SECS,
+                interval_secs,
+            )
+        },
         refresh_usage_for_all_accounts,
         |_| true,
     );
 }
 
 fn gateway_keepalive_loop() {
-    let configured = std::env::var("CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS").ok();
-    let interval_secs = parse_interval_secs(
-        configured.as_deref(),
-        DEFAULT_GATEWAY_KEEPALIVE_INTERVAL_SECS,
-        MIN_GATEWAY_KEEPALIVE_INTERVAL_SECS,
-    );
-    let jitter_secs = parse_interval_with_fallback(
-        GATEWAY_KEEPALIVE_JITTER_ENV,
-        COMMON_POLL_JITTER_ENV,
-        DEFAULT_GATEWAY_KEEPALIVE_JITTER_SECS,
-        0,
-    );
-    let failure_backoff_cap_secs = parse_interval_with_fallback(
-        GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_ENV,
-        COMMON_POLL_FAILURE_BACKOFF_MAX_ENV,
-        DEFAULT_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS,
-        interval_secs,
-    );
-    run_blocking_poll_loop(
+    run_dynamic_poll_loop(
         "gateway keepalive",
-        Duration::from_secs(interval_secs),
-        Duration::from_secs(jitter_secs),
-        Duration::from_secs(failure_backoff_cap_secs),
+        || GATEWAY_KEEPALIVE_ENABLED.load(Ordering::Relaxed),
+        || GATEWAY_KEEPALIVE_INTERVAL_SECS.load(Ordering::Relaxed),
+        || {
+            parse_interval_with_fallback(
+                GATEWAY_KEEPALIVE_JITTER_ENV,
+                COMMON_POLL_JITTER_ENV,
+                DEFAULT_GATEWAY_KEEPALIVE_JITTER_SECS,
+                0,
+            )
+        },
+        |interval_secs| {
+            parse_interval_with_fallback(
+                GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_ENV,
+                COMMON_POLL_FAILURE_BACKOFF_MAX_ENV,
+                DEFAULT_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS,
+                interval_secs,
+            )
+        },
         run_gateway_keepalive_once,
         |err| !is_keepalive_error_ignorable(err),
     );
 }
 
 fn token_refresh_polling_loop() {
-    run_blocking_poll_loop(
+    run_dynamic_poll_loop(
         "token refresh polling",
-        Duration::from_secs(TOKEN_REFRESH_POLL_INTERVAL_SECS),
-        Duration::ZERO,
-        Duration::from_secs(TOKEN_REFRESH_FAILURE_BACKOFF_MAX_SECS),
+        || TOKEN_REFRESH_POLLING_ENABLED.load(Ordering::Relaxed),
+        || TOKEN_REFRESH_POLL_INTERVAL_SECS_ATOMIC.load(Ordering::Relaxed),
+        || 0,
+        |interval_secs| TOKEN_REFRESH_FAILURE_BACKOFF_MAX_SECS.max(interval_secs),
         refresh_tokens_before_expiry_for_all_accounts,
         |_| true,
     );
@@ -192,6 +429,107 @@ fn parse_interval_with_fallback(
     let fallback = std::env::var(fallback_env).ok();
     let raw = primary.as_deref().or(fallback.as_deref());
     parse_interval_secs(raw, default_secs, min_secs)
+}
+
+fn run_dynamic_poll_loop<F, L, E, I, J, B>(
+    loop_name: &str,
+    enabled: E,
+    interval_secs: I,
+    jitter_secs: J,
+    failure_backoff_cap_secs: B,
+    mut task: F,
+    mut should_log_error: L,
+) where
+    F: FnMut() -> Result<(), String>,
+    L: FnMut(&str) -> bool,
+    E: Fn() -> bool,
+    I: Fn() -> u64,
+    J: Fn() -> u64,
+    B: Fn(u64) -> u64,
+{
+    let mut rng = rand::thread_rng();
+    let mut consecutive_failures = 0u32;
+    loop {
+        if !enabled() {
+            consecutive_failures = 0;
+            thread::sleep(Duration::from_secs(1));
+            continue;
+        }
+
+        let succeeded = match task() {
+            Ok(_) => true,
+            Err(err) => {
+                if should_log_error(err.as_str()) {
+                    log::warn!("{loop_name} error: {err}");
+                }
+                false
+            }
+        };
+
+        if succeeded {
+            consecutive_failures = 0;
+        } else {
+            consecutive_failures = consecutive_failures.saturating_add(1);
+        }
+
+        let base_interval_secs = interval_secs().max(1);
+        let jitter_cap_secs = jitter_secs();
+        let sampled_jitter = if jitter_cap_secs == 0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs(rng.gen_range(0..=jitter_cap_secs))
+        };
+        let delay = next_dynamic_poll_delay(
+            Duration::from_secs(base_interval_secs),
+            Duration::from_secs(jitter_cap_secs),
+            Duration::from_secs(failure_backoff_cap_secs(base_interval_secs).max(base_interval_secs)),
+            consecutive_failures,
+            sampled_jitter,
+        );
+        thread::sleep(delay);
+    }
+}
+
+fn next_dynamic_poll_delay(
+    interval: Duration,
+    jitter_cap: Duration,
+    failure_backoff_cap: Duration,
+    consecutive_failures: u32,
+    sampled_jitter: Duration,
+) -> Duration {
+    let base_delay = next_dynamic_failure_backoff(interval, failure_backoff_cap, consecutive_failures);
+    let bounded_jitter = if jitter_cap.is_zero() {
+        Duration::ZERO
+    } else {
+        sampled_jitter.min(jitter_cap)
+    };
+    base_delay.checked_add(bounded_jitter).unwrap_or(Duration::MAX)
+}
+
+fn next_dynamic_failure_backoff(
+    interval: Duration,
+    failure_backoff_cap: Duration,
+    consecutive_failures: u32,
+) -> Duration {
+    if consecutive_failures == 0 {
+        return interval;
+    }
+
+    let base_ms = interval.as_millis();
+    if base_ms == 0 {
+        return interval;
+    }
+
+    let cap_ms = failure_backoff_cap.max(interval).as_millis();
+    let shift = (consecutive_failures.saturating_sub(1)).min(20);
+    let multiplier = 1u128 << shift;
+    let scaled_ms = base_ms.saturating_mul(multiplier);
+    let bounded_ms = scaled_ms.min(cap_ms).max(base_ms);
+    if bounded_ms > u64::MAX as u128 {
+        Duration::from_millis(u64::MAX)
+    } else {
+        Duration::from_millis(bounded_ms as u64)
+    }
 }
 
 fn enqueue_usage_refresh_with_worker<F>(account_id: &str, worker: F) -> bool
@@ -257,11 +595,8 @@ fn usage_refresh_worker_loop(receiver: Receiver<UsageRefreshTask>) {
 }
 
 fn usage_refresh_worker_count() -> usize {
-    std::env::var(USAGE_REFRESH_WORKERS_ENV)
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_USAGE_REFRESH_WORKERS)
+    ensure_background_tasks_config_loaded();
+    USAGE_REFRESH_WORKERS.load(Ordering::Relaxed).max(1)
 }
 
 fn mark_usage_refresh_task_pending(account_id: &str) -> bool {

@@ -422,6 +422,21 @@ export async function serviceGatewayHeaderPolicySet(cpaNoCookieHeaderModeEnabled
   );
 }
 
+export async function serviceGatewayBackgroundTasksGet() {
+  if (!isTauriRuntime()) {
+    return rpcInvoke("gateway/backgroundTasks/get");
+  }
+  return invoke("service_gateway_background_tasks_get", withAddr());
+}
+
+export async function serviceGatewayBackgroundTasksSet(settings = {}) {
+  const payload = settings && typeof settings === "object" ? settings : {};
+  if (!isTauriRuntime()) {
+    return rpcInvoke("gateway/backgroundTasks/set", payload);
+  }
+  return invoke("service_gateway_background_tasks_set", withAddr(payload));
+}
+
 // 登录
 export async function serviceLoginStart(payload) {
   if (!isTauriRuntime()) {

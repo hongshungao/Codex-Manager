@@ -11,6 +11,7 @@ pub(crate) const DEFAULT_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS: u64 = 900;
 pub(crate) const MIN_USAGE_POLL_INTERVAL_SECS: u64 = 30;
 pub(crate) const MIN_GATEWAY_KEEPALIVE_INTERVAL_SECS: u64 = 30;
 
+#[allow(dead_code)]
 pub(crate) fn run_blocking_poll_loop<F, L>(
     loop_name: &str,
     interval: Duration,
@@ -45,6 +46,7 @@ pub(crate) fn run_blocking_poll_loop<F, L>(
     );
 }
 
+#[allow(dead_code)]
 pub(crate) fn run_blocking_poll_loop_with_sleep<F, L, S, J>(
     loop_name: &str,
     interval: Duration,
@@ -91,6 +93,7 @@ pub(crate) fn run_blocking_poll_loop_with_sleep<F, L, S, J>(
     }
 }
 
+#[allow(dead_code)]
 fn next_poll_delay(
     interval: Duration,
     jitter_cap: Duration,
@@ -107,6 +110,7 @@ fn next_poll_delay(
     base_delay.checked_add(bounded_jitter).unwrap_or(Duration::MAX)
 }
 
+#[allow(dead_code)]
 fn next_failure_backoff(
     interval: Duration,
     failure_backoff_cap: Duration,
@@ -129,6 +133,7 @@ fn next_failure_backoff(
     duration_from_millis(bounded_ms)
 }
 
+#[allow(dead_code)]
 fn duration_from_millis(ms: u128) -> Duration {
     if ms > u64::MAX as u128 {
         Duration::from_millis(u64::MAX)

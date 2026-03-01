@@ -21,7 +21,7 @@
   justify-content: flex-start;
   gap: 18px;
   flex-wrap: nowrap;
-  padding: 16px clamp(16px, 2vw, 30px);
+  padding: 12px clamp(16px, 2.2vw, 30px);
   position: fixed;
   left: 0;
   right: 0;
@@ -29,16 +29,16 @@
   z-index: 10;
   background: var(--top-nav-bg);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(4px);
+  backdrop-filter: saturate(130%) blur(8px);
 }
 
 button {
   padding: var(--btn-pad-y) var(--btn-pad-x);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--accent);
+  border: 1px solid transparent;
   background: var(--btn-primary-bg);
   color: #fff;
-  font-weight: 700;
+  font-weight: 600;
   font-size: var(--btn-font-size);
   line-height: var(--btn-line-height);
   cursor: pointer;
@@ -52,13 +52,13 @@ button {
 
 button.secondary {
   background: var(--btn-secondary-bg);
-  color: color-mix(in srgb, var(--accent) 72%, #19365f);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, #d8e6fa);
-  box-shadow: var(--shadow-soft);
+  color: color-mix(in srgb, var(--ink) 88%, #0f172a);
+  border: 1px solid var(--border);
+  box-shadow: none;
 }
 
 button.ghost {
-  background: rgba(35, 59, 92, 0.08);
+  background: color-mix(in srgb, var(--surface-2) 78%, #ffffff);
   color: var(--ink);
   border: 1px solid var(--border);
   box-shadow: none;
@@ -127,11 +127,11 @@ button.secondary.is-loading::after {
   flex-wrap: nowrap;
   flex: 0 1 auto;
   width: fit-content;
-  max-width: min(680px, calc(100vw - 220px));
+  max-width: min(760px, calc(100vw - 220px));
   min-width: 0;
   padding: 8px;
   background: var(--pill-nav-bg);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   border-radius: 999px;
   box-shadow: var(--shadow-soft);
   overflow-x: auto;
@@ -147,8 +147,8 @@ button.secondary.is-loading::after {
   border-radius: 999px;
   border: none;
   background: transparent;
-  color: color-mix(in srgb, var(--accent) 68%, #2a4668);
-  font-weight: 700;
+  color: color-mix(in srgb, var(--ink) 76%, #334155);
+  font-weight: 600;
   box-shadow: none;
   white-space: nowrap;
   flex: 0 0 auto;
