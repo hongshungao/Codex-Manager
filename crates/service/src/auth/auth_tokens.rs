@@ -15,6 +15,7 @@ static OPENAI_AUTH_HTTP_CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLoc
 const OPENAI_AUTH_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const OPENAI_AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const OPENAI_AUTH_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+const ACCOUNT_SORT_STEP: i64 = 5;
 
 fn read_json_with_timeout<T>(
     resp: reqwest::blocking::Response,
@@ -185,6 +186,15 @@ fn pick_existing_account_id_by_identity(
     None
 }
 
+fn next_account_sort(storage: &codexmanager_core::storage::Storage) -> i64 {
+    storage
+        .list_accounts()
+        .ok()
+        .and_then(|accounts| accounts.into_iter().map(|account| account.sort).max())
+        .map(|sort| sort.saturating_add(ACCOUNT_SORT_STEP))
+        .unwrap_or(0)
+}
+
 fn openai_auth_http_client() -> &'static Client {
     OPENAI_AUTH_HTTP_CLIENT.get_or_init(|| {
         Client::builder()
@@ -274,6 +284,18 @@ pub(crate) fn complete_login_with_redirect(
         &fallback_subject_key,
     )
     .unwrap_or(account_storage_id);
+    let now = now_ts();
+    let existing_account = storage
+        .find_account_by_id(&account_key)
+        .map_err(|e| e.to_string())?;
+    let sort = existing_account
+        .as_ref()
+        .map(|account| account.sort)
+        .unwrap_or_else(|| next_account_sort(&storage));
+    let created_at = existing_account
+        .as_ref()
+        .map(|account| account.created_at)
+        .unwrap_or(now);
     let account = Account {
         id: account_key.clone(),
         label,
@@ -281,10 +303,10 @@ pub(crate) fn complete_login_with_redirect(
         chatgpt_account_id,
         workspace_id,
         group_name: session.group_name.clone(),
-        sort: 0,
+        sort,
         status: "active".to_string(),
-        created_at: now_ts(),
-        updated_at: now_ts(),
+        created_at,
+        updated_at: now,
     };
     storage.insert_account(&account).map_err(|e| e.to_string())?;
 
@@ -295,7 +317,7 @@ pub(crate) fn complete_login_with_redirect(
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         api_key_access_token,
-        last_refresh: now_ts(),
+        last_refresh: now,
     };
     storage.insert_token(&token).map_err(|e| e.to_string())?;
 
@@ -374,7 +396,7 @@ pub(crate) fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::pick_existing_account_id_by_identity;
+    use super::{next_account_sort, pick_existing_account_id_by_identity};
     use codexmanager_core::storage::{now_ts, Account, Storage};
 
     fn build_account(
@@ -434,6 +456,26 @@ mod tests {
         );
 
         assert_eq!(found.as_deref(), Some("acc-ws-b"));
+    }
+
+    #[test]
+    fn next_account_sort_uses_step_five() {
+        let storage = Storage::open_in_memory().expect("open in memory");
+        storage.init().expect("init");
+        storage
+            .insert_account(&build_account("acc-1", Some("cgpt-1"), Some("ws-1")))
+            .expect("insert account 1");
+        storage
+            .update_account_sort("acc-1", 2)
+            .expect("update sort 1");
+        storage
+            .insert_account(&build_account("acc-2", Some("cgpt-2"), Some("ws-2")))
+            .expect("insert account 2");
+        storage
+            .update_account_sort("acc-2", 7)
+            .expect("update sort 2");
+
+        assert_eq!(next_account_sort(&storage), 12);
     }
 }
 

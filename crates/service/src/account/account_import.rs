@@ -13,6 +13,7 @@ use crate::storage_helpers::{account_key, open_storage};
 const MAX_ERROR_ITEMS: usize = 50;
 const DEFAULT_IMPORT_BATCH_SIZE: usize = 200;
 const IMPORT_BATCH_SIZE_ENV: &str = "CODEXMANAGER_ACCOUNT_IMPORT_BATCH_SIZE";
+const ACCOUNT_SORT_STEP: i64 = 5;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct AccountImportResult {
@@ -49,7 +50,9 @@ impl ExistingAccountIndex {
         let accounts = storage.list_accounts().map_err(|e| e.to_string())?;
         let mut idx = ExistingAccountIndex::default();
         for account in accounts {
-            idx.next_sort = idx.next_sort.max(account.sort + 1);
+            idx.next_sort = idx
+                .next_sort
+                .max(account.sort.saturating_add(ACCOUNT_SORT_STEP));
             if let Some(chatgpt_account_id) = account.chatgpt_account_id.as_ref() {
                 let key = chatgpt_account_id.trim();
                 if !key.is_empty() {
@@ -374,7 +377,7 @@ fn import_single_item(
         (existing_id, updated, false)
     } else {
         let next_sort = index.next_sort;
-        index.next_sort += 1;
+        index.next_sort = index.next_sort.saturating_add(ACCOUNT_SORT_STEP);
         let created = Account {
             id: logical_account_id.clone(),
             label,
@@ -536,7 +539,8 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_logical_account_id, ImportTokenPayload};
+    use super::{resolve_logical_account_id, ExistingAccountIndex, ImportTokenPayload};
+    use codexmanager_core::storage::{now_ts, Account, Storage};
 
     fn payload() -> ImportTokenPayload {
         ImportTokenPayload {
@@ -591,5 +595,43 @@ mod tests {
         .expect("resolve second");
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn existing_account_index_next_sort_uses_step_five() {
+        let storage = Storage::open_in_memory().expect("open in memory");
+        storage.init().expect("init");
+        let now = now_ts();
+        storage
+            .insert_account(&Account {
+                id: "acc-1".to_string(),
+                label: "acc-1".to_string(),
+                issuer: "https://auth.openai.com".to_string(),
+                chatgpt_account_id: Some("cgpt-1".to_string()),
+                workspace_id: Some("ws-1".to_string()),
+                group_name: None,
+                sort: 0,
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("insert acc-1");
+        storage
+            .insert_account(&Account {
+                id: "acc-2".to_string(),
+                label: "acc-2".to_string(),
+                issuer: "https://auth.openai.com".to_string(),
+                chatgpt_account_id: Some("cgpt-2".to_string()),
+                workspace_id: Some("ws-2".to_string()),
+                group_name: None,
+                sort: 9,
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("insert acc-2");
+
+        let idx = ExistingAccountIndex::build(&storage).expect("build index");
+        assert_eq!(idx.next_sort, 14);
     }
 }
