@@ -10,9 +10,33 @@ test("pickBestRecommendations finds 5h/7d best accounts in one scan result", () 
     { id: "a3", label: "three" },
   ];
   const usageMap = new Map([
-    ["a1", { usedPercent: 20, secondaryUsedPercent: 60 }],
-    ["a2", { usedPercent: 40, secondaryUsedPercent: 10 }],
-    ["a3", { usedPercent: 70, secondaryUsedPercent: 30 }],
+    [
+      "a1",
+      {
+        usedPercent: 20,
+        windowMinutes: 300,
+        secondaryUsedPercent: 60,
+        secondaryWindowMinutes: 10080,
+      },
+    ],
+    [
+      "a2",
+      {
+        usedPercent: 40,
+        windowMinutes: 300,
+        secondaryUsedPercent: 10,
+        secondaryWindowMinutes: 10080,
+      },
+    ],
+    [
+      "a3",
+      {
+        usedPercent: 70,
+        windowMinutes: 300,
+        secondaryUsedPercent: 30,
+        secondaryWindowMinutes: 10080,
+      },
+    ],
   ]);
 
   const { primaryPick, secondaryPick } = pickBestRecommendations(accounts, usageMap);
@@ -28,8 +52,24 @@ test("pickBestRecommendations keeps first account when remain ties", () => {
     { id: "a2", label: "two" },
   ];
   const usageMap = new Map([
-    ["a1", { usedPercent: 20, secondaryUsedPercent: 20 }],
-    ["a2", { usedPercent: 20, secondaryUsedPercent: 20 }],
+    [
+      "a1",
+      {
+        usedPercent: 20,
+        windowMinutes: 300,
+        secondaryUsedPercent: 20,
+        secondaryWindowMinutes: 10080,
+      },
+    ],
+    [
+      "a2",
+      {
+        usedPercent: 20,
+        windowMinutes: 300,
+        secondaryUsedPercent: 20,
+        secondaryWindowMinutes: 10080,
+      },
+    ],
   ]);
 
   const { primaryPick, secondaryPick } = pickBestRecommendations(accounts, usageMap);
