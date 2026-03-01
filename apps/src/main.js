@@ -1376,9 +1376,23 @@ async function refreshAll(options = {}) {
       }
     }
     // 中文注释：并行刷新时允许“部分失败部分成功”，否则某个慢/失败接口会拖垮整页刷新体验。
-    const hasFailedTask = results.some((item) => item.status === "rejected");
-    if (hasFailedTask) {
-      showToast("部分数据刷新失败，已展示可用数据", "error");
+    const failedTasks = results.filter((item) => item.status === "rejected");
+    if (failedTasks.length > 0) {
+      const taskLabelMap = new Map(tasks.map((task) => [task.name, task.label || task.name]));
+      const failedLabels = [...new Set(failedTasks.map((task) => taskLabelMap.get(task.name) || task.name))];
+      const failedLabelText = failedLabels.length > 3
+        ? `${failedLabels.slice(0, 3).join("、")} 等${failedLabels.length}项`
+        : failedLabels.join("、");
+      const firstFailedMessage = normalizeErrorMessage(failedTasks[0].reason);
+      // 中文注释：自动刷新触发的失败仅记日志，避免每分钟弹错打断；手动刷新才提示具体失败项。
+      if (options.manual === true) {
+        const detail = firstFailedMessage ? `（示例错误：${firstFailedMessage}）` : "";
+        showToast(`部分数据刷新失败：${failedLabelText}，已展示可用数据${detail}`, "error");
+      } else {
+        console.warn(
+          `[refreshAll] partial failure: ${failedLabelText}; first error: ${firstFailedMessage || "unknown"}`,
+        );
+      }
     }
     renderCurrentPageView();
   })();
