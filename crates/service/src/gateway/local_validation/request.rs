@@ -48,6 +48,7 @@ pub(super) fn build_local_validation_result(
         body,
         effective_model.as_deref(),
         effective_reasoning.as_deref(),
+        api_key.upstream_base_url.as_deref(),
     );
 
     let request_method = request.method().as_str().to_string();

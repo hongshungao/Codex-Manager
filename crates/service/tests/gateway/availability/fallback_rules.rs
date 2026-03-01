@@ -10,7 +10,13 @@ fn html_content_type_detection() {
 #[test]
 fn apply_request_overrides_accepts_xhigh() {
     let body = br#"{"model":"gpt-5.3-codex","reasoning":{"effort":"medium"}}"#.to_vec();
-    let updated = apply_request_overrides("/v1/responses", body, None, Some("xhigh"));
+    let updated = apply_request_overrides(
+        "/v1/responses",
+        body,
+        None,
+        Some("xhigh"),
+        Some("https://chatgpt.com/backend-api/codex"),
+    );
     let value: serde_json::Value = serde_json::from_slice(&updated).expect("json");
     assert_eq!(value["reasoning"]["effort"], "xhigh");
 }
@@ -18,7 +24,13 @@ fn apply_request_overrides_accepts_xhigh() {
 #[test]
 fn apply_request_overrides_maps_extra_high_to_xhigh() {
     let body = br#"{"model":"gpt-5.3-codex"}"#.to_vec();
-    let updated = apply_request_overrides("/v1/responses", body, None, Some("extra_high"));
+    let updated = apply_request_overrides(
+        "/v1/responses",
+        body,
+        None,
+        Some("extra_high"),
+        Some("https://chatgpt.com/backend-api/codex"),
+    );
     let value: serde_json::Value = serde_json::from_slice(&updated).expect("json");
     assert_eq!(value["reasoning"]["effort"], "xhigh");
 }
