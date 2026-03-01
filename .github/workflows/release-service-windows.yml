@@ -104,11 +104,11 @@ jobs:
           $inSection = $false
           foreach ($line in Get-Content 'Cargo.toml') {
             $trim = $line.Trim()
-            if ($trim -match '^\\[') {
+            if ($trim.StartsWith('[')) {
               $inSection = ($trim -eq '[workspace.package]')
               continue
             }
-            if ($inSection -and $trim -match '^version\\s*=\\s*\"([^\"]+)\"') {
+            if ($inSection -and $trim -match '^\s*version\s*=\s*"([^"]+)"') {
               $workspaceVersion = $Matches[1]
               break
             }
