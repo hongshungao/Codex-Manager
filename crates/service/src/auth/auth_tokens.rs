@@ -81,6 +81,22 @@ fn normalize_id_part(value: Option<&str>) -> Option<String> {
     Some(raw.replace("::", "_"))
 }
 
+fn build_scope_identity_hint(
+    chatgpt_account_id: Option<&str>,
+    workspace_id: Option<&str>,
+) -> Option<String> {
+    let chatgpt = normalize_id_part(chatgpt_account_id);
+    let workspace = normalize_id_part(workspace_id);
+    match (chatgpt, workspace) {
+        (Some(chatgpt), Some(workspace)) if chatgpt != workspace => {
+            Some(format!("cgpt={chatgpt}|ws={workspace}"))
+        }
+        (Some(chatgpt), _) => Some(format!("cgpt={chatgpt}")),
+        (None, Some(workspace)) => Some(format!("ws={workspace}")),
+        (None, None) => None,
+    }
+}
+
 fn build_account_storage_id(
     subject_account_id: &str,
     identity_hint: Option<&str>,
@@ -109,6 +125,14 @@ fn pick_existing_account_id_by_identity(
     workspace_id: Option<&str>,
     fallback_subject_key: &str,
 ) -> Option<String> {
+    fn normalized(value: Option<&str>) -> Option<&str> {
+        value.map(str::trim).filter(|v| !v.is_empty())
+    }
+
+    fn same_normalized(lhs: Option<&str>, rhs: Option<&str>) -> bool {
+        normalized(lhs) == normalized(rhs)
+    }
+
     let preferred_chatgpt = chatgpt_account_id
         .map(str::trim)
         .filter(|v| !v.is_empty())
@@ -119,25 +143,37 @@ fn pick_existing_account_id_by_identity(
         .map(str::to_string);
 
     let accounts = storage.list_accounts().ok()?;
-    if let Some(chatgpt_id) = preferred_chatgpt.as_ref() {
+    if let (Some(chatgpt_id), Some(workspace_id)) =
+        (preferred_chatgpt.as_ref(), preferred_workspace.as_ref())
+    {
         if let Some(found) = accounts.iter().find(|acc| {
-            acc.chatgpt_account_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                == Some(chatgpt_id.as_str())
+            same_normalized(acc.chatgpt_account_id.as_deref(), Some(chatgpt_id.as_str()))
+                && same_normalized(acc.workspace_id.as_deref(), Some(workspace_id.as_str()))
         }) {
             return Some(found.id.clone());
         }
         return None;
     }
+    if let Some(chatgpt_id) = preferred_chatgpt.as_ref() {
+        let mut matched = accounts.iter().filter(|acc| {
+            same_normalized(acc.chatgpt_account_id.as_deref(), Some(chatgpt_id.as_str()))
+        });
+        if let Some(found) = matched.next() {
+            if matched.next().is_none() {
+                return Some(found.id.clone());
+            }
+        }
+        return accounts
+            .iter()
+            .find(|acc| {
+                same_normalized(acc.chatgpt_account_id.as_deref(), Some(chatgpt_id.as_str()))
+                    && normalized(acc.workspace_id.as_deref()).is_none()
+            })
+            .map(|acc| acc.id.clone());
+    }
     if let Some(workspace) = preferred_workspace.as_ref() {
         if let Some(found) = accounts.iter().find(|acc| {
-            acc.workspace_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                == Some(workspace.as_str())
+            same_normalized(acc.workspace_id.as_deref(), Some(workspace.as_str()))
         }) {
             return Some(found.id.clone());
         }
@@ -224,11 +260,11 @@ pub(crate) fn complete_login_with_redirect(
             .or_else(|| chatgpt_account_id.clone()),
     );
     let fallback_subject_key = account_key(&subject_account_id, session.tags.as_deref());
+    let scope_identity_hint =
+        build_scope_identity_hint(chatgpt_account_id.as_deref(), workspace_id.as_deref());
     let account_storage_id = build_account_storage_id(
         &subject_account_id,
-        chatgpt_account_id
-            .as_deref()
-            .or(workspace_id.as_deref()),
+        scope_identity_hint.as_deref(),
         session.tags.as_deref(),
     );
     let account_key = pick_existing_account_id_by_identity(
@@ -334,5 +370,70 @@ pub(crate) fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> R
     }
     let body: ExchangeResp = read_json_with_timeout(resp, OPENAI_AUTH_READ_TIMEOUT)?;
     Ok(body.access_token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_existing_account_id_by_identity;
+    use codexmanager_core::storage::{now_ts, Account, Storage};
+
+    fn build_account(
+        id: &str,
+        chatgpt_account_id: Option<&str>,
+        workspace_id: Option<&str>,
+    ) -> Account {
+        let now = now_ts();
+        Account {
+            id: id.to_string(),
+            label: id.to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: chatgpt_account_id.map(|v| v.to_string()),
+            workspace_id: workspace_id.map(|v| v.to_string()),
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn pick_existing_account_requires_exact_scope_when_workspace_present() {
+        let storage = Storage::open_in_memory().expect("open in memory");
+        storage.init().expect("init");
+        storage
+            .insert_account(&build_account("acc-ws-a", Some("cgpt-1"), Some("ws-a")))
+            .expect("insert ws-a");
+
+        let found = pick_existing_account_id_by_identity(
+            &storage,
+            Some("cgpt-1"),
+            Some("ws-b"),
+            "sub-fallback",
+        );
+
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn pick_existing_account_matches_exact_workspace_scope() {
+        let storage = Storage::open_in_memory().expect("open in memory");
+        storage.init().expect("init");
+        storage
+            .insert_account(&build_account("acc-ws-a", Some("cgpt-1"), Some("ws-a")))
+            .expect("insert ws-a");
+        storage
+            .insert_account(&build_account("acc-ws-b", Some("cgpt-1"), Some("ws-b")))
+            .expect("insert ws-b");
+
+        let found = pick_existing_account_id_by_identity(
+            &storage,
+            Some("cgpt-1"),
+            Some("ws-b"),
+            "sub-fallback",
+        );
+
+        assert_eq!(found.as_deref(), Some("acc-ws-b"));
+    }
 }
 

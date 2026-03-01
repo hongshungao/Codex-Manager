@@ -427,6 +427,13 @@ fn resolve_logical_account_id(
     workspace_id: Option<&str>,
     token_fingerprint: Option<&str>,
 ) -> Result<String, String> {
+    fn normalized(value: Option<&str>) -> Option<String> {
+        value
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    }
+
     let account_id_hint = payload.account_id_hint.as_deref().map(str::trim).filter(|v| !v.is_empty());
     let hint_suffix = account_id_hint.and_then(|value| {
         value
@@ -437,15 +444,25 @@ fn resolve_logical_account_id(
 
     if let Some(sub) = subject_account_id.map(str::trim).filter(|v| !v.is_empty()) {
         let mut identity_parts: Vec<String> = Vec::new();
-        if let Some(v) = chatgpt_account_id.map(str::trim).filter(|v| !v.is_empty()) {
-            identity_parts.push(v.to_string());
-        } else if let Some(v) = workspace_id.map(str::trim).filter(|v| !v.is_empty()) {
-            identity_parts.push(v.to_string());
-        } else if let Some(v) = hint_suffix {
-            identity_parts.push(v.to_string());
+        let chatgpt = normalized(chatgpt_account_id);
+        let workspace = normalized(workspace_id);
+        if let Some(v) = chatgpt.as_ref() {
+            identity_parts.push(format!("cgpt={v}"));
         }
-        if let Some(fp) = token_fingerprint.map(str::trim).filter(|v| !v.is_empty()) {
-            identity_parts.push(format!("fp_{fp}"));
+        if let Some(v) = workspace.as_ref() {
+            if chatgpt.as_deref() != Some(v.as_str()) {
+                identity_parts.push(format!("ws={v}"));
+            }
+        }
+        if identity_parts.is_empty() {
+            if let Some(v) = hint_suffix {
+                identity_parts.push(format!("hint={v}"));
+            }
+        }
+        if identity_parts.is_empty() {
+            if let Some(fp) = token_fingerprint.map(str::trim).filter(|v| !v.is_empty()) {
+                identity_parts.push(format!("fp_{fp}"));
+            }
         }
         let identity_hint = if identity_parts.is_empty() {
             None
@@ -455,23 +472,25 @@ fn resolve_logical_account_id(
         return Ok(account_key(sub, identity_hint.as_deref()));
     }
 
+    let chatgpt = normalized(chatgpt_account_id)
+        .or_else(|| extract_chatgpt_account_id(&payload.id_token))
+        .or_else(|| extract_chatgpt_account_id(&payload.access_token));
+    let workspace = normalized(workspace_id);
+    if let Some(chatgpt) = chatgpt.as_ref() {
+        if let Some(workspace) = workspace.as_ref() {
+            if chatgpt != workspace {
+                return Ok(account_key(chatgpt, Some(workspace)));
+            }
+        }
+        return Ok(chatgpt.to_string());
+    }
+
     if let Some(value) = account_id_hint {
         return Ok(value.to_string());
     }
 
-    if let Some(value) = chatgpt_account_id
-        .map(str::to_string)
-        .or_else(|| extract_chatgpt_account_id(&payload.id_token))
-        .or_else(|| extract_chatgpt_account_id(&payload.access_token))
-    {
-        let normalized = value.trim().to_string();
-        if !normalized.is_empty() {
-            return Ok(normalized);
-        }
-    }
-
-    if let Some(value) = workspace_id.map(str::trim).filter(|v| !v.is_empty()) {
-        return Ok(value.to_string());
+    if let Some(workspace) = workspace {
+        return Ok(workspace);
     }
 
     Err("unable to resolve account id from tokens.account_id / id_token / access_token".to_string())
@@ -513,4 +532,64 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_logical_account_id, ImportTokenPayload};
+
+    fn payload() -> ImportTokenPayload {
+        ImportTokenPayload {
+            access_token: "access".to_string(),
+            id_token: "id".to_string(),
+            refresh_token: "refresh".to_string(),
+            account_id_hint: None,
+        }
+    }
+
+    #[test]
+    fn resolve_logical_account_id_distinguishes_workspace_under_same_chatgpt() {
+        let input = payload();
+        let a = resolve_logical_account_id(
+            &input,
+            Some("sub-1"),
+            Some("cgpt-1"),
+            Some("ws-a"),
+            Some("same-fp"),
+        )
+        .expect("resolve ws-a");
+        let b = resolve_logical_account_id(
+            &input,
+            Some("sub-1"),
+            Some("cgpt-1"),
+            Some("ws-b"),
+            Some("same-fp"),
+        )
+        .expect("resolve ws-b");
+
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn resolve_logical_account_id_is_stable_when_scope_is_stable() {
+        let input = payload();
+        let first = resolve_logical_account_id(
+            &input,
+            Some("sub-1"),
+            Some("cgpt-1"),
+            Some("ws-a"),
+            Some("fp-1"),
+        )
+        .expect("resolve first");
+        let second = resolve_logical_account_id(
+            &input,
+            Some("sub-1"),
+            Some("cgpt-1"),
+            Some("ws-a"),
+            Some("fp-2"),
+        )
+        .expect("resolve second");
+
+        assert_eq!(first, second);
+    }
 }
