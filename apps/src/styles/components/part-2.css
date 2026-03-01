@@ -51,12 +51,15 @@
   gap: 16px;
 }
 
-/* 仪表盘与账号页统一内容版心，避免视觉错位。 */
+/* 各页面统一内容版心，避免大屏拉伸导致信息稀疏。 */
 #pageDashboard .stats-grid,
 #pageDashboard .dashboard-duo,
 #pageAccounts .accounts-toolbar,
-#pageAccounts .panel {
-  width: min(100%, 1480px);
+#pageAccounts .panel,
+#pageApiKeys .panel,
+#pageRequestLogs .panel,
+#pageSettings .settings-grid {
+  width: 100%;
   margin-inline: auto;
 }
 
@@ -66,17 +69,17 @@
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
 }
 
 .stat-card {
-  background: linear-gradient(170deg, #ffffff, #f2f8ff);
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 14px;
+  padding: 16px;
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   box-shadow: var(--shadow);
   transition: transform 0.2s ease, border-color 0.2s ease;
@@ -126,8 +129,8 @@
 
 .dashboard-duo {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
 }
 
 .dashboard-compact .stats-grid {
@@ -186,6 +189,12 @@
   line-height: 1;
   font-variant-numeric: tabular-nums;
   text-shadow: none;
+}
+
+@media (min-width: 1201px) {
+  .dashboard-compact .stat-card.stat-card-cost {
+    grid-column: span 2;
+  }
 }
 
 .dashboard-compact .dashboard-duo {
@@ -256,10 +265,14 @@
 }
 
 .card {
-  background: linear-gradient(165deg, #ffffff, #f1f8ff);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card) 97%, #ffffff),
+    color-mix(in srgb, var(--card) 92%, var(--surface))
+  );
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 16px;
+  padding: 18px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -268,10 +281,14 @@
 }
 
 .panel {
-  background: linear-gradient(165deg, #ffffff, #f2f8ff);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card) 97%, #ffffff),
+    color-mix(in srgb, var(--card) 92%, var(--surface))
+  );
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 16px;
+  padding: 18px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -282,9 +299,9 @@
 .stat-card:hover,
 .card:hover,
 .panel:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
-  box-shadow: 0 12px 22px color-mix(in srgb, var(--accent) 18%, transparent);
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.08);
 }
 
 .panel-header {
@@ -292,8 +309,22 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 0;
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, #ffffff);
   flex-wrap: wrap;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.panel-header p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .toolbar-actions {
@@ -320,7 +351,7 @@
   padding: 14px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-strong);
-  background: linear-gradient(170deg, #ffffff, #edf6ff);
+  background: var(--card);
   box-shadow: var(--shadow-soft);
 }
 
@@ -364,6 +395,7 @@
 }
 
 .requestlog-wrap {
-  max-height: 58vh;
+  min-height: min(46vh, 420px);
+  max-height: 62vh;
   overflow: auto;
 }

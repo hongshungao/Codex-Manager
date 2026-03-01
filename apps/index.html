@@ -36,8 +36,15 @@
                     </div>
                     <div class="top-actions">
                         <div class="service-setup">
-                            <input id="serviceAddr" type="text" placeholder="端口，如 5050" />
-                            <label class="service-toggle-control update-auto-check switch-control" for="serviceToggle">
+                            <input
+                                id="serviceAddr"
+                                type="text"
+                                placeholder="端口，如 5050"
+                            />
+                            <label
+                                class="service-toggle-control update-auto-check switch-control"
+                                for="serviceToggle"
+                            >
                                 <input id="serviceToggle" type="checkbox" />
                                 <span class="switch-track" aria-hidden="true">
                                     <span class="switch-thumb"></span>
@@ -51,7 +58,10 @@
                     </div>
                 </section>
 
-                <section id="pageDashboard" class="page active dashboard-compact">
+                <section
+                    id="pageDashboard"
+                    class="page active dashboard-compact"
+                >
                     <div class="stats-grid">
                         <div class="stat-card">
                             <div class="stat-icon"></div>
@@ -89,7 +99,9 @@
                             <div class="stat-icon"></div>
                             <div class="stat-body">
                                 <h3>缓存 Token</h3>
-                                <div id="metricCachedInputTokens" class="stat">0</div>
+                                <div id="metricCachedInputTokens" class="stat">
+                                    0
+                                </div>
                                 <div class="metric-sub">输入缓存命中</div>
                             </div>
                         </div>
@@ -97,15 +109,22 @@
                             <div class="stat-icon"></div>
                             <div class="stat-body">
                                 <h3>推理 Token</h3>
-                                <div id="metricReasoningOutputTokens" class="stat">0</div>
+                                <div
+                                    id="metricReasoningOutputTokens"
+                                    class="stat"
+                                >
+                                    0
+                                </div>
                                 <div class="metric-sub">输出中推理部分</div>
                             </div>
                         </div>
-                        <div class="stat-card">
+                        <div class="stat-card stat-card-cost">
                             <div class="stat-icon"></div>
                             <div class="stat-body">
                                 <h3>预计费用</h3>
-                                <div id="metricTodayCost" class="stat">$0.00</div>
+                                <div id="metricTodayCost" class="stat">
+                                    $0.00
+                                </div>
                                 <div class="metric-sub">按今日请求估算</div>
                             </div>
                         </div>
@@ -121,23 +140,41 @@
                     <div id="accountsToolbar" class="accounts-toolbar">
                         <div class="toolbar-left">
                             <div class="search-field">
-                                <input id="accountSearch" placeholder="搜索账号名 / ID..." />
+                                <input
+                                    id="accountSearch"
+                                    placeholder="搜索账号名 / ID..."
+                                />
                             </div>
                             <div class="search-field">
-                                <select id="accountGroupFilter" class="inline-select">
+                                <select
+                                    id="accountGroupFilter"
+                                    class="inline-select"
+                                >
                                     <option value="all">全部分组</option>
                                 </select>
                             </div>
                             <div class="segmented">
-                                <button id="filterAll" class="active">全部</button>
+                                <button id="filterAll" class="active">
+                                    全部
+                                </button>
                                 <button id="filterActive">可用</button>
                                 <button id="filterLow">低配额</button>
                             </div>
                         </div>
                         <div class="actions">
-                            <button id="addAccount" class="ghost">添加账号</button>
-                            <button id="importAccounts" class="secondary">导入账号</button>
-                            <input id="importAccountsInput" type="file" accept=".json,.txt" multiple hidden />
+                            <button id="addAccount" class="ghost">
+                                添加账号
+                            </button>
+                            <button id="importAccounts" class="secondary">
+                                导入账号
+                            </button>
+                            <input
+                                id="importAccountsInput"
+                                type="file"
+                                accept=".json,.txt"
+                                multiple
+                                hidden
+                            />
                             <button id="refreshAll">刷新所有</button>
                         </div>
                     </div>
@@ -169,8 +206,12 @@
                                 <p>创建/管理网关调用所需的 Key</p>
                             </div>
                             <div class="toolbar-actions api-keys-toolbar">
-                                <button id="refreshApiModels" class="ghost">刷新模型</button>
-                                <button id="createApiKey" class="secondary">创建 Key</button>
+                                <button id="refreshApiModels" class="ghost">
+                                    刷新模型
+                                </button>
+                                <button id="createApiKey" class="secondary">
+                                    创建 Key
+                                </button>
                             </div>
                         </div>
                         <div class="table-wrap">
@@ -200,14 +241,26 @@
                             </div>
                             <div class="toolbar-actions">
                                 <div class="segmented log-segmented">
-                                    <button id="filterLogAll" class="active">全部</button>
+                                    <button id="filterLogAll" class="active">
+                                        全部
+                                    </button>
                                     <button id="filterLog2xx">2xx</button>
                                     <button id="filterLog4xx">4xx</button>
                                     <button id="filterLog5xx">5xx</button>
                                 </div>
-                                <input id="requestLogSearch" placeholder="搜索，支持 method:GET / status:5xx / key:abc" />
-                                <button id="clearRequestLogs" class="danger">清空日志</button>
-                                <button id="refreshRequestLogs" class="secondary">刷新</button>
+                                <input
+                                    id="requestLogSearch"
+                                    placeholder="搜索，支持 method:GET / status:5xx / key:abc"
+                                />
+                                <button id="clearRequestLogs" class="danger">
+                                    清空日志
+                                </button>
+                                <button
+                                    id="refreshRequestLogs"
+                                    class="secondary"
+                                >
+                                    刷新
+                                </button>
                             </div>
                         </div>
                         <div class="table-wrap requestlog-wrap">
@@ -231,71 +284,438 @@
                     </div>
                 </section>
 
-                <section id="pageSettings" class="page">
-                    <div class="settings-grid">
-                        <div class="panel settings-card">
-                            <div class="panel-header">
-                                <div>
-                                    <h3>更新设置</h3>
-                                    <p>启动自动检查与手动更新入口</p>
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <label class="update-auto-check switch-control" for="autoCheckUpdate">
-                                    <input id="autoCheckUpdate" type="checkbox" checked />
-                                    <span class="switch-track" aria-hidden="true">
-                                        <span class="switch-thumb"></span>
-                                    </span>
-                                    <span>自动检查更新</span>
-                                </label>
-                                <button id="checkUpdate" class="secondary" type="button">
-                                    检查更新
-                                </button>
-                            </div>
-                            <div class="hint">当前版本：<span id="updateCurrentVersion">--</span></div>
-                            <div id="updateStatusText" class="hint">尚未检查更新</div>
-                        </div>
-
-                        <div class="panel settings-card settings-card-gateway">
-                            <div class="panel-header">
-                                <div>
-                                    <h3>网关策略</h3>
-                                    <p>配置请求路由策略</p>
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <label class="hint settings-field-label" for="routeStrategySelect">网关选路策略</label>
-                                <select id="routeStrategySelect" class="inline-select settings-inline-select">
-                                    <option value="ordered">顺序优先</option>
-                                    <option value="balanced">均衡轮询</option>
-                                </select>
-                            </div>
-                            <div id="routeStrategyHint" class="hint">默认按账号顺序优先，优先使用可用账号（不可用账号不会参与选路）。</div>
-                            <div class="settings-row">
-                                <label class="update-auto-check switch-control" for="cpaNoCookieHeaderMode">
-                                    <input id="cpaNoCookieHeaderMode" type="checkbox" />
-                                    <span class="switch-track" aria-hidden="true">
-                                        <span class="switch-thumb"></span>
-                                    </span>
-                                    <span>启用请求头收敛策略</span>
-                                </label>
-                            </div>
-                            <div id="cpaNoCookieHeaderModeHint" class="hint">开启后将取消 x-codex-turn-state、Conversation_id、固定 Openai-Beta、Chatgpt-Account-Id 请求头，减少 Cloudflare/WAF challenge 命中；可能降低跨轮会话粘性。</div>
-                        </div>
-
-                        <div class="panel settings-card settings-card-span-2">
-                            <div class="panel-header">
-                                <div>
-                                    <h3>主题设置</h3>
-                                    <p>切换界面配色主题</p>
-                                </div>
-                            </div>
-                            <div class="theme-popover settings-theme">
+                <section id="pageSettings" class="page page-settings-modern">
+                    <div class="panel settings-sheet">
+                        <div class="settings-grid">
+                            <div class="settings-top-grid">
                                 <div
-                                    id="themePanel"
-                                    class="theme-panel"
-                                    aria-label="主题切换"
-                                ></div>
+                                    class="panel settings-card settings-card-update settings-card-compact"
+                                >
+                                    <div class="panel-header">
+                                        <div>
+                                            <h3>更新设置</h3>
+                                            <p>自动检查与手动更新</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label
+                                            class="update-auto-check switch-control"
+                                            for="autoCheckUpdate"
+                                        >
+                                            <input
+                                                id="autoCheckUpdate"
+                                                type="checkbox"
+                                                checked
+                                            />
+                                            <span
+                                                class="switch-track"
+                                                aria-hidden="true"
+                                            >
+                                                <span
+                                                    class="switch-thumb"
+                                                ></span>
+                                            </span>
+                                            <span>自动检查更新</span>
+                                        </label>
+                                        <button
+                                            id="checkUpdate"
+                                            class="secondary"
+                                            type="button"
+                                        >
+                                            检查更新
+                                        </button>
+                                    </div>
+                                    <div class="hint">
+                                        当前版本：<span
+                                            id="updateCurrentVersion"
+                                            >--</span
+                                        >
+                                    </div>
+                                    <div id="updateStatusText" class="hint">
+                                        尚未检查更新
+                                    </div>
+                                </div>
+
+                                <div
+                                    class="panel settings-card settings-card-gateway settings-card-compact"
+                                >
+                                    <div class="panel-header">
+                                        <div>
+                                            <h3>网关策略</h3>
+                                            <p>配置请求路由策略</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label
+                                            class="update-auto-check switch-control"
+                                            for="cpaNoCookieHeaderMode"
+                                        >
+                                            <input
+                                                id="cpaNoCookieHeaderMode"
+                                                type="checkbox"
+                                            />
+                                            <span
+                                                class="switch-track"
+                                                aria-hidden="true"
+                                            >
+                                                <span
+                                                    class="switch-thumb"
+                                                ></span>
+                                            </span>
+                                            <span
+                                                class="settings-switch-text-with-tip"
+                                            >
+                                                <span>启用请求头收敛策略</span>
+                                                <span
+                                                    id="cpaNoCookieHeaderModeHint"
+                                                    class="settings-inline-tip"
+                                                    tabindex="0"
+                                                    role="note"
+                                                    title="开启后会移除高风险会话头，降低 Cloudflare/WAF challenge 命中。"
+                                                    aria-label="请求头收敛策略说明：开启后会移除高风险会话头，降低 Cloudflare/WAF challenge 命中。"
+                                                    >?</span
+                                                >
+                                            </span>
+                                        </label>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label
+                                            class="hint settings-field-label settings-field-label-with-tip"
+                                            for="routeStrategySelect"
+                                        >
+                                            <span>网关选路策略</span>
+                                            <span
+                                                id="routeStrategyHint"
+                                                class="settings-inline-tip"
+                                                tabindex="0"
+                                                role="note"
+                                                title="按账号顺序优先请求，优先使用可用账号（不可用账号不会参与选路）。"
+                                                aria-label="网关选路策略说明：按账号顺序优先请求，优先使用可用账号（不可用账号不会参与选路）。"
+                                                >?</span
+                                            >
+                                        </label>
+                                        <select
+                                            id="routeStrategySelect"
+                                            class="inline-select settings-inline-select"
+                                        >
+                                            <option value="ordered">
+                                                顺序优先
+                                            </option>
+                                            <option value="balanced">
+                                                均衡轮询
+                                            </option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div
+                                    id="settingsLowTransparencyCard"
+                                    class="panel settings-card settings-card-visual settings-card-compact"
+                                >
+                                    <div class="panel-header">
+                                        <div>
+                                            <h3>视觉性能</h3>
+                                            <p>低端设备可开启，减少特效开销</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label
+                                            class="update-auto-check switch-control"
+                                            for="lowTransparencyMode"
+                                        >
+                                            <input
+                                                id="lowTransparencyMode"
+                                                type="checkbox"
+                                            />
+                                            <span
+                                                class="switch-track"
+                                                aria-hidden="true"
+                                            >
+                                                <span
+                                                    class="switch-thumb"
+                                                ></span>
+                                            </span>
+                                            <span>性能模式 / 低透明度</span>
+                                        </label>
+                                    </div>
+                                    <div class="hint">
+                                        关闭 blur、backdrop-filter
+                                        等高成本效果。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div
+                                class="panel settings-card settings-card-background settings-card-background-modern"
+                            >
+                                <div class="panel-header">
+                                    <div>
+                                        <h3>后台任务</h3>
+                                        <p>轮询线程与 HTTP worker 参数</p>
+                                    </div>
+                                </div>
+                                <div class="settings-subtitle">
+                                    轮询线程（保存后热生效）
+                                </div>
+                                <div class="settings-poll-grid">
+                                    <div class="settings-poll-item">
+                                        <label
+                                            class="update-auto-check switch-control"
+                                            for="backgroundUsagePollingEnabled"
+                                        >
+                                            <input
+                                                id="backgroundUsagePollingEnabled"
+                                                type="checkbox"
+                                            />
+                                            <span
+                                                class="switch-track"
+                                                aria-hidden="true"
+                                            >
+                                                <span
+                                                    class="switch-thumb"
+                                                ></span>
+                                            </span>
+                                            <span>用量轮询线程</span>
+                                        </label>
+                                        <div class="settings-interval-field">
+                                            <label
+                                                class="hint settings-interval-label"
+                                                for="backgroundUsagePollIntervalSecs"
+                                                >间隔（秒）</label
+                                            >
+                                            <input
+                                                id="backgroundUsagePollIntervalSecs"
+                                                class="settings-inline-number"
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div class="settings-poll-item">
+                                        <label
+                                            class="update-auto-check switch-control"
+                                            for="backgroundGatewayKeepaliveEnabled"
+                                        >
+                                            <input
+                                                id="backgroundGatewayKeepaliveEnabled"
+                                                type="checkbox"
+                                            />
+                                            <span
+                                                class="switch-track"
+                                                aria-hidden="true"
+                                            >
+                                                <span
+                                                    class="switch-thumb"
+                                                ></span>
+                                            </span>
+                                            <span>网关保活线程</span>
+                                        </label>
+                                        <div class="settings-interval-field">
+                                            <label
+                                                class="hint settings-interval-label"
+                                                for="backgroundGatewayKeepaliveIntervalSecs"
+                                                >间隔（秒）</label
+                                            >
+                                            <input
+                                                id="backgroundGatewayKeepaliveIntervalSecs"
+                                                class="settings-inline-number"
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div class="settings-poll-item">
+                                        <label
+                                            class="update-auto-check switch-control"
+                                            for="backgroundTokenRefreshPollingEnabled"
+                                        >
+                                            <input
+                                                id="backgroundTokenRefreshPollingEnabled"
+                                                type="checkbox"
+                                            />
+                                            <span
+                                                class="switch-track"
+                                                aria-hidden="true"
+                                            >
+                                                <span
+                                                    class="switch-thumb"
+                                                ></span>
+                                            </span>
+                                            <span>令牌刷新轮询线程</span>
+                                        </label>
+                                        <div class="settings-interval-field">
+                                            <label
+                                                class="hint settings-interval-label"
+                                                for="backgroundTokenRefreshPollIntervalSecs"
+                                                >间隔（秒）</label
+                                            >
+                                            <input
+                                                id="backgroundTokenRefreshPollIntervalSecs"
+                                                class="settings-inline-number"
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="settings-subtitle">
+                                    Worker 参数（重启 service 生效）
+                                </div>
+                                <div class="hint">
+                                    并发线程数按 max(CPU 核心数 × 因子, 最小值)
+                                    计算。
+                                </div>
+                                <div class="settings-workers-grid">
+                                    <div class="settings-inline-number-field">
+                                        <label
+                                            class="hint settings-field-label settings-field-label-with-tip"
+                                            for="backgroundUsageRefreshWorkers"
+                                        >
+                                            <span>用量刷新并发线程数</span>
+                                            <span
+                                                class="settings-inline-tip"
+                                                tabindex="0"
+                                                role="note"
+                                                title="后台刷新账号用量时并行执行的任务线程数。值越大刷新更快，但会占用更多 CPU/网络资源。"
+                                                aria-label="用量刷新并发线程数说明：后台刷新账号用量时并行执行的任务线程数，值越大刷新更快，但会占用更多 CPU 和网络资源。"
+                                                >?</span
+                                            >
+                                        </label>
+                                        <input
+                                            id="backgroundUsageRefreshWorkers"
+                                            class="settings-inline-number"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                        />
+                                    </div>
+                                    <div class="settings-inline-number-field">
+                                        <label
+                                            class="hint settings-field-label settings-field-label-with-tip"
+                                            for="backgroundHttpWorkerFactor"
+                                        >
+                                            <span>普通请求并发因子</span>
+                                            <span
+                                                class="settings-inline-tip"
+                                                tabindex="0"
+                                                role="note"
+                                                title="普通 HTTP 请求线程数的倍数因子，最终线程数=max(CPU核心数×因子, 普通请求最小并发)。"
+                                                aria-label="普通请求并发因子说明：普通 HTTP 请求线程数的倍数因子，最终线程数等于 max(CPU核心数乘因子, 普通请求最小并发)。"
+                                                >?</span
+                                            >
+                                        </label>
+                                        <input
+                                            id="backgroundHttpWorkerFactor"
+                                            class="settings-inline-number"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                        />
+                                    </div>
+                                    <div class="settings-inline-number-field">
+                                        <label
+                                            class="hint settings-field-label settings-field-label-with-tip"
+                                            for="backgroundHttpWorkerMin"
+                                        >
+                                            <span>普通请求最小并发</span>
+                                            <span
+                                                class="settings-inline-tip"
+                                                tabindex="0"
+                                                role="note"
+                                                title="普通 HTTP 请求线程数的下限。CPU 较少时，仍至少保留这个并发数。"
+                                                aria-label="普通请求最小并发说明：普通 HTTP 请求线程数的下限，CPU 较少时仍至少保留这个并发数。"
+                                                >?</span
+                                            >
+                                        </label>
+                                        <input
+                                            id="backgroundHttpWorkerMin"
+                                            class="settings-inline-number"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                        />
+                                    </div>
+                                    <div class="settings-inline-number-field">
+                                        <label
+                                            class="hint settings-field-label settings-field-label-with-tip"
+                                            for="backgroundHttpStreamWorkerFactor"
+                                        >
+                                            <span>流式请求并发因子</span>
+                                            <span
+                                                class="settings-inline-tip"
+                                                tabindex="0"
+                                                role="note"
+                                                title="SSE/流式请求线程数的倍数因子，最终线程数=max(CPU核心数×因子, 流式请求最小并发)。"
+                                                aria-label="流式请求并发因子说明：SSE/流式请求线程数的倍数因子，最终线程数等于 max(CPU核心数乘因子, 流式请求最小并发)。"
+                                                >?</span
+                                            >
+                                        </label>
+                                        <input
+                                            id="backgroundHttpStreamWorkerFactor"
+                                            class="settings-inline-number"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                        />
+                                    </div>
+                                    <div class="settings-inline-number-field">
+                                        <label
+                                            class="hint settings-field-label settings-field-label-with-tip"
+                                            for="backgroundHttpStreamWorkerMin"
+                                        >
+                                            <span>流式请求最小并发</span>
+                                            <span
+                                                class="settings-inline-tip"
+                                                tabindex="0"
+                                                role="note"
+                                                title="流式请求线程数的下限。保证流式对话在高负载时仍有基础并发能力。"
+                                                aria-label="流式请求最小并发说明：流式请求线程数的下限，保证流式对话在高负载时仍有基础并发能力。"
+                                                >?</span
+                                            >
+                                        </label>
+                                        <input
+                                            id="backgroundHttpStreamWorkerMin"
+                                            class="settings-inline-number"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                        />
+                                    </div>
+                                </div>
+                                <div class="settings-row settings-row-actions">
+                                    <button
+                                        id="backgroundTasksSave"
+                                        class="secondary"
+                                        type="button"
+                                    >
+                                        保存配置
+                                    </button>
+                                    <div id="backgroundTasksHint" class="hint">
+                                        保存后会按参数生效。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div
+                                class="panel settings-card settings-card-theme settings-card-compact"
+                            >
+                                <div class="panel-header">
+                                    <div>
+                                        <h3>主题设置</h3>
+                                        <p>切换界面配色主题</p>
+                                    </div>
+                                </div>
+                                <div class="theme-popover settings-theme">
+                                    <div
+                                        id="themePanel"
+                                        class="theme-panel"
+                                        aria-label="主题切换"
+                                    ></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -309,7 +729,11 @@
                 <div id="startupMaskText" class="hint">
                     正在连接本地服务并加载页面数据...
                 </div>
-                <div id="startupMaskDetail" class="startup-mask-detail" hidden></div>
+                <div
+                    id="startupMaskDetail"
+                    class="startup-mask-detail"
+                    hidden
+                ></div>
             </div>
         </div>
         <div id="modalAccount" class="modal">
@@ -385,11 +809,19 @@
                     />
                     <label>协议</label>
                     <select id="inputApiKeyProtocol">
-                        <option value="openai_compat">OpenAI Compatible（默认）</option>
+                        <option value="openai_compat">
+                            OpenAI Compatible（默认）
+                        </option>
                         <option value="azure_openai">Azure OpenAI</option>
-                        <option value="anthropic_native">Claude Code 兼容</option>
+                        <option value="anthropic_native">
+                            Claude Code 兼容
+                        </option>
                     </select>
-                    <div id="apiKeyAzureFields" class="azure-fields-grid" hidden>
+                    <div
+                        id="apiKeyAzureFields"
+                        class="azure-fields-grid"
+                        hidden
+                    >
                         <div class="modal-field">
                             <label for="inputApiKeyEndpoint">Endpoint</label>
                             <input
@@ -421,8 +853,15 @@
                     </select>
                     <label>平台 Key</label>
                     <div class="login-url">
-                        <input id="apiKeyValue" class="mono" readonly value="" />
-                        <button id="copyApiKey" class="secondary">复制Key</button>
+                        <input
+                            id="apiKeyValue"
+                            class="mono"
+                            readonly
+                            value=""
+                        />
+                        <button id="copyApiKey" class="secondary">
+                            复制Key
+                        </button>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -449,4 +888,3 @@
         <script type="module" src="/src/main.js"></script>
     </body>
 </html>
-

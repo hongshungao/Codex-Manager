@@ -28,6 +28,20 @@
   border: 1px solid var(--border);
   font-size: 13px;
   vertical-align: top;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.data-table tbody tr:nth-child(even) td {
+  background: linear-gradient(180deg, #ffffff, color-mix(in srgb, var(--surface) 36%, #ffffff));
+}
+
+.data-table tbody tr:hover td {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 6%, #ffffff),
+    color-mix(in srgb, var(--accent) 4%, #f7fbff)
+  );
 }
 
 .requestlog-table tbody td:nth-child(5),
@@ -123,25 +137,25 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
 .search-field input {
-  width: 180px;
+  width: clamp(180px, 22vw, 280px);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: 13px;
   background: #fff;
 }
 
 .search-field select {
-  width: 160px;
+  width: clamp(150px, 18vw, 220px);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: 13px;
   background: #fff;
 }
 .segmented {

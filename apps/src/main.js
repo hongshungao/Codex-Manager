@@ -5,6 +5,8 @@ import "./styles/responsive.css";
 import "./styles/performance.css";
 
 import {
+  serviceGatewayBackgroundTasksGet,
+  serviceGatewayBackgroundTasksSet,
   serviceGatewayHeaderPolicyGet,
   serviceGatewayHeaderPolicySet,
   serviceGatewayRouteStrategyGet,
@@ -91,6 +93,34 @@ const ROUTE_STRATEGY_STORAGE_KEY = "codexmanager.gateway.route_strategy";
 const ROUTE_STRATEGY_ORDERED = "ordered";
 const ROUTE_STRATEGY_BALANCED = "balanced";
 const CPA_NO_COOKIE_HEADER_MODE_STORAGE_KEY = "codexmanager.gateway.cpa_no_cookie_header_mode";
+const BACKGROUND_TASKS_SETTINGS_STORAGE_KEY = "codexmanager.gateway.background_tasks";
+const DEFAULT_BACKGROUND_TASKS_SETTINGS = {
+  usagePollingEnabled: true,
+  usagePollIntervalSecs: 600,
+  gatewayKeepaliveEnabled: true,
+  gatewayKeepaliveIntervalSecs: 180,
+  tokenRefreshPollingEnabled: true,
+  tokenRefreshPollIntervalSecs: 60,
+  usageRefreshWorkers: 4,
+  httpWorkerFactor: 4,
+  httpWorkerMin: 8,
+  httpStreamWorkerFactor: 1,
+  httpStreamWorkerMin: 2,
+};
+const BACKGROUND_TASKS_RESTART_KEYS_DEFAULT = [
+  "usageRefreshWorkers",
+  "httpWorkerFactor",
+  "httpWorkerMin",
+  "httpStreamWorkerFactor",
+  "httpStreamWorkerMin",
+];
+const BACKGROUND_TASKS_RESTART_KEY_LABELS = {
+  usageRefreshWorkers: "用量刷新并发线程数",
+  httpWorkerFactor: "普通请求并发因子",
+  httpWorkerMin: "普通请求最小并发",
+  httpStreamWorkerFactor: "流式请求并发因子",
+  httpStreamWorkerMin: "流式请求最小并发",
+};
 const API_MODELS_REMOTE_REFRESH_STORAGE_KEY = "codexmanager.apikey.models.last_remote_refresh_at";
 const API_MODELS_REMOTE_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_DELAY_MS = 1200;
@@ -102,6 +132,8 @@ let routeStrategySyncInFlight = null;
 let routeStrategySyncedProbeId = -1;
 let cpaNoCookieHeaderModeSyncInFlight = null;
 let cpaNoCookieHeaderModeSyncedProbeId = -1;
+let backgroundTasksSyncInFlight = null;
+let backgroundTasksSyncedProbeId = -1;
 let apiModelsRemoteRefreshInFlight = null;
 function buildRefreshAllTasks(options = {}) {
   const refreshRemoteUsage = options.refreshRemoteUsage === true;
@@ -273,11 +305,12 @@ function routeStrategyLabel(strategy) {
 
 function updateRouteStrategyHint(strategy) {
   if (!dom.routeStrategyHint) return;
+  let hintText = "按账号顺序优先请求，优先使用可用账号（不可用账号不会参与选路）。";
   if (normalizeRouteStrategy(strategy) === ROUTE_STRATEGY_BALANCED) {
-    dom.routeStrategyHint.textContent = "按 Key + 模型 均衡轮询起点，优先使用可用账号（不可用账号不会参与选路）。";
-    return;
+    hintText = "按 Key + 模型 均衡轮询起点，优先使用可用账号（不可用账号不会参与选路）。";
   }
-  dom.routeStrategyHint.textContent = "按账号顺序优先请求，优先使用可用账号（不可用账号不会参与选路）。";
+  dom.routeStrategyHint.title = hintText;
+  dom.routeStrategyHint.setAttribute("aria-label", `网关选路策略说明：${hintText}`);
 }
 
 function readRouteStrategySetting() {
@@ -496,6 +529,353 @@ async function syncCpaNoCookieHeaderModeOnStartup() {
     cpaNoCookieHeaderModeSyncedProbeId = state.serviceProbeId;
   } catch {
     setCpaNoCookieHeaderModeToggle(readCpaNoCookieHeaderModeSetting());
+  }
+}
+
+function normalizeBooleanSetting(value, fallback = false) {
+  if (value == null) {
+    return Boolean(fallback);
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return Boolean(fallback);
+}
+
+function normalizePositiveInteger(value, fallback, min = 1) {
+  const fallbackValue = Math.max(min, Math.floor(Number(fallback) || min));
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallbackValue;
+  }
+  const intValue = Math.floor(numeric);
+  if (intValue < min) {
+    return min;
+  }
+  return intValue;
+}
+
+function normalizeBackgroundTasksSettings(input) {
+  const source = input && typeof input === "object" ? input : {};
+  return {
+    usagePollingEnabled: normalizeBooleanSetting(
+      source.usagePollingEnabled,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.usagePollingEnabled,
+    ),
+    usagePollIntervalSecs: normalizePositiveInteger(
+      source.usagePollIntervalSecs,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.usagePollIntervalSecs,
+      1,
+    ),
+    gatewayKeepaliveEnabled: normalizeBooleanSetting(
+      source.gatewayKeepaliveEnabled,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.gatewayKeepaliveEnabled,
+    ),
+    gatewayKeepaliveIntervalSecs: normalizePositiveInteger(
+      source.gatewayKeepaliveIntervalSecs,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.gatewayKeepaliveIntervalSecs,
+      1,
+    ),
+    tokenRefreshPollingEnabled: normalizeBooleanSetting(
+      source.tokenRefreshPollingEnabled,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.tokenRefreshPollingEnabled,
+    ),
+    tokenRefreshPollIntervalSecs: normalizePositiveInteger(
+      source.tokenRefreshPollIntervalSecs,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.tokenRefreshPollIntervalSecs,
+      1,
+    ),
+    usageRefreshWorkers: normalizePositiveInteger(
+      source.usageRefreshWorkers,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.usageRefreshWorkers,
+      1,
+    ),
+    httpWorkerFactor: normalizePositiveInteger(
+      source.httpWorkerFactor,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.httpWorkerFactor,
+      1,
+    ),
+    httpWorkerMin: normalizePositiveInteger(
+      source.httpWorkerMin,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.httpWorkerMin,
+      1,
+    ),
+    httpStreamWorkerFactor: normalizePositiveInteger(
+      source.httpStreamWorkerFactor,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.httpStreamWorkerFactor,
+      1,
+    ),
+    httpStreamWorkerMin: normalizePositiveInteger(
+      source.httpStreamWorkerMin,
+      DEFAULT_BACKGROUND_TASKS_SETTINGS.httpStreamWorkerMin,
+      1,
+    ),
+  };
+}
+
+function readBackgroundTasksSetting() {
+  if (typeof localStorage === "undefined") {
+    return normalizeBackgroundTasksSettings(DEFAULT_BACKGROUND_TASKS_SETTINGS);
+  }
+  const raw = localStorage.getItem(BACKGROUND_TASKS_SETTINGS_STORAGE_KEY);
+  if (!raw) {
+    return normalizeBackgroundTasksSettings(DEFAULT_BACKGROUND_TASKS_SETTINGS);
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeBackgroundTasksSettings(parsed);
+  } catch {
+    return normalizeBackgroundTasksSettings(DEFAULT_BACKGROUND_TASKS_SETTINGS);
+  }
+}
+
+function saveBackgroundTasksSetting(settings) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  const normalized = normalizeBackgroundTasksSettings(settings);
+  localStorage.setItem(BACKGROUND_TASKS_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+}
+
+function setBackgroundTasksForm(settings) {
+  const normalized = normalizeBackgroundTasksSettings(settings);
+  if (dom.backgroundUsagePollingEnabled) {
+    dom.backgroundUsagePollingEnabled.checked = normalized.usagePollingEnabled;
+  }
+  if (dom.backgroundUsagePollIntervalSecs) {
+    dom.backgroundUsagePollIntervalSecs.value = String(normalized.usagePollIntervalSecs);
+  }
+  if (dom.backgroundGatewayKeepaliveEnabled) {
+    dom.backgroundGatewayKeepaliveEnabled.checked = normalized.gatewayKeepaliveEnabled;
+  }
+  if (dom.backgroundGatewayKeepaliveIntervalSecs) {
+    dom.backgroundGatewayKeepaliveIntervalSecs.value = String(normalized.gatewayKeepaliveIntervalSecs);
+  }
+  if (dom.backgroundTokenRefreshPollingEnabled) {
+    dom.backgroundTokenRefreshPollingEnabled.checked = normalized.tokenRefreshPollingEnabled;
+  }
+  if (dom.backgroundTokenRefreshPollIntervalSecs) {
+    dom.backgroundTokenRefreshPollIntervalSecs.value = String(normalized.tokenRefreshPollIntervalSecs);
+  }
+  if (dom.backgroundUsageRefreshWorkers) {
+    dom.backgroundUsageRefreshWorkers.value = String(normalized.usageRefreshWorkers);
+  }
+  if (dom.backgroundHttpWorkerFactor) {
+    dom.backgroundHttpWorkerFactor.value = String(normalized.httpWorkerFactor);
+  }
+  if (dom.backgroundHttpWorkerMin) {
+    dom.backgroundHttpWorkerMin.value = String(normalized.httpWorkerMin);
+  }
+  if (dom.backgroundHttpStreamWorkerFactor) {
+    dom.backgroundHttpStreamWorkerFactor.value = String(normalized.httpStreamWorkerFactor);
+  }
+  if (dom.backgroundHttpStreamWorkerMin) {
+    dom.backgroundHttpStreamWorkerMin.value = String(normalized.httpStreamWorkerMin);
+  }
+}
+
+function readBackgroundTasksForm() {
+  const integerFields = [
+    ["usagePollIntervalSecs", dom.backgroundUsagePollIntervalSecs, "用量轮询间隔"],
+    ["gatewayKeepaliveIntervalSecs", dom.backgroundGatewayKeepaliveIntervalSecs, "网关保活间隔"],
+    ["tokenRefreshPollIntervalSecs", dom.backgroundTokenRefreshPollIntervalSecs, "令牌刷新间隔"],
+    ["usageRefreshWorkers", dom.backgroundUsageRefreshWorkers, "用量刷新 worker 数"],
+    ["httpWorkerFactor", dom.backgroundHttpWorkerFactor, "HTTP worker 因子"],
+    ["httpWorkerMin", dom.backgroundHttpWorkerMin, "HTTP worker 最小值"],
+    ["httpStreamWorkerFactor", dom.backgroundHttpStreamWorkerFactor, "流式 worker 因子"],
+    ["httpStreamWorkerMin", dom.backgroundHttpStreamWorkerMin, "流式 worker 最小值"],
+  ];
+  const numbers = {};
+  for (const [key, input, label] of integerFields) {
+    const raw = input ? String(input.value || "").trim() : "";
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0 || Math.floor(parsed) !== parsed) {
+      return { ok: false, error: `${label} 需填写正整数` };
+    }
+    numbers[key] = parsed;
+  }
+  return {
+    ok: true,
+    settings: normalizeBackgroundTasksSettings({
+      usagePollingEnabled: dom.backgroundUsagePollingEnabled
+        ? Boolean(dom.backgroundUsagePollingEnabled.checked)
+        : DEFAULT_BACKGROUND_TASKS_SETTINGS.usagePollingEnabled,
+      usagePollIntervalSecs: numbers.usagePollIntervalSecs,
+      gatewayKeepaliveEnabled: dom.backgroundGatewayKeepaliveEnabled
+        ? Boolean(dom.backgroundGatewayKeepaliveEnabled.checked)
+        : DEFAULT_BACKGROUND_TASKS_SETTINGS.gatewayKeepaliveEnabled,
+      gatewayKeepaliveIntervalSecs: numbers.gatewayKeepaliveIntervalSecs,
+      tokenRefreshPollingEnabled: dom.backgroundTokenRefreshPollingEnabled
+        ? Boolean(dom.backgroundTokenRefreshPollingEnabled.checked)
+        : DEFAULT_BACKGROUND_TASKS_SETTINGS.tokenRefreshPollingEnabled,
+      tokenRefreshPollIntervalSecs: numbers.tokenRefreshPollIntervalSecs,
+      usageRefreshWorkers: numbers.usageRefreshWorkers,
+      httpWorkerFactor: numbers.httpWorkerFactor,
+      httpWorkerMin: numbers.httpWorkerMin,
+      httpStreamWorkerFactor: numbers.httpStreamWorkerFactor,
+      httpStreamWorkerMin: numbers.httpStreamWorkerMin,
+    }),
+  };
+}
+
+function resolveBackgroundTasksSettingsFromPayload(payload) {
+  return normalizeBackgroundTasksSettings({
+    usagePollingEnabled: pickBooleanValue(payload, [
+      "usagePollingEnabled",
+      "result.usagePollingEnabled",
+    ]),
+    usagePollIntervalSecs: pickFirstValue(payload, [
+      "usagePollIntervalSecs",
+      "result.usagePollIntervalSecs",
+    ]),
+    gatewayKeepaliveEnabled: pickBooleanValue(payload, [
+      "gatewayKeepaliveEnabled",
+      "result.gatewayKeepaliveEnabled",
+    ]),
+    gatewayKeepaliveIntervalSecs: pickFirstValue(payload, [
+      "gatewayKeepaliveIntervalSecs",
+      "result.gatewayKeepaliveIntervalSecs",
+    ]),
+    tokenRefreshPollingEnabled: pickBooleanValue(payload, [
+      "tokenRefreshPollingEnabled",
+      "result.tokenRefreshPollingEnabled",
+    ]),
+    tokenRefreshPollIntervalSecs: pickFirstValue(payload, [
+      "tokenRefreshPollIntervalSecs",
+      "result.tokenRefreshPollIntervalSecs",
+    ]),
+    usageRefreshWorkers: pickFirstValue(payload, [
+      "usageRefreshWorkers",
+      "result.usageRefreshWorkers",
+    ]),
+    httpWorkerFactor: pickFirstValue(payload, [
+      "httpWorkerFactor",
+      "result.httpWorkerFactor",
+    ]),
+    httpWorkerMin: pickFirstValue(payload, [
+      "httpWorkerMin",
+      "result.httpWorkerMin",
+    ]),
+    httpStreamWorkerFactor: pickFirstValue(payload, [
+      "httpStreamWorkerFactor",
+      "result.httpStreamWorkerFactor",
+    ]),
+    httpStreamWorkerMin: pickFirstValue(payload, [
+      "httpStreamWorkerMin",
+      "result.httpStreamWorkerMin",
+    ]),
+  });
+}
+
+function resolveBackgroundTasksRestartKeys(payload) {
+  const raw = pickFirstValue(payload, [
+    "requiresRestartKeys",
+    "result.requiresRestartKeys",
+  ]);
+  if (!Array.isArray(raw)) {
+    return [...BACKGROUND_TASKS_RESTART_KEYS_DEFAULT];
+  }
+  return raw
+    .map((item) => String(item || "").trim())
+    .filter((item) => item.length > 0);
+}
+
+function updateBackgroundTasksHint(requiresRestartKeys) {
+  if (!dom.backgroundTasksHint) {
+    return;
+  }
+  const keys = Array.isArray(requiresRestartKeys) ? requiresRestartKeys : [];
+  if (keys.length === 0) {
+    dom.backgroundTasksHint.textContent = "保存后立即生效。";
+    return;
+  }
+  const labels = keys.map((key) => BACKGROUND_TASKS_RESTART_KEY_LABELS[key] || key);
+  dom.backgroundTasksHint.textContent = `已保存。以下参数需重启服务生效：${labels.join("、")}。`;
+}
+
+function initBackgroundTasksSetting() {
+  const settings = readBackgroundTasksSetting();
+  if (typeof localStorage !== "undefined" && localStorage.getItem(BACKGROUND_TASKS_SETTINGS_STORAGE_KEY) == null) {
+    saveBackgroundTasksSetting(settings);
+  }
+  setBackgroundTasksForm(settings);
+  updateBackgroundTasksHint(BACKGROUND_TASKS_RESTART_KEYS_DEFAULT);
+}
+
+async function applyBackgroundTasksToService(settings, { silent = true } = {}) {
+  const normalized = normalizeBackgroundTasksSettings(settings);
+  if (backgroundTasksSyncInFlight) {
+    return backgroundTasksSyncInFlight;
+  }
+  backgroundTasksSyncInFlight = (async () => {
+    const connected = await ensureConnected();
+    serviceLifecycle.updateServiceToggle();
+    if (!connected) {
+      if (!silent) {
+        showToast("服务未连接，稍后会自动应用后台任务配置", "error");
+      }
+      return false;
+    }
+    const response = await serviceGatewayBackgroundTasksSet(normalized);
+    const applied = resolveBackgroundTasksSettingsFromPayload(response);
+    const restartKeys = resolveBackgroundTasksRestartKeys(response);
+    saveBackgroundTasksSetting(applied);
+    setBackgroundTasksForm(applied);
+    updateBackgroundTasksHint(restartKeys);
+    backgroundTasksSyncedProbeId = state.serviceProbeId;
+    if (!silent) {
+      showToast("后台任务配置已保存");
+    }
+    return true;
+  })();
+
+  try {
+    return await backgroundTasksSyncInFlight;
+  } catch (err) {
+    if (!silent) {
+      showToast(`保存失败：${normalizeErrorMessage(err)}`, "error");
+    }
+    return false;
+  } finally {
+    backgroundTasksSyncInFlight = null;
+  }
+}
+
+async function syncBackgroundTasksOnStartup() {
+  const connected = await ensureConnected();
+  serviceLifecycle.updateServiceToggle();
+  if (!connected) {
+    return;
+  }
+  const hasLocalSetting = typeof localStorage !== "undefined"
+    && localStorage.getItem(BACKGROUND_TASKS_SETTINGS_STORAGE_KEY) != null;
+  if (hasLocalSetting) {
+    await applyBackgroundTasksToService(readBackgroundTasksSetting(), { silent: true });
+    return;
+  }
+  try {
+    const response = await serviceGatewayBackgroundTasksGet();
+    const settings = resolveBackgroundTasksSettingsFromPayload(response);
+    const restartKeys = resolveBackgroundTasksRestartKeys(response);
+    saveBackgroundTasksSetting(settings);
+    setBackgroundTasksForm(settings);
+    updateBackgroundTasksHint(restartKeys);
+    backgroundTasksSyncedProbeId = state.serviceProbeId;
+  } catch {
+    setBackgroundTasksForm(readBackgroundTasksSetting());
+    updateBackgroundTasksHint(BACKGROUND_TASKS_RESTART_KEYS_DEFAULT);
   }
 }
 
@@ -957,6 +1337,9 @@ async function refreshAll(options = {}) {
     if (cpaNoCookieHeaderModeSyncedProbeId !== state.serviceProbeId) {
       await applyCpaNoCookieHeaderModeToService(readCpaNoCookieHeaderModeSetting(), { silent: true });
     }
+    if (backgroundTasksSyncedProbeId !== state.serviceProbeId) {
+      await applyBackgroundTasksToService(readBackgroundTasksSetting(), { silent: true });
+    }
 
     // 中文注释：全并发会制造瞬时抖动（同时多次 RPC/DOM 更新）；这里改为有限并发并统一限流上限。
     const results = await runRefreshTasks(
@@ -1267,6 +1650,21 @@ function bindEvents() {
       void applyCpaNoCookieHeaderModeToService(enabled, { silent: false });
     });
   }
+  if (dom.backgroundTasksSave && dom.backgroundTasksSave.dataset.bound !== "1") {
+    dom.backgroundTasksSave.dataset.bound = "1";
+    dom.backgroundTasksSave.addEventListener("click", () => {
+      void withButtonBusy(dom.backgroundTasksSave, "保存中...", async () => {
+        const parsed = readBackgroundTasksForm();
+        if (!parsed.ok) {
+          showToast(parsed.error, "error");
+          return;
+        }
+        const nextSettings = parsed.settings;
+        saveBackgroundTasksSetting(nextSettings);
+        await applyBackgroundTasksToService(nextSettings, { silent: false });
+      });
+    });
+  }
   const lowTransparencyToggle = typeof document === "undefined"
     ? null
     : document.getElementById(UI_LOW_TRANSPARENCY_TOGGLE_ID);
@@ -1291,6 +1689,7 @@ function bootstrap() {
   initUpdateAutoCheckSetting();
   initRouteStrategySetting();
   initCpaNoCookieHeaderModeSetting();
+  initBackgroundTasksSetting();
   void bootstrapUpdateStatus();
   serviceLifecycle.restoreServiceAddr();
   serviceLifecycle.updateServiceToggle();
@@ -1301,6 +1700,7 @@ function bootstrap() {
   void serviceLifecycle.autoStartService().finally(() => {
     void syncRouteStrategyOnStartup();
     void syncCpaNoCookieHeaderModeOnStartup();
+    void syncBackgroundTasksOnStartup();
     setStartupMask(false);
   });
 }

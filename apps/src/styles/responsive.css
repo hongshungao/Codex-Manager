@@ -19,6 +19,14 @@
   .update-auto-check span {
     max-width: none;
   }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-top-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1024px) {
@@ -29,6 +37,12 @@
   .top-nav {
     flex-wrap: wrap;
     justify-content: flex-start;
+    left: 0;
+    width: 100%;
+    transform: none;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
   }
 
   .top-actions {
@@ -49,7 +63,28 @@
   }
 
   .content {
-    padding: 24px 18px 34px;
+    padding: 92px 14px 26px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-poll-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-top-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .settings-top-grid .settings-card {
+    min-height: auto;
+  }
+
+  .settings-workers-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -123,8 +158,34 @@
     min-width: 0;
   }
 
-  .settings-grid {
+  .settings-sheet {
+    padding: 12px 14px;
+  }
+
+  .settings-top-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-sheet .settings-card {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .settings-poll-item {
+    grid-template-columns: minmax(0, 1fr) 104px;
+    align-items: center;
+  }
+
+  .settings-poll-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-workers-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-row-actions .hint {
+    min-width: 0;
   }
 }
 
@@ -132,7 +193,7 @@
   .pill-nav {
     width: 100%;
     justify-content: flex-start;
-    padding: 6px;
+    padding: 4px;
   }
 
   .service-setup {
@@ -207,7 +268,7 @@
 
   .panel,
   .card {
-    padding: 16px;
+    padding: 14px;
   }
 }
 
