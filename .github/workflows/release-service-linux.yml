@@ -100,7 +100,7 @@ jobs:
             echo "tag must look like vX.Y.Z or vX.Y.Z-suffix, got: $TAG"
             exit 1
           fi
-          TAG_VERSION="$(echo "$TAG" | sed -E 's/^v([0-9]+\\.[0-9]+\\.[0-9]+).*/\\1/')"
+          TAG_VERSION="$(echo "$TAG" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
           WORKSPACE_VERSION="$(awk -F'\"' '
             BEGIN { in_section=0 }
             /^\[workspace\.package\]$/ { in_section=1; next }
