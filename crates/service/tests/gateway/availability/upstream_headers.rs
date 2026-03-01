@@ -12,6 +12,7 @@ fn codex_header_profile_sets_required_headers_for_stream() {
     let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
         auth_token: "token-123",
         account_id: Some("acc-1"),
+        include_account_id: true,
         upstream_cookie: Some("cf_clearance=test"),
         incoming_session_id: None,
         fallback_session_id: None,
@@ -71,6 +72,7 @@ fn codex_header_profile_uses_json_accept_for_non_stream() {
     let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
         auth_token: "token-456",
         account_id: None,
+        include_account_id: true,
         upstream_cookie: None,
         incoming_session_id: None,
         fallback_session_id: None,
@@ -94,6 +96,7 @@ fn codex_header_profile_regenerates_session_on_failover() {
     let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
         auth_token: "token-789",
         account_id: None,
+        include_account_id: true,
         upstream_cookie: None,
         incoming_session_id: Some("sticky-session"),
         fallback_session_id: Some("fallback-session"),
@@ -118,6 +121,7 @@ fn codex_header_profile_uses_fallback_session_when_incoming_missing() {
     let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
         auth_token: "token-fallback",
         account_id: None,
+        include_account_id: true,
         upstream_cookie: None,
         incoming_session_id: None,
         fallback_session_id: Some("fallback-session"),
@@ -140,6 +144,7 @@ fn codex_header_profile_uses_fallback_conversation_when_incoming_missing() {
     let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
         auth_token: "token-fallback-conv",
         account_id: None,
+        include_account_id: true,
         upstream_cookie: None,
         incoming_session_id: None,
         fallback_session_id: Some("fallback-session"),
@@ -155,4 +160,24 @@ fn codex_header_profile_uses_fallback_conversation_when_incoming_missing() {
         find_header(&headers, "Conversation_id").as_deref(),
         Some("fallback-conversation")
     );
+}
+
+#[test]
+fn codex_header_profile_skips_account_header_when_disabled() {
+    let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
+        auth_token: "token-no-acc",
+        account_id: Some("acc-should-not-send"),
+        include_account_id: false,
+        upstream_cookie: None,
+        incoming_session_id: None,
+        fallback_session_id: None,
+        incoming_turn_state: None,
+        incoming_conversation_id: None,
+        fallback_conversation_id: None,
+        strip_session_affinity: false,
+        is_stream: true,
+        has_body: true,
+    });
+
+    assert!(find_header(&headers, "Chatgpt-Account-Id").is_none());
 }

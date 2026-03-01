@@ -65,9 +65,11 @@ pub(super) fn send_upstream_request(
         .chatgpt_account_id
         .as_deref()
         .or_else(|| account.workspace_id.as_deref());
+    let include_account_id = !super::super::is_openai_api_base(target_url);
     let header_input = super::header_profile::CodexUpstreamHeaderInput {
         auth_token,
         account_id,
+        include_account_id,
         upstream_cookie,
         incoming_session_id,
         fallback_session_id: derived_session_id.as_deref(),

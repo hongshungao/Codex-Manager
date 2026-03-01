@@ -2,8 +2,48 @@ use bytes::Bytes;
 use codexmanager_core::storage::{Account, Storage, Token};
 use reqwest::blocking::Client;
 use reqwest::Method;
+use serde_json::Value;
 use std::time::Instant;
 use tiny_http::Request;
+
+fn body_has_encrypted_content_hint(body: &[u8]) -> bool {
+    // Fast path: avoid JSON parsing unless we hit the recovery path.
+    std::str::from_utf8(body)
+        .ok()
+        .is_some_and(|text| text.contains("\"encrypted_content\""))
+}
+
+fn strip_encrypted_content_value(value: &mut Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            let mut changed = map.remove("encrypted_content").is_some();
+            for v in map.values_mut() {
+                if strip_encrypted_content_value(v) {
+                    changed = true;
+                }
+            }
+            changed
+        }
+        Value::Array(items) => {
+            let mut changed = false;
+            for item in items.iter_mut() {
+                if strip_encrypted_content_value(item) {
+                    changed = true;
+                }
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+fn strip_encrypted_content_from_body(body: &[u8]) -> Option<Vec<u8>> {
+    let mut value: Value = serde_json::from_slice(body).ok()?;
+    if !strip_encrypted_content_value(&mut value) {
+        return None;
+    }
+    serde_json::to_vec(&value).ok()
+}
 
 pub(super) fn try_openai_fallback(
     client: &Client,
@@ -25,13 +65,28 @@ pub(super) fn try_openai_fallback(
     let bearer = super::resolve_openai_bearer_token(storage, account, token)?;
     let attempt_started_at = Instant::now();
 
+    // `x-codex-turn-state` is an org-scoped encrypted blob. When we hit API-key fallback
+    // (often a different org than the ChatGPT workspace), forwarding it can trigger:
+    // `invalid_encrypted_content` / organization_id mismatch. In that case, prefer
+    // resetting session affinity to keep the request usable.
+    let strip_session_affinity = strip_session_affinity || incoming_headers.turn_state().is_some();
+    let body_for_request = if strip_session_affinity && body_has_encrypted_content_hint(body.as_ref()) {
+        strip_encrypted_content_from_body(body.as_ref())
+            .map(Bytes::from)
+            .unwrap_or_else(|| body.clone())
+    } else {
+        body.clone()
+    };
+
     let account_id = account
         .chatgpt_account_id
         .as_deref()
         .or_else(|| account.workspace_id.as_deref());
+    let include_account_id = !super::is_openai_api_base(upstream_base);
     let header_input = super::upstream::header_profile::CodexUpstreamHeaderInput {
         auth_token: bearer.as_str(),
         account_id,
+        include_account_id,
         upstream_cookie,
         incoming_session_id: incoming_headers.session_id(),
         fallback_session_id: None,
@@ -57,8 +112,8 @@ pub(super) fn try_openai_fallback(
         for (name, value) in upstream_headers.iter() {
             builder = builder.header(name, value);
         }
-        if !body.is_empty() {
-            builder = builder.body(body.clone());
+        if !body_for_request.is_empty() {
+            builder = builder.body(body_for_request.clone());
         }
         builder
     };

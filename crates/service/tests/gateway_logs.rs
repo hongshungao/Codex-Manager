@@ -1,3 +1,4 @@
+use codexmanager_core::rpc::types::ModelOption;
 use codexmanager_core::storage::{now_ts, Account, ApiKey, Storage, Token};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -71,6 +72,39 @@ fn post_http_raw(
             request.push_str("\r\n");
         }
         request.push_str(&format!("Content-Length: {}\r\n\r\n{}", body.len(), body));
+        stream.write_all(request.as_bytes()).expect("write");
+
+        let mut buf = String::new();
+        stream.read_to_string(&mut buf).expect("read");
+        if let Some(status) = buf
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|value| value.parse::<u16>().ok())
+        {
+            let body = buf.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+            return (status, body);
+        }
+        last_raw = buf;
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!("status parse failed, raw response: {last_raw:?}");
+}
+
+fn get_http_raw(addr: &str, path: &str, headers: &[(&str, &str)]) -> (u16, String) {
+    let mut last_raw = String::new();
+    for _ in 0..20 {
+        let mut stream = TcpStream::connect(addr).expect("connect server");
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut request =
+            format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+        for (name, value) in headers {
+            request.push_str(name);
+            request.push_str(": ");
+            request.push_str(value);
+            request.push_str("\r\n");
+        }
+        request.push_str("\r\n");
         stream.write_all(request.as_bytes()).expect("write");
 
         let mut buf = String::new();
@@ -878,6 +912,682 @@ fn gateway_openai_non_stream_without_usage_keeps_tokens_null() {
     assert_eq!(log.output_tokens, None);
     assert_eq!(log.total_tokens, None);
     assert_eq!(log.reasoning_output_tokens, None);
+}
+
+#[test]
+fn gateway_models_returns_cached_without_upstream() {
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-models-cache");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+    let _upstream_guard = EnvGuard::set(
+        "CODEXMANAGER_UPSTREAM_BASE_URL",
+        "http://127.0.0.1:1/backend-api/codex",
+    );
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    let platform_key = "pk_models_cache";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_models_cache".to_string(),
+            name: Some("models-cache".to_string()),
+            model_slug: None,
+            reasoning_effort: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let cached = vec![ModelOption {
+        slug: "gpt-5.3-codex".to_string(),
+        display_name: "GPT-5.3 Codex".to_string(),
+    }];
+    let items_json = serde_json::to_string(&cached).expect("serialize cached model options");
+    storage
+        .upsert_model_options_cache("default", &items_json, now_ts())
+        .expect("upsert model options cache");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let (status, response_body) = get_http_raw(
+        &server.addr,
+        "/v1/models",
+        &[("Authorization", &format!("Bearer {platform_key}"))],
+    );
+    server.join();
+    assert_eq!(status, 200, "gateway response: {response_body}");
+
+    let value: serde_json::Value =
+        serde_json::from_str(&response_body).expect("parse models list response");
+    let data = value
+        .get("data")
+        .and_then(|v| v.as_array())
+        .expect("models list data array");
+    assert!(
+        data.iter()
+            .any(|item| item.get("id").and_then(|v| v.as_str()) == Some("gpt-5.3-codex")),
+        "models response missing cached id: {response_body}"
+    );
+}
+
+#[test]
+fn gateway_openai_fallback_strips_turn_state_headers() {
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-openai-fallback-strip-turn-state");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let first_response = serde_json::json!({
+        "error": {
+            "message": "rate limited",
+            "type": "rate_limit_error"
+        }
+    });
+    let second_response = serde_json::json!({
+        "id": "resp_fallback_ok",
+        "model": "gpt-5.3-codex",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "ok" }]
+        }],
+        "usage": { "input_tokens": 3, "output_tokens": 2, "total_tokens": 5 }
+    });
+    let err_body = serde_json::to_string(&first_response).expect("serialize first response");
+    let ok_body = serde_json::to_string(&second_response).expect("serialize second response");
+    let (upstream_addr, upstream_rx, upstream_join) =
+        start_mock_upstream_sequence(vec![(429, err_body), (200, ok_body)]);
+
+    // Make the primary base look like a ChatGPT backend base so fallback logic is enabled,
+    // while still routing to the local mock upstream server.
+    let upstream_base = format!("http://{upstream_addr}/chatgpt.com/backend-api/codex");
+    let fallback_base = format!("http://{upstream_addr}/v1");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+    let _fallback_guard =
+        EnvGuard::set("CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL", &fallback_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    storage
+        .insert_account(&Account {
+            id: "acc_fallback".to_string(),
+            label: "fallback".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: None,
+            workspace_id: Some("ws_fallback".to_string()),
+            group_name: None,
+            sort: 1,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_fallback".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_fallback".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_fallback".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+
+    let platform_key = "pk_openai_fallback_strip_turn_state";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_openai_fallback_strip_turn_state".to_string(),
+            name: Some("fallback-strip-turn-state".to_string()),
+            model_slug: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let req_body = r#"{"model":"gpt-5.3-codex","input":"hello","stream":false}"#;
+    let (status, response_body) = post_http_raw(
+        &server.addr,
+        "/v1/responses",
+        req_body,
+        &[
+            ("Content-Type", "application/json"),
+            ("Authorization", &format!("Bearer {platform_key}")),
+            ("x-codex-turn-state", "gAAA_dummy_turn_state_blob"),
+            ("Conversation_id", "conv_dummy"),
+        ],
+    );
+    server.join();
+    assert_eq!(status, 200, "gateway response: {response_body}");
+
+    // Primary attempt + fallback attempt should both be captured.
+    let first = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive primary upstream request");
+    let second = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive fallback upstream request");
+    upstream_join.join().expect("join mock upstream");
+
+    assert!(
+        first.headers.contains_key("x-codex-turn-state"),
+        "primary attempt should forward turn_state for same-account flow"
+    );
+
+    assert_eq!(second.path, "/v1/responses");
+    assert!(
+        !second.headers.contains_key("x-codex-turn-state"),
+        "fallback attempt must strip org-scoped turn_state to avoid invalid_encrypted_content"
+    );
+    assert!(
+        !second.headers.contains_key("conversation_id"),
+        "fallback attempt must strip conversation_id when stripping session affinity"
+    );
+    assert!(
+        second.headers.contains_key("session_id"),
+        "fallback attempt should still send a session_id"
+    );
+}
+
+#[test]
+fn gateway_stateless_retry_strips_encrypted_content_on_invalid_encrypted_content() {
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-strip-encrypted-content-on-400");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let first_response = serde_json::json!({
+        "error": {
+            "message": "The encrypted content gAAA_test could not be verified. Reason: Encrypted content organization_id did not match the target organization.",
+            "type": "invalid_request_error",
+            "code": "invalid_encrypted_content"
+        }
+    });
+    let second_response = serde_json::json!({
+        "id": "resp_retry_ok",
+        "model": "gpt-5.3-codex",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "ok" }]
+        }],
+        "usage": { "input_tokens": 3, "output_tokens": 2, "total_tokens": 5 }
+    });
+    let err_body = serde_json::to_string(&first_response).expect("serialize first response");
+    let ok_body = serde_json::to_string(&second_response).expect("serialize second response");
+    let (upstream_addr, upstream_rx, upstream_join) =
+        start_mock_upstream_sequence(vec![(400, err_body), (200, ok_body)]);
+
+    let upstream_base = format!("http://{upstream_addr}/v1");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    storage
+        .insert_account(&Account {
+            id: "acc_retry_encrypted_content".to_string(),
+            label: "retry".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: None,
+            workspace_id: Some("ws_retry".to_string()),
+            group_name: None,
+            sort: 1,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_retry_encrypted_content".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_retry".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_retry".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+
+    let platform_key = "pk_retry_strip_encrypted_content";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_retry_strip_encrypted_content".to_string(),
+            name: Some("retry-strip-encrypted-content".to_string()),
+            model_slug: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let req_body = r#"{"model":"gpt-5.3-codex","input":"hello","stream":false,"encrypted_content":"gAAA_test_payload"}"#;
+    let (status, response_body) = post_http_raw(
+        &server.addr,
+        "/v1/responses",
+        req_body,
+        &[
+            ("Content-Type", "application/json"),
+            ("Authorization", &format!("Bearer {platform_key}")),
+            ("x-codex-turn-state", "gAAA_dummy_turn_state_blob"),
+            ("Conversation_id", "conv_dummy"),
+        ],
+    );
+    server.join();
+    assert_eq!(status, 200, "gateway response: {response_body}");
+
+    let first = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive first upstream request");
+    let second = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive second upstream request");
+    upstream_join.join().expect("join upstream");
+
+    assert!(first.headers.contains_key("x-codex-turn-state"));
+    assert!(first.headers.contains_key("conversation_id"));
+    let first_body: serde_json::Value =
+        serde_json::from_slice(&first.body).expect("parse first request body");
+    assert_eq!(
+        first_body
+            .get("encrypted_content")
+            .and_then(|v| v.as_str()),
+        Some("gAAA_test_payload")
+    );
+
+    assert!(!second.headers.contains_key("x-codex-turn-state"));
+    assert!(!second.headers.contains_key("conversation_id"));
+    let second_body: serde_json::Value =
+        serde_json::from_slice(&second.body).expect("parse second request body");
+    assert!(
+        second_body.get("encrypted_content").is_none(),
+        "stateless retry must drop org-scoped encrypted_content field"
+    );
+}
+
+#[test]
+fn gateway_claude_failover_cross_workspace_strips_session_affinity_headers() {
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-claude-strip-cross-workspace");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let first_response = serde_json::json!({
+        "error": {
+            "message": "not found for this account",
+            "type": "invalid_request_error"
+        }
+    });
+    let second_response = serde_json::json!({
+        "id": "resp_strip_cross_workspace_ok",
+        "model": "gpt-5.3-codex",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "ok" }]
+        }],
+        "usage": { "input_tokens": 8, "output_tokens": 4, "total_tokens": 12 }
+    });
+    let err_body = serde_json::to_string(&first_response).expect("serialize first response");
+    let ok_body = serde_json::to_string(&second_response).expect("serialize second response");
+    // A 404 can trigger alternate-path + stateless retries before failover. Force those retries to
+    // also 404 so the gateway actually fails over to wsB.
+    let (upstream_addr, upstream_rx, upstream_join) = start_mock_upstream_sequence(vec![
+        (404, err_body.clone()),
+        (404, err_body.clone()),
+        (404, err_body.clone()),
+        (404, err_body),
+        (200, ok_body),
+    ]);
+    let upstream_base = format!("http://{upstream_addr}/backend-api/codex");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    storage
+        .insert_account(&Account {
+            id: "acc_ws_a".to_string(),
+            label: "ws-a".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: None,
+            workspace_id: Some("wsA".to_string()),
+            group_name: None,
+            sort: 1,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account wsA");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_ws_a".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_ws_a".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_ws_a".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token wsA");
+
+    storage
+        .insert_account(&Account {
+            id: "acc_ws_b".to_string(),
+            label: "ws-b".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: None,
+            workspace_id: Some("wsB".to_string()),
+            group_name: None,
+            sort: 2,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account wsB");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_ws_b".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_ws_b".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_ws_b".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token wsB");
+
+    let platform_key = "pk_strip_cross_workspace";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_strip_cross_workspace".to_string(),
+            name: Some("strip-cross-workspace".to_string()),
+            model_slug: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: Some("high".to_string()),
+            client_type: "codex".to_string(),
+            protocol_type: "anthropic_native".to_string(),
+            auth_scheme: "x_api_key".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let body = serde_json::json!({
+        "model": "gpt-5.3-codex",
+        "messages": [{ "role": "user", "content": "hello" }],
+        "metadata": { "user_id": "user_strip_cross_workspace" },
+        "stream": false
+    });
+    let body = serde_json::to_string(&body).expect("serialize request");
+    let (status, response_body) = post_http_raw(
+        &server.addr,
+        "/v1/messages",
+        &body,
+        &[
+            ("Content-Type", "application/json"),
+            ("x-api-key", platform_key),
+            ("anthropic-version", "2023-06-01"),
+            ("x-stainless-lang", "js"),
+            ("x-codex-turn-state", "turn_state_cross_ws"),
+            ("conversation_id", "conv_cross_ws"),
+        ],
+    );
+    server.join();
+    assert_eq!(status, 200, "gateway response: {response_body}");
+
+    let mut captured = Vec::new();
+    for idx in 0..5 {
+        captured.push(
+            upstream_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap_or_else(|_| panic!("receive upstream request {idx}")),
+        );
+    }
+    upstream_join.join().expect("join upstream");
+
+    let ws_a_stateful = captured
+        .iter()
+        .find(|req| {
+            req.headers
+                .get("chatgpt-account-id")
+                .map(String::as_str)
+                == Some("wsA")
+                && req.headers.contains_key("x-codex-turn-state")
+        })
+        .expect("expected wsA stateful upstream request");
+    let ws_b = captured
+        .iter()
+        .find(|req| {
+            req.headers
+                .get("chatgpt-account-id")
+                .map(String::as_str)
+                == Some("wsB")
+        })
+        .expect("expected wsB upstream request");
+
+    assert_eq!(
+        ws_a_stateful
+            .headers
+            .get("x-codex-turn-state")
+            .map(String::as_str),
+        Some("turn_state_cross_ws")
+    );
+    assert_eq!(
+        ws_a_stateful
+            .headers
+            .get("conversation_id")
+            .map(String::as_str),
+        Some("conv_cross_ws")
+    );
+    assert!(
+        ws_a_stateful
+            .headers
+            .get("authorization")
+            .map(|v| v.contains("access_token_ws_a"))
+            .unwrap_or(false),
+        "wsA upstream authorization missing expected bearer token"
+    );
+
+    assert!(!ws_b.headers.contains_key("x-codex-turn-state"));
+    assert!(!ws_b.headers.contains_key("conversation_id"));
+    assert!(
+        ws_b.headers
+            .get("authorization")
+            .map(|v| v.contains("access_token_ws_b"))
+            .unwrap_or(false),
+        "wsB upstream authorization missing expected bearer token"
+    );
+}
+
+#[test]
+fn gateway_claude_failover_same_workspace_preserves_session_affinity_headers() {
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-gateway-claude-strip-same-workspace");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let first_response = serde_json::json!({
+        "error": {
+            "message": "not found for this account",
+            "type": "invalid_request_error"
+        }
+    });
+    let second_response = serde_json::json!({
+        "id": "resp_strip_same_workspace_ok",
+        "model": "gpt-5.3-codex",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "ok" }]
+        }],
+        "usage": { "input_tokens": 8, "output_tokens": 4, "total_tokens": 12 }
+    });
+    let err_body = serde_json::to_string(&first_response).expect("serialize first response");
+    let ok_body = serde_json::to_string(&second_response).expect("serialize second response");
+    // A 404 can trigger alternate-path + stateless retries before failover. Force those retries to
+    // also 404 so the gateway actually fails over to the 2nd account (same workspace scope).
+    let (upstream_addr, upstream_rx, upstream_join) = start_mock_upstream_sequence(vec![
+        (404, err_body.clone()),
+        (404, err_body.clone()),
+        (404, err_body.clone()),
+        (404, err_body),
+        (200, ok_body),
+    ]);
+    let upstream_base = format!("http://{upstream_addr}/backend-api/codex");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    for index in 1..=2 {
+        storage
+            .insert_account(&Account {
+                id: format!("acc_ws_same_{index}"),
+                label: format!("ws-same-{index}"),
+                issuer: "https://auth.openai.com".to_string(),
+                chatgpt_account_id: None,
+                workspace_id: Some("wsSame".to_string()),
+                group_name: None,
+                sort: index,
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("insert account wsSame");
+        storage
+            .insert_token(&Token {
+                account_id: format!("acc_ws_same_{index}"),
+                id_token: String::new(),
+                access_token: format!("access_token_ws_same_{index}"),
+                refresh_token: String::new(),
+                api_key_access_token: Some(format!("api_access_token_ws_same_{index}")),
+                last_refresh: now,
+            })
+            .expect("insert token wsSame");
+    }
+
+    let platform_key = "pk_strip_same_workspace";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_strip_same_workspace".to_string(),
+            name: Some("strip-same-workspace".to_string()),
+            model_slug: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: Some("high".to_string()),
+            client_type: "codex".to_string(),
+            protocol_type: "anthropic_native".to_string(),
+            auth_scheme: "x_api_key".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let body = serde_json::json!({
+        "model": "gpt-5.3-codex",
+        "messages": [{ "role": "user", "content": "hello" }],
+        "metadata": { "user_id": "user_strip_same_workspace" },
+        "stream": false
+    });
+    let body = serde_json::to_string(&body).expect("serialize request");
+    let (status, response_body) = post_http_raw(
+        &server.addr,
+        "/v1/messages",
+        &body,
+        &[
+            ("Content-Type", "application/json"),
+            ("x-api-key", platform_key),
+            ("anthropic-version", "2023-06-01"),
+            ("x-stainless-lang", "js"),
+            ("x-codex-turn-state", "turn_state_same_ws"),
+            ("conversation_id", "conv_same_ws"),
+        ],
+    );
+    server.join();
+    assert_eq!(status, 200, "gateway response: {response_body}");
+
+    let mut captured = Vec::new();
+    for idx in 0..5 {
+        captured.push(
+            upstream_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap_or_else(|_| panic!("receive upstream request {idx}")),
+        );
+    }
+    upstream_join.join().expect("join upstream");
+
+    let account_2 = captured
+        .iter()
+        .find(|req| {
+            req.headers
+                .get("authorization")
+                .map(|v| v.contains("access_token_ws_same_2"))
+                .unwrap_or(false)
+        })
+        .expect("expected upstream request for account 2");
+
+    assert_eq!(
+        account_2
+            .headers
+            .get("chatgpt-account-id")
+            .map(String::as_str),
+        Some("wsSame")
+    );
+    assert_eq!(
+        account_2
+            .headers
+            .get("x-codex-turn-state")
+            .map(String::as_str),
+        Some("turn_state_same_ws")
+    );
+    assert_eq!(
+        account_2
+            .headers
+            .get("conversation_id")
+            .map(String::as_str),
+        Some("conv_same_ws")
+    );
 }
 
 #[test]

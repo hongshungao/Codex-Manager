@@ -296,26 +296,27 @@ fn import_single_item(
         .as_ref()
         .map(|c| c.sub.trim().to_string())
         .filter(|v| !v.is_empty());
-    let chatgpt_account_id = payload
-        .account_id_hint
-        .clone()
-        .or_else(|| claims.as_ref().and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone()))
-        .or_else(|| extract_chatgpt_account_id(&payload.id_token))
-        .or_else(|| extract_chatgpt_account_id(&payload.access_token))
-        .or_else(|| subject_account_id.clone())
-        .unwrap_or_else(|| format!("import-sub-{sequence}"));
+    let chatgpt_account_id = clean_value(
+        payload
+            .account_id_hint
+            .clone()
+            .or_else(|| claims.as_ref().and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone()))
+            .or_else(|| extract_chatgpt_account_id(&payload.id_token))
+            .or_else(|| extract_chatgpt_account_id(&payload.access_token)),
+    );
 
-    let workspace_id = claims
-        .as_ref()
-        .and_then(|c| c.workspace_id.clone())
-        .or_else(|| extract_workspace_id(&payload.id_token))
-        .or_else(|| extract_workspace_id(&payload.access_token))
-        .or_else(|| Some(chatgpt_account_id.clone()));
+    let workspace_id = clean_value(
+        claims
+            .as_ref()
+            .and_then(|c| c.workspace_id.clone())
+            .or_else(|| extract_workspace_id(&payload.id_token))
+            .or_else(|| extract_workspace_id(&payload.access_token)),
+    );
     let token_fingerprint = token_fingerprint(&payload.refresh_token);
     let logical_account_id = resolve_logical_account_id(
         &payload,
         subject_account_id.as_deref(),
-        Some(chatgpt_account_id.as_str()),
+        chatgpt_account_id.as_deref(),
         workspace_id.as_deref(),
         Some(token_fingerprint.as_str()),
     )?;
@@ -340,6 +341,12 @@ fn import_single_item(
             .get(&existing_id)
             .cloned()
             .ok_or_else(|| format!("existing account not found in index: {existing_id}"))?;
+        let merged_chatgpt_account_id = chatgpt_account_id
+            .clone()
+            .or_else(|| clean_value(existing.chatgpt_account_id.clone()));
+        let merged_workspace_id = workspace_id
+            .clone()
+            .or_else(|| clean_value(existing.workspace_id.clone()));
         let updated = Account {
             id: existing.id.clone(),
             label: if existing.label.trim().is_empty() {
@@ -352,8 +359,8 @@ fn import_single_item(
             } else {
                 existing.issuer.clone()
             },
-            chatgpt_account_id: Some(chatgpt_account_id),
-            workspace_id,
+            chatgpt_account_id: merged_chatgpt_account_id,
+            workspace_id: merged_workspace_id,
             group_name: existing
                 .group_name
                 .clone()
@@ -372,7 +379,7 @@ fn import_single_item(
             id: logical_account_id.clone(),
             label,
             issuer: DEFAULT_ISSUER.to_string(),
-            chatgpt_account_id: Some(chatgpt_account_id),
+            chatgpt_account_id: chatgpt_account_id.clone(),
             workspace_id,
             group_name: Some("IMPORT".to_string()),
             sort: next_sort,
@@ -479,6 +486,12 @@ fn token_fingerprint(refresh_token: &str) -> String {
         out.push_str(&format!("{:02x}", b));
     }
     out
+}
+
+fn clean_value(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 fn required_string(value: &Value, key: &str) -> Result<String, String> {

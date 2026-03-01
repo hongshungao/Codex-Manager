@@ -1,4 +1,5 @@
 use crate::apikey_profile::{PROTOCOL_ANTHROPIC_NATIVE, PROTOCOL_AZURE_OPENAI};
+use serde_json::Value;
 use std::time::{Duration, Instant};
 use tiny_http::{Request, Response};
 
@@ -7,6 +8,45 @@ use super::super::local_validation::LocalValidationResult;
 use super::candidate_flow::{process_candidate_upstream_flow, CandidateUpstreamDecision};
 use super::execution_context::GatewayUpstreamExecutionContext;
 use super::precheck::{prepare_candidates_for_proxy, CandidatePrecheckResult};
+
+fn body_has_encrypted_content_hint(body: &[u8]) -> bool {
+    // Fast path: avoid JSON parsing unless we hit a recovery path.
+    std::str::from_utf8(body)
+        .ok()
+        .is_some_and(|text| text.contains("\"encrypted_content\""))
+}
+
+fn strip_encrypted_content_value(value: &mut Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            let mut changed = map.remove("encrypted_content").is_some();
+            for v in map.values_mut() {
+                if strip_encrypted_content_value(v) {
+                    changed = true;
+                }
+            }
+            changed
+        }
+        Value::Array(items) => {
+            let mut changed = false;
+            for item in items.iter_mut() {
+                if strip_encrypted_content_value(item) {
+                    changed = true;
+                }
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+fn strip_encrypted_content_from_body(body: &[u8]) -> Option<Vec<u8>> {
+    let mut value: Value = serde_json::from_slice(body).ok()?;
+    if !strip_encrypted_content_value(&mut value) {
+        return None;
+    }
+    serde_json::to_vec(&value).ok()
+}
 
 fn respond_terminal(request: Request, status_code: u16, message: String) -> Result<(), String> {
     let response = Response::from_string(message).with_status_code(status_code);
@@ -223,7 +263,13 @@ pub(in super::super) fn proxy_validated_request(
     let has_sticky_fallback_conversation =
         super::header_profile::derive_sticky_conversation_id_from_headers(&incoming_headers)
             .is_some();
+    let has_body_encrypted_content = body_has_encrypted_content_hint(body.as_ref());
+    let mut stripped_body: Option<bytes::Bytes> = None;
 
+    // For `anthropic_native` with `prompt_cache_key`, keep Session/Conversation affinity within the
+    // same Chatgpt-Account-Id "scope" (chatgpt_account_id preferred, otherwise workspace_id).
+    // Switching scope on failover can increase upstream challenge probability.
+    let mut first_candidate_account_scope: Option<String> = None;
     for (idx, (account, mut token)) in candidates.into_iter().enumerate() {
         if super::deadline::is_expired(request_deadline) {
             let request = request
@@ -234,9 +280,41 @@ pub(in super::super) fn proxy_validated_request(
         // 中文注释：Claude 兼容入口命中 prompt_cache_key 时，优先保持会话粘性；
         // failover 时若强制重置 Session/Conversation，更容易触发 upstream challenge。
         let strip_session_affinity = if anthropic_has_prompt_cache_key {
-            false
+            let candidate_scope = account
+                .chatgpt_account_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string())
+                .or_else(|| {
+                    account
+                        .workspace_id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(|value| value.to_string())
+                });
+            if idx == 0 {
+                first_candidate_account_scope = candidate_scope.clone();
+                false
+            } else {
+                candidate_scope != first_candidate_account_scope
+            }
         } else {
             idx > 0
+        };
+
+        let body_for_attempt = if strip_session_affinity && has_body_encrypted_content {
+            if stripped_body.is_none() {
+                stripped_body = strip_encrypted_content_from_body(body.as_ref())
+                    .map(bytes::Bytes::from)
+                    .or_else(|| Some(body.clone()));
+            }
+            stripped_body
+                .as_ref()
+                .expect("stripped body should be initialized")
+        } else {
+            &body
         };
         context.log_candidate_start(&account.id, idx, strip_session_affinity);
         if let Some(skip_reason) = context.should_skip_candidate(&account.id, idx) {
@@ -262,7 +340,7 @@ pub(in super::super) fn proxy_validated_request(
             incoming_conversation_id.is_some() || has_sticky_fallback_conversation,
             None,
             request_shape.as_deref(),
-            body.len(),
+            body_for_attempt.len(),
             model_for_log.as_deref(),
         );
         // 中文注释：把 inflight 计数覆盖到整个响应生命周期，确保下一批请求能看到真实负载。
@@ -275,7 +353,7 @@ pub(in super::super) fn proxy_validated_request(
             &method,
             request_ref,
             &incoming_headers,
-            &body,
+            body_for_attempt,
             is_stream,
             base,
             &path,
@@ -324,8 +402,87 @@ pub(in super::super) fn proxy_validated_request(
                     .expect("request should be available before terminal response");
                 return respond_terminal(request, status_code, message);
             }
-            CandidateUpstreamDecision::RespondUpstream(resp) => {
-                let status_code = resp.status().as_u16();
+            CandidateUpstreamDecision::RespondUpstream(mut resp) => {
+                let mut status_code = resp.status().as_u16();
+                // If the client is continuing a previous session but the selected upstream account belongs
+                // to another org/workspace, the server can reject the org-scoped encrypted blobs with:
+                // `invalid_encrypted_content`. Attempt a one-shot stateless retry (strip affinity + drop
+                // encrypted_content fields) to salvage the request.
+                if status_code == 400
+                    && !strip_session_affinity
+                    && (incoming_turn_state.is_some() || has_body_encrypted_content)
+                {
+                    let retry_body = if has_body_encrypted_content {
+                        if stripped_body.is_none() {
+                            stripped_body = strip_encrypted_content_from_body(body.as_ref())
+                                .map(bytes::Bytes::from)
+                                .or_else(|| Some(body.clone()));
+                        }
+                        stripped_body
+                            .as_ref()
+                            .expect("stripped body should be initialized")
+                    } else {
+                        &body
+                    };
+
+                    let retry_decision = process_candidate_upstream_flow(
+                        &storage,
+                        &method,
+                        request_ref,
+                        &incoming_headers,
+                        retry_body,
+                        is_stream,
+                        base,
+                        &path,
+                        url.as_str(),
+                        url_alt.as_deref(),
+                        request_deadline,
+                        upstream_fallback_base.as_deref(),
+                        &account,
+                        &mut token,
+                        upstream_cookie.as_deref(),
+                        true,
+                        debug,
+                        allow_openai_fallback,
+                        disable_challenge_stateless_retry,
+                        context.has_more_candidates(idx),
+                        |upstream_url, status_code, error| {
+                            last_attempt_url = upstream_url.map(str::to_string);
+                            last_attempt_error = error.map(str::to_string);
+                            super::super::record_route_quality(&account.id, status_code);
+                            context.log_attempt_result(&account.id, upstream_url, status_code, error);
+                        },
+                    );
+
+                    match retry_decision {
+                        CandidateUpstreamDecision::RespondUpstream(retry_resp) => {
+                            resp = retry_resp;
+                            status_code = resp.status().as_u16();
+                        }
+                        CandidateUpstreamDecision::Failover => {
+                            let _ = super::super::clear_manual_preferred_account_if(&account.id);
+                            super::super::record_gateway_failover_attempt();
+                            continue;
+                        }
+                        CandidateUpstreamDecision::Terminal { status_code, message } => {
+                            let _ = super::super::clear_manual_preferred_account_if(&account.id);
+                            let elapsed_ms = started_at.elapsed().as_millis();
+                            context.log_final_result(
+                                Some(&account.id),
+                                last_attempt_url.as_deref(),
+                                status_code,
+                                RequestLogUsage::default(),
+                                Some(message.as_str()),
+                                elapsed_ms,
+                            );
+                            let request = request
+                                .take()
+                                .expect("request should be available before terminal response");
+                            return respond_terminal(request, status_code, message);
+                        }
+                    }
+                }
+
                 if status_code >= 400 {
                     let _ = super::super::clear_manual_preferred_account_if(&account.id);
                 }

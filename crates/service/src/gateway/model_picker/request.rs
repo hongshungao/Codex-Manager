@@ -26,6 +26,7 @@ pub(super) fn send_models_request(
         .as_deref()
         .or_else(|| account.workspace_id.as_deref())
         .map(str::to_string);
+    let include_account_header = !super::super::is_openai_api_base(upstream_base);
     let build_request = |http: &Client| {
         let mut builder = http.request(method.clone(), &url);
         builder = builder.header("User-Agent", "codex-cli");
@@ -35,8 +36,10 @@ pub(super) fn send_models_request(
             }
         }
         builder = builder.header("Authorization", format!("Bearer {}", bearer));
-        if let Some(acc) = account_header_value.as_deref() {
-            builder = builder.header("ChatGPT-Account-Id", acc);
+        if include_account_header {
+            if let Some(acc) = account_header_value.as_deref() {
+                builder = builder.header("ChatGPT-Account-Id", acc);
+            }
         }
         builder
     };

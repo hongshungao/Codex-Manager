@@ -17,6 +17,15 @@ pub(super) enum PrimaryFlowDecision {
     Terminal { status_code: u16, message: String },
 }
 
+fn resolve_chatgpt_primary_bearer(token: &Token) -> Option<String> {
+    let access = token.access_token.trim();
+    if access.is_empty() {
+        None
+    } else {
+        Some(access.to_string())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_primary_upstream_flow<F>(
     client: &reqwest::blocking::Client,
@@ -43,25 +52,30 @@ pub(super) fn run_primary_upstream_flow<F>(
 where
     F: FnMut(Option<&str>, u16, Option<&str>),
 {
-    let auth_token = match super::super::resolve_openai_bearer_token(storage, account, token) {
-        Ok(token) => token,
-        Err(err) => {
-            super::super::mark_account_cooldown(&account.id, super::super::CooldownReason::Network);
-            log_gateway_result(Some(primary_url), 502, Some(err.as_str()));
-            if has_more_candidates {
-                return PrimaryFlowDecision::Failover;
+    let (auth_token, token_source) = if let Some(access_token) = resolve_chatgpt_primary_bearer(token) {
+        (access_token, "access_token")
+    } else {
+        match super::super::resolve_openai_bearer_token(storage, account, token) {
+            Ok(token) => (token, "openai_bearer_fallback"),
+            Err(err) => {
+                super::super::mark_account_cooldown(&account.id, super::super::CooldownReason::Network);
+                log_gateway_result(Some(primary_url), 502, Some(err.as_str()));
+                if has_more_candidates {
+                    return PrimaryFlowDecision::Failover;
+                }
+                return PrimaryFlowDecision::Terminal {
+                    status_code: 502,
+                    message: format!("resolve upstream bearer token failed: {err}"),
+                };
             }
-            return PrimaryFlowDecision::Terminal {
-                status_code: 502,
-                message: format!("resolve upstream bearer token failed: {err}"),
-            };
         }
     };
     if debug {
         log::debug!(
-            "event=gateway_upstream_token_source path={} account_id={} token_source=openai_bearer upstream_base={}",
+            "event=gateway_upstream_token_source path={} account_id={} token_source={} upstream_base={}",
             path,
             account.id,
+            token_source,
             base,
         );
     }
@@ -131,6 +145,38 @@ where
             status_code,
             message,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_chatgpt_primary_bearer;
+    use codexmanager_core::storage::Token;
+
+    fn build_token(access_token: &str) -> Token {
+        Token {
+            account_id: "acc-test".to_string(),
+            id_token: "id-token".to_string(),
+            access_token: access_token.to_string(),
+            refresh_token: "refresh-token".to_string(),
+            api_key_access_token: Some("api-key-token".to_string()),
+            last_refresh: 0,
+        }
+    }
+
+    #[test]
+    fn chatgpt_primary_bearer_prefers_access_token() {
+        let token = build_token("access-token");
+        assert_eq!(
+            resolve_chatgpt_primary_bearer(&token).as_deref(),
+            Some("access-token")
+        );
+    }
+
+    #[test]
+    fn chatgpt_primary_bearer_rejects_empty_access_token() {
+        let token = build_token("   ");
+        assert!(resolve_chatgpt_primary_bearer(&token).is_none());
     }
 }
 

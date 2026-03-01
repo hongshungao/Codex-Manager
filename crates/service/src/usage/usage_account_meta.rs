@@ -127,21 +127,51 @@ pub(crate) fn patch_account_meta_cached(
     patch_account_meta(storage, account_id, chatgpt_account_id, workspace_id);
 }
 
+pub(crate) fn patch_account_meta_in_place(
+    account: &mut Account,
+    chatgpt_account_id: Option<String>,
+    workspace_id: Option<String>,
+) -> bool {
+    apply_account_meta_patch(account, chatgpt_account_id, workspace_id)
+}
+
+fn is_invalid_upstream_scope_value(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    // `auth0|...` / `google-oauth2|...` 等 subject 不能作为 ChatGPT workspace/account header。
+    trimmed.contains('|') || trimmed.starts_with("import-sub-")
+}
+
 fn apply_account_meta_patch(
     account: &mut Account,
     chatgpt_account_id: Option<String>,
     workspace_id: Option<String>,
 ) -> bool {
     let mut changed = false;
-    if account.chatgpt_account_id.as_deref().unwrap_or("").trim().is_empty()
-        && chatgpt_account_id.is_some()
-    {
-        account.chatgpt_account_id = chatgpt_account_id;
-        changed = true;
+    let next_chatgpt_account_id = clean_header_value(chatgpt_account_id);
+    let next_workspace_id = clean_header_value(workspace_id);
+
+    if let Some(next) = next_chatgpt_account_id.clone() {
+        let current = account.chatgpt_account_id.as_deref().unwrap_or("").trim();
+        if current.is_empty() || is_invalid_upstream_scope_value(current) {
+            if current != next {
+                account.chatgpt_account_id = Some(next);
+                changed = true;
+            }
+        }
     }
-    if account.workspace_id.as_deref().unwrap_or("").trim().is_empty() && workspace_id.is_some() {
-        account.workspace_id = workspace_id;
-        changed = true;
+
+    let desired_workspace = next_workspace_id.or_else(|| next_chatgpt_account_id.clone());
+    if let Some(next) = desired_workspace {
+        let current = account.workspace_id.as_deref().unwrap_or("").trim();
+        if current.is_empty() || is_invalid_upstream_scope_value(current) {
+            if current != next {
+                account.workspace_id = Some(next);
+                changed = true;
+            }
+        }
     }
     changed
 }
@@ -237,6 +267,31 @@ mod tests {
             .expect("account");
         assert_eq!(updated.chatgpt_account_id.as_deref(), Some("chatgpt-5"));
         assert_eq!(updated.workspace_id.as_deref(), Some("workspace-5"));
+    }
+
+    #[test]
+    fn patch_account_meta_cached_replaces_subject_style_scope_values() {
+        let storage = Storage::open_in_memory().expect("open");
+        storage.init().expect("init");
+        let account = build_account("acc-6", Some("auth0|legacy"), Some("auth0|legacy"));
+        storage.insert_account(&account).expect("insert");
+        let mut account_map = HashMap::new();
+        account_map.insert(account.id.clone(), account);
+
+        patch_account_meta_cached(
+            &storage,
+            &mut account_map,
+            "acc-6",
+            Some("org-correct".to_string()),
+            Some("ws-correct".to_string()),
+        );
+
+        let updated = storage
+            .find_account_by_id("acc-6")
+            .expect("find")
+            .expect("account");
+        assert_eq!(updated.chatgpt_account_id.as_deref(), Some("org-correct"));
+        assert_eq!(updated.workspace_id.as_deref(), Some("ws-correct"));
     }
 }
 

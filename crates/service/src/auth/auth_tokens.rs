@@ -213,8 +213,7 @@ pub(crate) fn complete_login_with_redirect(
             .as_ref()
             .and_then(|auth| auth.chatgpt_account_id.clone())
             .or_else(|| extract_chatgpt_account_id(&tokens.id_token))
-            .or_else(|| extract_chatgpt_account_id(&tokens.access_token))
-            .or_else(|| Some(subject_account_id.clone())),
+            .or_else(|| extract_chatgpt_account_id(&tokens.access_token)),
     );
     let workspace_id = clean_value(
         claims

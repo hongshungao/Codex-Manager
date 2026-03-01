@@ -1,10 +1,11 @@
-use codexmanager_core::storage::{Account, Storage, Token, UsageSnapshotRecord};
+use codexmanager_core::storage::{now_ts, Account, Storage, Token, UsageSnapshotRecord};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::account_availability::is_available;
+use crate::usage_account_meta::{derive_account_meta, patch_account_meta_in_place};
 
 static CANDIDATE_SNAPSHOT_CACHE: OnceLock<Mutex<Option<CandidateSnapshotCache>>> = OnceLock::new();
 static SELECTION_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
@@ -59,7 +60,17 @@ fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account
         if !is_available(usage) {
             continue;
         }
-        out.push((account.clone(), token));
+        let mut candidate_account = account.clone();
+        let (chatgpt_account_id, workspace_id) = derive_account_meta(&token);
+        if patch_account_meta_in_place(
+            &mut candidate_account,
+            chatgpt_account_id,
+            workspace_id,
+        ) {
+            candidate_account.updated_at = now_ts();
+            let _ = storage.insert_account(&candidate_account);
+        }
+        out.push((candidate_account, token));
     }
     if out.is_empty() {
         log_no_candidates(&accounts, &token_map, &snap_map);
