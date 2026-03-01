@@ -18,6 +18,10 @@ fn extract_prompt_cache_key(body: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
+fn should_compact_upstream_headers() -> bool {
+    super::super::cpa_no_cookie_header_mode_enabled()
+}
+
 pub(super) fn send_upstream_request(
     client: &reqwest::blocking::Client,
     method: &reqwest::Method,
@@ -33,7 +37,20 @@ pub(super) fn send_upstream_request(
     strip_session_affinity: bool,
 ) -> Result<reqwest::blocking::Response, reqwest::Error> {
     let attempt_started_at = Instant::now();
-    let incoming_session_id = incoming_headers.session_id();
+    let compact_headers_mode = should_compact_upstream_headers();
+    let prompt_cache_key = if strip_session_affinity {
+        None
+    } else {
+        extract_prompt_cache_key(body.as_ref())
+    };
+    let mut incoming_session_id = incoming_headers.session_id();
+    let mut incoming_conversation_id = incoming_headers.conversation_id();
+    if compact_headers_mode && prompt_cache_key.is_some() {
+        // 中文注释：在请求头收敛策略下，prompt_cache_key 命中时优先绑定新的会话锚点，
+        // 避免透传旧会话 id 造成跨账号粘性。
+        incoming_session_id = None;
+        incoming_conversation_id = None;
+    }
     let remote = request.remote_addr();
     let mut derived_session_id = if !strip_session_affinity && incoming_session_id.is_none() {
         super::header_profile::derive_sticky_session_id_from_headers_with_remote(
@@ -43,7 +60,6 @@ pub(super) fn send_upstream_request(
     } else {
         None
     };
-    let incoming_conversation_id = incoming_headers.conversation_id();
     let mut derived_conversation_id = if !strip_session_affinity && incoming_conversation_id.is_none() {
         super::header_profile::derive_sticky_conversation_id_from_headers_with_remote(
             incoming_headers,
@@ -55,27 +71,31 @@ pub(super) fn send_upstream_request(
 
     // 中文注释：参考 CLIProxyAPI 的 claude 兼容逻辑：当 prompt_cache_key 存在时，
     // 需要将 Session_id/Conversation_id 与其对齐，否则更容易触发 upstream challenge。
-    if !strip_session_affinity && incoming_session_id.is_none() && incoming_conversation_id.is_none() {
-        if let Some(cache_key) = extract_prompt_cache_key(body.as_ref()) {
+    if !strip_session_affinity {
+        if let Some(cache_key) = prompt_cache_key.as_ref() {
             derived_session_id = Some(cache_key.clone());
-            derived_conversation_id = Some(cache_key);
+            derived_conversation_id = Some(cache_key.clone());
         }
     }
     let account_id = account
         .chatgpt_account_id
         .as_deref()
         .or_else(|| account.workspace_id.as_deref());
-    let include_account_id = !super::super::is_openai_api_base(target_url);
+    let include_account_id =
+        !compact_headers_mode && !super::super::is_openai_api_base(target_url);
     let header_input = super::header_profile::CodexUpstreamHeaderInput {
         auth_token,
         account_id,
         include_account_id,
+        include_openai_beta: !compact_headers_mode,
         upstream_cookie,
         incoming_session_id,
         fallback_session_id: derived_session_id.as_deref(),
         incoming_turn_state: incoming_headers.turn_state(),
+        include_turn_state: !compact_headers_mode,
         incoming_conversation_id,
         fallback_conversation_id: derived_conversation_id.as_deref(),
+        include_conversation_id: !compact_headers_mode,
         strip_session_affinity,
         is_stream,
         has_body: !body.is_empty(),

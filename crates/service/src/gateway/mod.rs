@@ -140,6 +140,19 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
     Ok(applied)
 }
 
+pub(crate) fn cpa_no_cookie_header_mode_enabled() -> bool {
+    runtime_config::cpa_no_cookie_header_mode_enabled()
+}
+
+pub(crate) fn set_cpa_no_cookie_header_mode(enabled: bool) -> bool {
+    runtime_config::set_cpa_no_cookie_header_mode_enabled(enabled);
+    std::env::set_var(
+        "CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE",
+        if enabled { "1" } else { "0" },
+    );
+    enabled
+}
+
 pub(crate) fn manual_preferred_account() -> Option<String> {
     route_hint::get_manual_preferred_account()
 }

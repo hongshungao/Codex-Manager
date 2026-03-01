@@ -275,6 +275,7 @@ It updates:
 | `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | Primary upstream base URL. Bare ChatGPT host values are normalized to backend-api/codex. |
 | `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | Auto-inferred | Explicit fallback upstream. If unset and primary is ChatGPT backend, fallback defaults to `https://api.openai.com/v1`. |
 | `CODEXMANAGER_UPSTREAM_COOKIE` | Unset | Upstream Cookie, mainly for Cloudflare/WAF challenge scenarios. |
+| `CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE` | `0` | Enable header compaction policy: suppress `x-codex-turn-state`/`Conversation_id`/fixed `Openai-Beta`/`Chatgpt-Account-Id` by default to reduce Cloudflare/WAF challenges. Also available in Settings UI. |
 | `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | Gateway account routing strategy: default `ordered` (follow account order, fail over to next on failure); set `balanced`/`round_robin`/`rr` to enable key+model-based balanced round-robin starts. |
 | `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | Upstream connect timeout in seconds. |
 | `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` | `120000` | Upstream total timeout per request in milliseconds. Set `0` to disable. |
@@ -346,6 +347,7 @@ Notes:
 ## Troubleshooting
 - OAuth callback failures: check `CODEXMANAGER_LOGIN_ADDR` conflicts, or use manual callback parsing in UI.
 - Model list/request blocked by challenge: try `CODEXMANAGER_UPSTREAM_COOKIE` or explicit `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`.
+- Still blocked by Cloudflare/WAF: enable "Header compaction policy" in Settings, or set `CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE=1`.
 - Standalone service/Web: if the run directory is not writable, set `CODEXMANAGER_DB_PATH` to a writable path.
 - macOS with a system proxy: ensure loopback requests (`localhost/127.0.0.1`) are `DIRECT`, and use lowercase `localhost:<port>` (for example `localhost:48760`).
 

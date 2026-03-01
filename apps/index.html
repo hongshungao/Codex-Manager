@@ -271,6 +271,16 @@
                                 </select>
                             </div>
                             <div id="routeStrategyHint" class="hint">默认按账号顺序优先，优先使用可用账号（不可用账号不会参与选路）。</div>
+                            <div class="settings-row">
+                                <label class="update-auto-check switch-control" for="cpaNoCookieHeaderMode">
+                                    <input id="cpaNoCookieHeaderMode" type="checkbox" />
+                                    <span class="switch-track" aria-hidden="true">
+                                        <span class="switch-thumb"></span>
+                                    </span>
+                                    <span>启用请求头收敛策略</span>
+                                </label>
+                            </div>
+                            <div id="cpaNoCookieHeaderModeHint" class="hint">开启后将取消 x-codex-turn-state、Conversation_id、固定 Openai-Beta、Chatgpt-Account-Id 请求头，减少 Cloudflare/WAF challenge 命中；可能降低跨轮会话粘性。</div>
                         </div>
 
                         <div class="panel settings-card settings-card-span-2">

@@ -15,12 +15,15 @@ pub(crate) struct CodexUpstreamHeaderInput<'a> {
     pub(crate) auth_token: &'a str,
     pub(crate) account_id: Option<&'a str>,
     pub(crate) include_account_id: bool,
+    pub(crate) include_openai_beta: bool,
     pub(crate) upstream_cookie: Option<&'a str>,
     pub(crate) incoming_session_id: Option<&'a str>,
     pub(crate) fallback_session_id: Option<&'a str>,
     pub(crate) incoming_turn_state: Option<&'a str>,
+    pub(crate) include_turn_state: bool,
     pub(crate) incoming_conversation_id: Option<&'a str>,
     pub(crate) fallback_conversation_id: Option<&'a str>,
+    pub(crate) include_conversation_id: bool,
     pub(crate) strip_session_affinity: bool,
     pub(crate) is_stream: bool,
     pub(crate) has_body: bool,
@@ -104,7 +107,9 @@ pub(crate) fn build_codex_upstream_headers(
     ));
     headers.push(("Connection".to_string(), "Keep-Alive".to_string()));
     headers.push(("Version".to_string(), CODEX_CLIENT_VERSION.to_string()));
-    headers.push(("Openai-Beta".to_string(), CODEX_OPENAI_BETA.to_string()));
+    if input.include_openai_beta {
+        headers.push(("Openai-Beta".to_string(), CODEX_OPENAI_BETA.to_string()));
+    }
     headers.push(("User-Agent".to_string(), CODEX_USER_AGENT.to_string()));
     headers.push(("Originator".to_string(), CODEX_ORIGINATOR.to_string()));
     headers.push((
@@ -117,14 +122,18 @@ pub(crate) fn build_codex_upstream_headers(
     ));
 
     if !input.strip_session_affinity {
-        if let Some(turn_state) = input.incoming_turn_state {
-            headers.push(("x-codex-turn-state".to_string(), turn_state.to_string()));
+        if input.include_turn_state {
+            if let Some(turn_state) = input.incoming_turn_state {
+                headers.push(("x-codex-turn-state".to_string(), turn_state.to_string()));
+            }
         }
-        if let Some(conversation_id) = input
-            .incoming_conversation_id
-            .or(input.fallback_conversation_id)
-        {
-            headers.push(("Conversation_id".to_string(), conversation_id.to_string()));
+        if input.include_conversation_id {
+            if let Some(conversation_id) = input
+                .incoming_conversation_id
+                .or(input.fallback_conversation_id)
+            {
+                headers.push(("Conversation_id".to_string(), conversation_id.to_string()));
+            }
         }
     }
 

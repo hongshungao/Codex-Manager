@@ -577,6 +577,86 @@ fn inspect_sse_frame(lines: &[String]) -> SseFrameInspection {
     inspection
 }
 
+fn parse_sse_frame_json(lines: &[String]) -> Option<Value> {
+    let mut data_lines = Vec::new();
+    for line in lines {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if let Some(rest) = trimmed.strip_prefix("data:") {
+            data_lines.push(rest.trim_start().to_string());
+        }
+    }
+    if data_lines.is_empty() {
+        return None;
+    }
+    let data = data_lines.join("\n");
+    if data.trim() == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str::<Value>(&data).ok()
+}
+
+fn collect_non_stream_json_from_sse_bytes(payload: &[u8]) -> (Option<Vec<u8>>, UpstreamResponseUsage) {
+    let mut usage = UpstreamResponseUsage::default();
+    let mut completed_response: Option<Value> = None;
+    let mut frame_lines: Vec<String> = Vec::new();
+
+    let mut reader = BufReader::new(Cursor::new(payload));
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let Ok(read) = reader.read_line(&mut line) else {
+            break;
+        };
+        if read == 0 {
+            break;
+        }
+        if line == "\n" || line == "\r\n" {
+            if frame_lines.is_empty() {
+                continue;
+            }
+            let frame = std::mem::take(&mut frame_lines);
+            let inspection = inspect_sse_frame(&frame);
+            if let Some(parsed_usage) = inspection.usage {
+                merge_usage(&mut usage, parsed_usage);
+            }
+            if let Some(value) = parse_sse_frame_json(&frame) {
+                if value
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind == "response.completed")
+                {
+                    if let Some(response_obj) = value.get("response") {
+                        completed_response = Some(response_obj.clone());
+                    }
+                }
+            }
+            continue;
+        }
+        frame_lines.push(line.clone());
+    }
+
+    if !frame_lines.is_empty() {
+        let inspection = inspect_sse_frame(&frame_lines);
+        if let Some(parsed_usage) = inspection.usage {
+            merge_usage(&mut usage, parsed_usage);
+        }
+        if let Some(value) = parse_sse_frame_json(&frame_lines) {
+            if value
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind == "response.completed")
+            {
+                if let Some(response_obj) = value.get("response") {
+                    completed_response = Some(response_obj.clone());
+                }
+            }
+        }
+    }
+
+    let body = completed_response.and_then(|value| serde_json::to_vec(&value).ok());
+    (body, usage)
+}
+
 pub(super) fn respond_with_upstream(
     request: Request,
     upstream: reqwest::blocking::Response,
@@ -629,6 +709,39 @@ pub(super) fn respond_with_upstream(
                     len,
                     None,
                 );
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                return Ok(UpstreamResponseBridgeResult {
+                    usage,
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                });
+            }
+            if is_sse && !is_stream {
+                let upstream_body = upstream
+                    .bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
+                let (synthesized_body, mut usage) =
+                    collect_non_stream_json_from_sse_bytes(upstream_body.as_ref());
+                let body = synthesized_body.unwrap_or_else(|| upstream_body.to_vec());
+                if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                    merge_usage(&mut usage, parse_usage_from_json(&value));
+                }
+                headers.retain(|header| {
+                    !header
+                        .field
+                        .as_str()
+                        .as_str()
+                        .eq_ignore_ascii_case("Content-Type")
+                });
+                if let Ok(content_type_header) = Header::from_bytes(
+                    b"Content-Type".as_slice(),
+                    b"application/json".as_slice(),
+                ) {
+                    headers.push(content_type_header);
+                }
+                let len = Some(body.len());
+                let response = Response::new(status, headers, std::io::Cursor::new(body), len, None);
                 let delivery_error = request.respond(response).err().map(|err| err.to_string());
                 return Ok(UpstreamResponseBridgeResult {
                     usage,
@@ -1286,7 +1399,10 @@ fn tool_input_partial_json(value: Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_sse_frame, parse_usage_from_json, parse_usage_from_sse_frame};
+    use super::{
+        collect_non_stream_json_from_sse_bytes, inspect_sse_frame, parse_usage_from_json,
+        parse_usage_from_sse_frame,
+    };
     use serde_json::json;
 
     #[test]
@@ -1465,5 +1581,22 @@ mod tests {
             .unwrap_or("");
         assert!(err.contains("Model not found"), "unexpected err: {err}");
         assert!(err.contains("model_not_found"), "unexpected err: {err}");
+    }
+
+    #[test]
+    fn collect_non_stream_json_from_sse_bytes_extracts_response_completed() {
+        let sse = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5.3-codex\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"total_tokens\":10}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (body, usage) = collect_non_stream_json_from_sse_bytes(sse.as_bytes());
+        let body = body.expect("synthesized response json");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("parse synthesized body");
+        assert_eq!(value["id"], "resp_1");
+        assert_eq!(value["output"][0]["role"], "assistant");
+        assert_eq!(usage.input_tokens, Some(7));
+        assert_eq!(usage.output_tokens, Some(3));
+        assert_eq!(usage.total_tokens, Some(10));
     }
 }

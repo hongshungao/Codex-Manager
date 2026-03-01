@@ -404,6 +404,24 @@ export async function serviceGatewayManualAccountClear() {
   return invoke("service_gateway_manual_account_clear", withAddr());
 }
 
+export async function serviceGatewayHeaderPolicyGet() {
+  if (!isTauriRuntime()) {
+    return rpcInvoke("gateway/headerPolicy/get");
+  }
+  return invoke("service_gateway_header_policy_get", withAddr());
+}
+
+export async function serviceGatewayHeaderPolicySet(cpaNoCookieHeaderModeEnabled) {
+  const enabled = Boolean(cpaNoCookieHeaderModeEnabled);
+  if (!isTauriRuntime()) {
+    return rpcInvoke("gateway/headerPolicy/set", { cpaNoCookieHeaderModeEnabled: enabled });
+  }
+  return invoke(
+    "service_gateway_header_policy_set",
+    withAddr({ cpaNoCookieHeaderModeEnabled: enabled }),
+  );
+}
+
 // 登录
 export async function serviceLoginStart(payload) {
   if (!isTauriRuntime()) {

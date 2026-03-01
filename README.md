@@ -273,6 +273,7 @@ pwsh -NoLogo -NoProfile -File scripts/bump-version.ps1 -Version 0.1.3
 | `CODEXMANAGER_UPSTREAM_BASE_URL` | `https://chatgpt.com/backend-api/codex` | 主上游地址。若填 `https://chatgpt.com`/`https://chat.openai.com` 会自动归一化到 backend-api/codex。 |
 | `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL` | 自动推断 | 明确指定 fallback 上游。若未设置且主上游是 ChatGPT backend，则默认 fallback 到 `https://api.openai.com/v1`。 |
 | `CODEXMANAGER_UPSTREAM_COOKIE` | 未设置 | 上游 Cookie（主要用于 Cloudflare/WAF challenge 场景）。 |
+| `CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE` | `0` | 启用请求头收敛策略：默认不发 `x-codex-turn-state`/`Conversation_id`/固定 `Openai-Beta`/`Chatgpt-Account-Id`，降低 Cloudflare/WAF 拦截概率。可在设置页切换。 |
 | `CODEXMANAGER_ROUTE_STRATEGY` | `ordered` | 网关账号选路策略：默认 `ordered`（按账号顺序优先，失败再下一个）；可设 `balanced`/`round_robin`/`rr` 启用按 `Key+模型` 的均衡轮询起点。 |
 | `CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS` | `15` | 上游连接阶段超时（秒）。 |
 | `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` | `120000` | 上游单次请求总超时（毫秒）。设为 `0` 表示关闭总超时。 |
@@ -344,6 +345,7 @@ CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
 ## 常见问题
 - 授权回调失败：优先检查 `CODEXMANAGER_LOGIN_ADDR` 是否被占用，或在 UI 使用手动回调解析。
 - 模型列表/请求被挑战拦截：可尝试设置 `CODEXMANAGER_UPSTREAM_COOKIE`，或显式配置 `CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL`。
+- 仍被 Cloudflare/WAF 拦截：可在设置页开启“请求头收敛策略”，或设置 `CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE=1`。
 - 独立运行 service/Web：若所在目录不可写（如安装目录），请设置 `CODEXMANAGER_DB_PATH` 到可写路径。
 - macOS 代理环境下请求 `502/503`：优先确认系统代理未接管本地回环请求（`localhost/127.0.0.1` 走 `DIRECT`），并确保地址使用小写 `localhost:<port>`（例如 `localhost:48760`）。
 

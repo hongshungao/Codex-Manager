@@ -5,6 +5,8 @@ import "./styles/responsive.css";
 import "./styles/performance.css";
 
 import {
+  serviceGatewayHeaderPolicyGet,
+  serviceGatewayHeaderPolicySet,
   serviceGatewayRouteStrategyGet,
   serviceGatewayRouteStrategySet,
   serviceUsageRefresh,
@@ -88,6 +90,7 @@ const UI_LOW_TRANSPARENCY_CARD_ID = "settingsLowTransparencyCard";
 const ROUTE_STRATEGY_STORAGE_KEY = "codexmanager.gateway.route_strategy";
 const ROUTE_STRATEGY_ORDERED = "ordered";
 const ROUTE_STRATEGY_BALANCED = "balanced";
+const CPA_NO_COOKIE_HEADER_MODE_STORAGE_KEY = "codexmanager.gateway.cpa_no_cookie_header_mode";
 const API_MODELS_REMOTE_REFRESH_STORAGE_KEY = "codexmanager.apikey.models.last_remote_refresh_at";
 const API_MODELS_REMOTE_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_DELAY_MS = 1200;
@@ -97,6 +100,8 @@ let updateCheckInFlight = null;
 let pendingUpdateCandidate = null;
 let routeStrategySyncInFlight = null;
 let routeStrategySyncedProbeId = -1;
+let cpaNoCookieHeaderModeSyncInFlight = null;
+let cpaNoCookieHeaderModeSyncedProbeId = -1;
 let apiModelsRemoteRefreshInFlight = null;
 function buildRefreshAllTasks(options = {}) {
   const refreshRemoteUsage = options.refreshRemoteUsage === true;
@@ -369,6 +374,128 @@ async function syncRouteStrategyOnStartup() {
     routeStrategySyncedProbeId = state.serviceProbeId;
   } catch {
     setRouteStrategySelect(readRouteStrategySetting());
+  }
+}
+
+function normalizeCpaNoCookieHeaderMode(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return false;
+}
+
+function readCpaNoCookieHeaderModeSetting() {
+  if (typeof localStorage === "undefined") {
+    return false;
+  }
+  return normalizeCpaNoCookieHeaderMode(localStorage.getItem(CPA_NO_COOKIE_HEADER_MODE_STORAGE_KEY));
+}
+
+function saveCpaNoCookieHeaderModeSetting(enabled) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  localStorage.setItem(
+    CPA_NO_COOKIE_HEADER_MODE_STORAGE_KEY,
+    normalizeCpaNoCookieHeaderMode(enabled) ? "1" : "0",
+  );
+}
+
+function setCpaNoCookieHeaderModeToggle(enabled) {
+  if (dom.cpaNoCookieHeaderMode) {
+    dom.cpaNoCookieHeaderMode.checked = Boolean(enabled);
+  }
+}
+
+function initCpaNoCookieHeaderModeSetting() {
+  const enabled = readCpaNoCookieHeaderModeSetting();
+  if (typeof localStorage !== "undefined" && localStorage.getItem(CPA_NO_COOKIE_HEADER_MODE_STORAGE_KEY) == null) {
+    saveCpaNoCookieHeaderModeSetting(enabled);
+  }
+  setCpaNoCookieHeaderModeToggle(enabled);
+}
+
+function resolveCpaNoCookieHeaderModeFromPayload(payload) {
+  const value = pickBooleanValue(payload, [
+    "cpaNoCookieHeaderModeEnabled",
+    "enabled",
+    "result.cpaNoCookieHeaderModeEnabled",
+    "result.enabled",
+  ]);
+  return Boolean(value);
+}
+
+async function applyCpaNoCookieHeaderModeToService(enabled, { silent = true } = {}) {
+  const normalized = normalizeCpaNoCookieHeaderMode(enabled);
+  if (cpaNoCookieHeaderModeSyncInFlight) {
+    return cpaNoCookieHeaderModeSyncInFlight;
+  }
+  cpaNoCookieHeaderModeSyncInFlight = (async () => {
+    const connected = await ensureConnected();
+    serviceLifecycle.updateServiceToggle();
+    if (!connected) {
+      if (!silent) {
+        showToast("服务未连接，稍后会自动应用头策略开关", "error");
+      }
+      return false;
+    }
+    const response = await serviceGatewayHeaderPolicySet(normalized);
+    const applied = resolveCpaNoCookieHeaderModeFromPayload(response);
+    saveCpaNoCookieHeaderModeSetting(applied);
+    setCpaNoCookieHeaderModeToggle(applied);
+    cpaNoCookieHeaderModeSyncedProbeId = state.serviceProbeId;
+    if (!silent) {
+      showToast(applied ? "已启用请求头收敛策略" : "已关闭请求头收敛策略");
+    }
+    return true;
+  })();
+
+  try {
+    return await cpaNoCookieHeaderModeSyncInFlight;
+  } catch (err) {
+    if (!silent) {
+      showToast(`切换失败：${normalizeErrorMessage(err)}`, "error");
+    }
+    return false;
+  } finally {
+    cpaNoCookieHeaderModeSyncInFlight = null;
+  }
+}
+
+async function syncCpaNoCookieHeaderModeOnStartup() {
+  const connected = await ensureConnected();
+  serviceLifecycle.updateServiceToggle();
+  if (!connected) {
+    return;
+  }
+
+  const hasLocalSetting = typeof localStorage !== "undefined"
+    && localStorage.getItem(CPA_NO_COOKIE_HEADER_MODE_STORAGE_KEY) != null;
+  if (hasLocalSetting) {
+    await applyCpaNoCookieHeaderModeToService(readCpaNoCookieHeaderModeSetting(), { silent: true });
+    return;
+  }
+
+  try {
+    const response = await serviceGatewayHeaderPolicyGet();
+    const enabled = resolveCpaNoCookieHeaderModeFromPayload(response);
+    saveCpaNoCookieHeaderModeSetting(enabled);
+    setCpaNoCookieHeaderModeToggle(enabled);
+    cpaNoCookieHeaderModeSyncedProbeId = state.serviceProbeId;
+  } catch {
+    setCpaNoCookieHeaderModeToggle(readCpaNoCookieHeaderModeSetting());
   }
 }
 
@@ -827,6 +954,9 @@ async function refreshAll(options = {}) {
     if (routeStrategySyncedProbeId !== state.serviceProbeId) {
       await applyRouteStrategyToService(readRouteStrategySetting(), { silent: true });
     }
+    if (cpaNoCookieHeaderModeSyncedProbeId !== state.serviceProbeId) {
+      await applyCpaNoCookieHeaderModeToService(readCpaNoCookieHeaderModeSetting(), { silent: true });
+    }
 
     // 中文注释：全并发会制造瞬时抖动（同时多次 RPC/DOM 更新）；这里改为有限并发并统一限流上限。
     const results = await runRefreshTasks(
@@ -1128,6 +1258,15 @@ function bindEvents() {
       void applyRouteStrategyToService(selected, { silent: false });
     });
   }
+  if (dom.cpaNoCookieHeaderMode && dom.cpaNoCookieHeaderMode.dataset.bound !== "1") {
+    dom.cpaNoCookieHeaderMode.dataset.bound = "1";
+    dom.cpaNoCookieHeaderMode.addEventListener("change", () => {
+      const enabled = Boolean(dom.cpaNoCookieHeaderMode.checked);
+      saveCpaNoCookieHeaderModeSetting(enabled);
+      setCpaNoCookieHeaderModeToggle(enabled);
+      void applyCpaNoCookieHeaderModeToService(enabled, { silent: false });
+    });
+  }
   const lowTransparencyToggle = typeof document === "undefined"
     ? null
     : document.getElementById(UI_LOW_TRANSPARENCY_TOGGLE_ID);
@@ -1151,6 +1290,7 @@ function bootstrap() {
   initLowTransparencySetting();
   initUpdateAutoCheckSetting();
   initRouteStrategySetting();
+  initCpaNoCookieHeaderModeSetting();
   void bootstrapUpdateStatus();
   serviceLifecycle.restoreServiceAddr();
   serviceLifecycle.updateServiceToggle();
@@ -1160,6 +1300,7 @@ function bootstrap() {
   scheduleStartupUpdateCheck();
   void serviceLifecycle.autoStartService().finally(() => {
     void syncRouteStrategyOnStartup();
+    void syncCpaNoCookieHeaderModeOnStartup();
     setStartupMask(false);
   });
 }

@@ -144,9 +144,10 @@ pub(crate) fn is_upstream_challenge_response(
         .and_then(|v| v.to_str().ok())
         .map(is_html_content_type)
         .unwrap_or(false);
-    // 中文注释：403 并不总是 Cloudflare challenge（也可能是上游业务鉴权错误），
-    // 仅在明确 HTML challenge 或 429 限流时按 challenge 处理，避免误导排障方向。
-    is_html || status_code == 429
+    // 中文注释：429 常见于业务限流/额度，不应统一映射成 Cloudflare challenge；
+    // 仅在明确 HTML challenge 时按 challenge 处理，避免误报成 WAF 拦截。
+    let _ = status_code;
+    is_html
 }
 
 pub(crate) fn is_html_content_type(value: &str) -> bool {

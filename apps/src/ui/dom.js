@@ -16,6 +16,8 @@ export const dom = {
   updateStatusText: byId("updateStatusText"),
   routeStrategySelect: byId("routeStrategySelect"),
   routeStrategyHint: byId("routeStrategyHint"),
+  cpaNoCookieHeaderMode: byId("cpaNoCookieHeaderMode"),
+  cpaNoCookieHeaderModeHint: byId("cpaNoCookieHeaderModeHint"),
   themeToggle: byId("themeToggle"),
   themePanel: byId("themePanel"),
   serviceHint: byId("serviceHint"),

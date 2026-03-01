@@ -107,7 +107,11 @@ pub(in super::super) fn proxy_validated_request(
         method,
     } = validated;
     let started_at = Instant::now();
-    let request_deadline = super::deadline::request_deadline(started_at, is_stream);
+    let client_is_stream = is_stream;
+    // 中文注释：对齐 CPA：/v1/responses 上游固定走 SSE。
+    // 下游是否流式仍由客户端 `stream` 参数决定（在 response bridge 层聚合/透传）。
+    let upstream_is_stream = client_is_stream || path.starts_with("/v1/responses");
+    let request_deadline = super::deadline::request_deadline(started_at, client_is_stream);
 
     super::super::trace_log::log_request_start(
         trace_id.as_str(),
@@ -116,7 +120,7 @@ pub(in super::super) fn proxy_validated_request(
         path.as_str(),
         model_for_log.as_deref(),
         reasoning_for_log.as_deref(),
-        is_stream,
+        client_is_stream,
         protocol_type.as_str(),
     );
     super::super::trace_log::log_request_body_preview(trace_id.as_str(), body.as_ref());
@@ -131,7 +135,7 @@ pub(in super::super) fn proxy_validated_request(
             request_method.as_str(),
             &method,
             &body,
-            is_stream,
+            upstream_is_stream,
             response_adapter,
             model_for_log.as_deref(),
             reasoning_for_log.as_deref(),
@@ -355,7 +359,7 @@ pub(in super::super) fn proxy_validated_request(
             request_ref,
             &incoming_headers,
             body_for_attempt,
-            is_stream,
+            upstream_is_stream,
             base,
             &path,
             url.as_str(),
@@ -432,7 +436,7 @@ pub(in super::super) fn proxy_validated_request(
                         request_ref,
                         &incoming_headers,
                         retry_body,
-                        is_stream,
+                        upstream_is_stream,
                         base,
                         &path,
                         url.as_str(),
@@ -501,15 +505,15 @@ pub(in super::super) fn proxy_validated_request(
                     resp,
                     guard,
                     response_adapter,
-                    is_stream,
+                    client_is_stream,
                 )?;
-                let bridge_ok = bridge.is_ok(is_stream);
+                let bridge_ok = bridge.is_ok(client_is_stream);
                 let bridge_error_message = if bridge_ok {
                     None
                 } else {
                     Some(
                         bridge
-                            .error_message(is_stream)
+                            .error_message(client_is_stream)
                             .unwrap_or_else(|| "upstream response incomplete".to_string()),
                     )
                 };
@@ -530,7 +534,7 @@ pub(in super::super) fn proxy_validated_request(
 
                 // 中文注释：流式响应可能以 200 开始，但在未收到终止事件时提前断流（上游 5xx/网络抖动）。
                 // 这种情况对客户端等同失败，日志里也应标记为 5xx（或 499 客户端断开）。
-                let upstream_stream_failed = is_stream
+                let upstream_stream_failed = client_is_stream
                     && (!bridge.stream_terminal_seen || bridge.stream_terminal_error.is_some());
                 let client_delivery_failed = bridge
                     .delivery_error

@@ -33,10 +33,10 @@ fn cooldown_reason_maps_status() {
 }
 
 #[test]
-fn challenge_detection_requires_html_or_429() {
+fn challenge_detection_requires_html_content_type() {
     let html = HeaderValue::from_str("text/html; charset=utf-8").ok();
     let json = HeaderValue::from_str("application/json").ok();
     assert!(is_upstream_challenge_response(403, html.as_ref()));
     assert!(!is_upstream_challenge_response(403, json.as_ref()));
-    assert!(is_upstream_challenge_response(429, json.as_ref()));
+    assert!(!is_upstream_challenge_response(429, json.as_ref()));
 }

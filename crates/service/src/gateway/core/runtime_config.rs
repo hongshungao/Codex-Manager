@@ -1,7 +1,7 @@
 use codexmanager_core::auth::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
 use reqwest::blocking::Client;
 use reqwest::Proxy;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
@@ -16,6 +16,7 @@ static UPSTREAM_CONNECT_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(DEFAULT_UPSTREA
 static UPSTREAM_TOTAL_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_UPSTREAM_TOTAL_TIMEOUT_MS);
 static UPSTREAM_STREAM_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_UPSTREAM_STREAM_TIMEOUT_MS);
 static ACCOUNT_MAX_INFLIGHT: AtomicUsize = AtomicUsize::new(DEFAULT_ACCOUNT_MAX_INFLIGHT);
+static CPA_NO_COOKIE_HEADER_MODE: AtomicBool = AtomicBool::new(DEFAULT_CPA_NO_COOKIE_HEADER_MODE);
 static UPSTREAM_COOKIE: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 static TOKEN_EXCHANGE_CLIENT_ID: OnceLock<RwLock<String>> = OnceLock::new();
 static TOKEN_EXCHANGE_ISSUER: OnceLock<RwLock<String>> = OnceLock::new();
@@ -26,6 +27,7 @@ const DEFAULT_UPSTREAM_CONNECT_TIMEOUT_SECS: u64 = 15;
 const DEFAULT_UPSTREAM_TOTAL_TIMEOUT_MS: u64 = 120_000;
 const DEFAULT_UPSTREAM_STREAM_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_ACCOUNT_MAX_INFLIGHT: usize = 0;
+const DEFAULT_CPA_NO_COOKIE_HEADER_MODE: bool = false;
 const DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS: u64 = 300;
 const DEFAULT_TRACE_BODY_PREVIEW_MAX_BYTES: usize = 0;
 const DEFAULT_FRONT_PROXY_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -38,6 +40,7 @@ const ENV_UPSTREAM_CONNECT_TIMEOUT_SECS: &str = "CODEXMANAGER_UPSTREAM_CONNECT_T
 const ENV_UPSTREAM_TOTAL_TIMEOUT_MS: &str = "CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS";
 const ENV_UPSTREAM_STREAM_TIMEOUT_MS: &str = "CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS";
 const ENV_ACCOUNT_MAX_INFLIGHT: &str = "CODEXMANAGER_ACCOUNT_MAX_INFLIGHT";
+const ENV_CPA_NO_COOKIE_HEADER_MODE: &str = "CODEXMANAGER_CPA_NO_COOKIE_HEADER_MODE";
 const ENV_TOKEN_EXCHANGE_CLIENT_ID: &str = "CODEXMANAGER_CLIENT_ID";
 const ENV_TOKEN_EXCHANGE_ISSUER: &str = "CODEXMANAGER_ISSUER";
 const ENV_PROXY_LIST: &str = "CODEXMANAGER_PROXY_LIST";
@@ -150,6 +153,16 @@ pub(crate) fn account_max_inflight_limit() -> usize {
     ACCOUNT_MAX_INFLIGHT.load(Ordering::Relaxed)
 }
 
+pub(super) fn cpa_no_cookie_header_mode_enabled() -> bool {
+    ensure_runtime_config_loaded();
+    CPA_NO_COOKIE_HEADER_MODE.load(Ordering::Relaxed)
+}
+
+pub(super) fn set_cpa_no_cookie_header_mode_enabled(enabled: bool) {
+    ensure_runtime_config_loaded();
+    CPA_NO_COOKIE_HEADER_MODE.store(enabled, Ordering::Relaxed);
+}
+
 pub(crate) fn request_gate_wait_timeout() -> Duration {
     ensure_runtime_config_loaded();
     Duration::from_millis(REQUEST_GATE_WAIT_TIMEOUT_MS.load(Ordering::Relaxed))
@@ -214,6 +227,13 @@ pub(super) fn reload_from_env() {
     );
     ACCOUNT_MAX_INFLIGHT.store(
         env_usize_or(ENV_ACCOUNT_MAX_INFLIGHT, DEFAULT_ACCOUNT_MAX_INFLIGHT),
+        Ordering::Relaxed,
+    );
+    CPA_NO_COOKIE_HEADER_MODE.store(
+        env_bool_or(
+            ENV_CPA_NO_COOKIE_HEADER_MODE,
+            DEFAULT_CPA_NO_COOKIE_HEADER_MODE,
+        ),
         Ordering::Relaxed,
     );
 
@@ -304,6 +324,17 @@ fn env_usize_or(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+fn env_bool_or(name: &str, default: bool) -> bool {
+    let Some(value) = env_non_empty(name) else {
+        return default;
+    };
+    match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    }
+}
+
 fn parse_proxy_list_env() -> Vec<String> {
     let Some(raw) = env_non_empty(ENV_PROXY_LIST) else {
         return Vec::new();
@@ -369,6 +400,7 @@ mod tests {
         let _timeout_guard = EnvGuard::set(ENV_UPSTREAM_TOTAL_TIMEOUT_MS, "777");
         let _stream_timeout_guard = EnvGuard::set(ENV_UPSTREAM_STREAM_TIMEOUT_MS, "888");
         let _cookie_guard = EnvGuard::set(ENV_UPSTREAM_COOKIE, "cookie=abc");
+        let _cpa_mode_guard = EnvGuard::set(ENV_CPA_NO_COOKIE_HEADER_MODE, "1");
         let _client_id_guard = EnvGuard::set(ENV_TOKEN_EXCHANGE_CLIENT_ID, "client-id-123");
         let _issuer_guard = EnvGuard::set(ENV_TOKEN_EXCHANGE_ISSUER, "https://issuer.example");
 
@@ -377,6 +409,7 @@ mod tests {
         assert_eq!(upstream_total_timeout(), Some(Duration::from_millis(777)));
         assert_eq!(upstream_stream_timeout(), Some(Duration::from_millis(888)));
         assert_eq!(upstream_cookie().as_deref(), Some("cookie=abc"));
+        assert!(cpa_no_cookie_header_mode_enabled());
         assert_eq!(token_exchange_client_id(), "client-id-123");
         assert_eq!(
             token_exchange_default_issuer(),

@@ -45,6 +45,10 @@ fn strip_encrypted_content_from_body(body: &[u8]) -> Option<Vec<u8>> {
     serde_json::to_vec(&value).ok()
 }
 
+fn should_compact_upstream_headers() -> bool {
+    super::cpa_no_cookie_header_mode_enabled()
+}
+
 pub(super) fn try_openai_fallback(
     client: &Client,
     storage: &Storage,
@@ -64,6 +68,7 @@ pub(super) fn try_openai_fallback(
     let (url, _url_alt) = super::compute_upstream_url(upstream_base, request_path);
     let bearer = super::resolve_openai_bearer_token(storage, account, token)?;
     let attempt_started_at = Instant::now();
+    let compact_headers_mode = should_compact_upstream_headers();
 
     // `x-codex-turn-state` is an org-scoped encrypted blob. When we hit API-key fallback
     // (often a different org than the ChatGPT workspace), forwarding it can trigger:
@@ -82,17 +87,20 @@ pub(super) fn try_openai_fallback(
         .chatgpt_account_id
         .as_deref()
         .or_else(|| account.workspace_id.as_deref());
-    let include_account_id = !super::is_openai_api_base(upstream_base);
+    let include_account_id = !compact_headers_mode && !super::is_openai_api_base(upstream_base);
     let header_input = super::upstream::header_profile::CodexUpstreamHeaderInput {
         auth_token: bearer.as_str(),
         account_id,
         include_account_id,
+        include_openai_beta: !compact_headers_mode,
         upstream_cookie,
         incoming_session_id: incoming_headers.session_id(),
         fallback_session_id: None,
         incoming_turn_state: incoming_headers.turn_state(),
+        include_turn_state: !compact_headers_mode,
         incoming_conversation_id: incoming_headers.conversation_id(),
         fallback_conversation_id: None,
+        include_conversation_id: !compact_headers_mode,
         strip_session_affinity,
         is_stream,
         has_body: !body.is_empty(),

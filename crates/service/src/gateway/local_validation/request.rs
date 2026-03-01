@@ -39,6 +39,9 @@ pub(super) fn build_local_validation_result(
     .map_err(|err| LocalValidationError::new(400, err))?;
     let path = adapted.path;
     body = adapted.body;
+    // 中文注释：下游调用方的 stream 语义应在请求改写前确定；
+    // 否则上游兼容改写（例如 /responses 强制 stream=true）会污染下游响应模式判断。
+    let client_request_meta = super::super::parse_request_metadata(&body);
     let (effective_model, effective_reasoning) = resolve_effective_request_overrides(&api_key);
     body = super::super::apply_request_overrides(
         &path,
@@ -56,9 +59,9 @@ pub(super) fn build_local_validation_result(
     let reasoning_for_log = request_meta
         .reasoning_effort
         .or(api_key.reasoning_effort.clone());
-    let is_stream = request_meta.is_stream;
-    let has_prompt_cache_key = request_meta.has_prompt_cache_key;
-    let request_shape = request_meta.request_shape;
+    let is_stream = client_request_meta.is_stream;
+    let has_prompt_cache_key = client_request_meta.has_prompt_cache_key;
+    let request_shape = client_request_meta.request_shape;
 
     Ok(LocalValidationResult {
         trace_id,
