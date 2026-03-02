@@ -1610,6 +1610,7 @@ function bindEvents() {
     openApiKeyModal,
     closeAccountModal,
     handleLogin: loginFlow.handleLogin,
+    handleCancelLogin: loginFlow.handleCancelLogin,
     showToast,
     handleManualCallback: loginFlow.handleManualCallback,
     closeUsageModal,

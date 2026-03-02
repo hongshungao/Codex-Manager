@@ -453,11 +453,11 @@ export async function serviceLoginStart(payload) {
   return invoke("service_login_start", withAddr(payload));
 }
 
-export async function serviceLoginStatus(loginId) {
+export async function serviceLoginStatus(loginId, options = {}) {
   if (!isTauriRuntime()) {
-    return rpcInvoke("account/login/status", { loginId });
+    return rpcInvoke("account/login/status", { loginId }, options);
   }
-  return invoke("service_login_status", withAddr({ loginId }));
+  return invoke("service_login_status", withAddr({ loginId }), options);
 }
 
 export async function serviceLoginComplete(state, code, redirectUri) {

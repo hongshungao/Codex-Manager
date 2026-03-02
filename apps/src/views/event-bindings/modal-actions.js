@@ -10,6 +10,7 @@ export function bindModalActionEvents({
   openApiKeyModal,
   closeAccountModal,
   handleLogin,
+  handleCancelLogin,
   showToast,
   handleManualCallback,
   closeUsageModal,
@@ -67,10 +68,16 @@ export function bindModalActionEvents({
     if (!dom.modalApiKey || !dom.modalApiKey.classList.contains("active")) return;
     populateApiKeyModelSelect();
   });
+  const closeLoginModal = () => {
+    if (typeof handleCancelLogin === "function") {
+      handleCancelLogin();
+    }
+    closeAccountModal();
+  };
   if (dom.closeAccountModal) {
-    dom.closeAccountModal.addEventListener("click", closeAccountModal);
+    dom.closeAccountModal.addEventListener("click", closeLoginModal);
   }
-  if (dom.cancelLogin) dom.cancelLogin.addEventListener("click", closeAccountModal);
+  if (dom.cancelLogin) dom.cancelLogin.addEventListener("click", closeLoginModal);
   if (dom.submitLogin) dom.submitLogin.addEventListener("click", handleLogin);
   if (dom.copyLoginUrl) dom.copyLoginUrl.addEventListener("click", async () => {
     if (!dom.loginUrl.value) return;
