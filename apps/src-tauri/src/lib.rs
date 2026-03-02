@@ -2,7 +2,7 @@ use codexmanager_core::rpc::types::JsonRpcRequest;
 use codexmanager_core::storage::Storage;
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -54,7 +54,12 @@ async fn service_start(app: tauri::AppHandle, addr: String) -> Result<(), String
     // 中文注释：保存地址与回调地址，按需启动 service
     std::env::set_var("CODEXMANAGER_SERVICE_ADDR", &addr);
     stop_service();
-    spawn_service_with_addr(&app, &addr)
+    spawn_service_with_addr(&app, &addr)?;
+    wait_for_service_ready(&addr, 12, Duration::from_millis(250)).map_err(|err| {
+      log::error!("service health check failed at {}: {}", addr, err);
+      stop_service();
+      format!("service not ready at {addr}: {err}")
+    })
   })
   .await
   .map_err(|err| format!("service_start task failed: {err}"))?
@@ -426,6 +431,7 @@ pub fn run() {
   tauri::Builder::default()
     .setup(|app| {
       load_env_from_exe_dir();
+      apply_runtime_storage_env(app.handle());
       app.handle().plugin(
         tauri_plugin_log::Builder::default()
           .level(log::LevelFilter::Info)
@@ -577,12 +583,7 @@ fn spawn_service_with_addr(app: &tauri::AppHandle, addr: &str) -> Result<(), Str
     return Ok(());
   }
 
-  if let Ok(data_path) = resolve_db_path_with_legacy_migration(app) {
-    std::env::set_var("CODEXMANAGER_DB_PATH", data_path);
-    if let Ok(path) = std::env::var("CODEXMANAGER_DB_PATH") {
-      log::info!("db path: {}", path);
-    }
-  }
+  apply_runtime_storage_env(app);
 
   std::env::set_var("CODEXMANAGER_SERVICE_ADDR", addr);
   codexmanager_service::clear_shutdown_flag();
@@ -597,6 +598,21 @@ fn spawn_service_with_addr(app: &tauri::AppHandle, addr: &str) -> Result<(), Str
   });
   set_service_runtime(ServiceRuntime { addr, join: handle });
   Ok(())
+}
+
+fn resolve_rpc_token_path_for_db(db_path: &Path) -> PathBuf {
+  let parent = db_path.parent().unwrap_or_else(|| Path::new("."));
+  parent.join("codexmanager.rpc-token")
+}
+
+fn apply_runtime_storage_env(app: &tauri::AppHandle) {
+  if let Ok(data_path) = resolve_db_path_with_legacy_migration(app) {
+    std::env::set_var("CODEXMANAGER_DB_PATH", &data_path);
+    let token_path = resolve_rpc_token_path_for_db(&data_path);
+    std::env::set_var("CODEXMANAGER_RPC_TOKEN_FILE", &token_path);
+    log::info!("db path: {}", data_path.display());
+    log::info!("rpc token path: {}", token_path.display());
+  }
 }
 
 fn resolve_db_path_with_legacy_migration(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -815,70 +831,118 @@ fn parse_http_body(buf: &str) -> Result<String, String> {
   }
 }
 
+fn resolve_socket_addrs(addr: &str) -> Result<Vec<SocketAddr>, String> {
+  let addrs = addr
+    .to_socket_addrs()
+    .map_err(|err| format!("Invalid service address {addr}: {err}"))?;
+  let mut out = Vec::new();
+  for sock in addrs {
+    if !out.iter().any(|item| item == &sock) {
+      out.push(sock);
+    }
+  }
+  if out.is_empty() {
+    return Err(format!("Invalid service address {addr}: no address resolved"));
+  }
+  Ok(out)
+}
+
+fn rpc_call_on_socket(
+  method: &str,
+  addr: &str,
+  sock: SocketAddr,
+  params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+  let mut stream = TcpStream::connect_timeout(&sock, Duration::from_millis(400)).map_err(|e| {
+    let msg = format!("Failed to connect to service at {addr}: {e}");
+    log::warn!("rpc connect failed ({} -> {} via {}): {}", method, addr, sock, e);
+    msg
+  })?;
+  let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+  let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+
+  let req = JsonRpcRequest {
+    id: 1,
+    method: method.to_string(),
+    params,
+  };
+  let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+  let rpc_token = codexmanager_service::rpc_auth_token();
+  let http = format!(
+    "POST /rpc HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nX-CodexManager-Rpc-Token: {rpc_token}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+    json.len(),
+    json
+  );
+  stream.write_all(http.as_bytes()).map_err(|e| {
+    let msg = e.to_string();
+    log::warn!("rpc write failed ({} -> {} via {}): {}", method, addr, sock, msg);
+    msg
+  })?;
+
+  let mut buf = String::new();
+  stream.read_to_string(&mut buf).map_err(|e| {
+    let msg = e.to_string();
+    log::warn!("rpc read failed ({} -> {} via {}): {}", method, addr, sock, msg);
+    msg
+  })?;
+  let body = parse_http_body(&buf).map_err(|msg| {
+    log::warn!("rpc parse failed ({} -> {} via {}): {}", method, addr, sock, msg);
+    msg
+  })?;
+  if body.trim().is_empty() {
+    log::warn!("rpc empty response ({} -> {} via {})", method, addr, sock);
+    return Err("Empty response from service (service not ready, exited, or port occupied)".to_string());
+  }
+
+  let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+    let msg = format!("Unexpected RPC response (non-JSON body): {e}");
+    log::warn!(
+      "rpc json parse failed ({} -> {} via {}): {}",
+      method,
+      addr,
+      sock,
+      msg
+    );
+    msg
+  })?;
+  if let Some(err) = v.get("error") {
+    log::warn!("rpc error ({} -> {} via {}): {}", method, addr, sock, err);
+  }
+  Ok(v)
+}
+
+fn rpc_call_with_sockets(
+  method: &str,
+  addr: &str,
+  socket_addrs: &[SocketAddr],
+  params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+  if socket_addrs.is_empty() {
+    return Err(format!("Invalid service address {addr}: no address resolved"));
+  }
+  let mut last_err = "Empty response from service (service not ready, exited, or port occupied)".to_string();
+  for attempt in 0..=1 {
+    for sock in socket_addrs {
+      match rpc_call_on_socket(method, addr, *sock, params.clone()) {
+        Ok(v) => return Ok(v),
+        Err(err) => last_err = err,
+      }
+    }
+    if attempt == 0 {
+      std::thread::sleep(Duration::from_millis(120));
+    }
+  }
+  Err(last_err)
+}
+
 fn rpc_call(
   method: &str,
   addr: Option<String>,
   params: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
   let addr = resolve_service_addr(addr)?;
-  for attempt in 0..=1 {
-    let mut stream = connect_with_timeout(&addr, Duration::from_millis(400)).map_err(|e| {
-      log::warn!("rpc connect failed ({} -> {}): {}", method, addr, e);
-      e
-    })?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
-
-    let req = JsonRpcRequest {
-      id: 1,
-      method: method.to_string(),
-      params: params.clone(),
-    };
-    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-    let rpc_token = codexmanager_service::rpc_auth_token();
-    let http = format!(
-      "POST /rpc HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nX-CodexManager-Rpc-Token: {rpc_token}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-      json.len(),
-      json
-    );
-    stream.write_all(http.as_bytes()).map_err(|e| {
-      let msg = e.to_string();
-      log::warn!("rpc write failed ({} -> {}): {}", method, addr, msg);
-      msg
-    })?;
-
-    let mut buf = String::new();
-    stream.read_to_string(&mut buf).map_err(|e| {
-      let msg = e.to_string();
-      log::warn!("rpc read failed ({} -> {}): {}", method, addr, msg);
-      msg
-    })?;
-    let body = parse_http_body(&buf).map_err(|msg| {
-      log::warn!("rpc parse failed ({} -> {}): {}", method, addr, msg);
-      msg
-    })?;
-    if body.trim().is_empty() {
-      // 中文注释：前置代理在启动切换窗口可能返回空包；这里短重试一次，避免 UI 直接报“连接失败”。
-      if attempt == 0 {
-        std::thread::sleep(Duration::from_millis(120));
-        continue;
-      }
-      log::warn!("rpc empty response ({} -> {})", method, addr);
-      return Err("Empty response from service".to_string());
-    }
-
-    let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-      let msg = e.to_string();
-      log::warn!("rpc json parse failed ({} -> {}): {}", method, addr, msg);
-      msg
-    })?;
-    if let Some(err) = v.get("error") {
-      log::warn!("rpc error ({} -> {}): {}", method, addr, err);
-    }
-    return Ok(v);
-  }
-
-  Err("Empty response from service".to_string())
+  let socket_addrs = resolve_socket_addrs(&addr)?;
+  rpc_call_with_sockets(method, &addr, &socket_addrs, params)
 }
 
 fn normalize_host(value: &str) -> String {
@@ -926,23 +990,34 @@ fn stop_service() {
   }
 }
 
-fn connect_with_timeout(addr: &str, timeout: Duration) -> Result<TcpStream, String> {
-  let addrs = addr
-    .to_socket_addrs()
-    .map_err(|err| format!("Invalid service address {addr}: {err}"))?;
-  let mut last_err: Option<std::io::Error> = None;
-  for sock in addrs {
-    match TcpStream::connect_timeout(&sock, timeout) {
-      Ok(stream) => return Ok(stream),
-      Err(err) => last_err = Some(err),
+fn wait_for_service_ready(addr: &str, retries: usize, delay: Duration) -> Result<(), String> {
+  let mut last_err = "service bootstrap check failed".to_string();
+  for attempt in 0..=retries {
+    match rpc_call("initialize", Some(addr.to_string()), None) {
+      Ok(v) => {
+        let server_name = v
+          .get("result")
+          .and_then(|r| r.get("server_name"))
+          .and_then(|s| s.as_str())
+          .unwrap_or("");
+        if server_name == "codexmanager-service" {
+          return Ok(());
+        }
+        last_err = if server_name.is_empty() {
+          "missing server_name".to_string()
+        } else {
+          format!("unexpected server_name={server_name}")
+        };
+      }
+      Err(err) => {
+        last_err = err;
+      }
+    }
+    if attempt < retries {
+      std::thread::sleep(delay);
     }
   }
-  Err(format!(
-    "Failed to connect to service at {addr}: {}",
-    last_err
-      .map(|e| e.to_string())
-      .unwrap_or_else(|| "no address resolved".to_string())
-  ))
+  Err(last_err)
 }
 
 #[cfg(test)]
@@ -1013,5 +1088,58 @@ mod tests {
       .and_then(|v| v.get("ok"))
       .and_then(|v| v.as_bool());
     assert_eq!(ok, Some(true));
+  }
+
+  #[test]
+  fn rpc_call_falls_back_to_next_socket_after_empty_response() {
+    let bad_listener = TcpListener::bind("127.0.0.1:0").expect("bind bad");
+    let good_listener = TcpListener::bind("127.0.0.1:0").expect("bind good");
+    let bad_addr = bad_listener.local_addr().expect("bad addr");
+    let good_addr = good_listener.local_addr().expect("good addr");
+
+    std::thread::spawn(move || {
+      if let Ok((mut stream, _)) = bad_listener.accept() {
+        let mut buf = [0u8; 1024];
+        let _ = stream.read(&mut buf);
+        // 中文注释：模拟端口被无效服务占用后“直接断开连接”，触发空响应。
+      }
+    });
+
+    std::thread::spawn(move || {
+      if let Ok((mut stream, _)) = good_listener.accept() {
+        let mut buf = [0u8; 1024];
+        let _ = stream.read(&mut buf);
+        let body = r#"{"result":{"server_name":"codexmanager-service","version":"test"}}"#;
+        let response = format!(
+          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+          body.len(),
+          body
+        );
+        let _ = stream.write_all(response.as_bytes());
+      }
+    });
+
+    let res = rpc_call_with_sockets(
+      "initialize",
+      "localhost:48760",
+      &[bad_addr, good_addr],
+      None,
+    )
+    .expect("rpc_call_with_sockets");
+    let server_name = res
+      .get("result")
+      .and_then(|v| v.get("server_name"))
+      .and_then(|v| v.as_str());
+    assert_eq!(server_name, Some("codexmanager-service"));
+  }
+
+  #[test]
+  fn rpc_token_path_stays_in_db_dir() {
+    let db = PathBuf::from("C:/Users/test/AppData/Roaming/com.codexmanager.desktop/codexmanager.db");
+    let token = resolve_rpc_token_path_for_db(&db);
+    assert_eq!(
+      token,
+      PathBuf::from("C:/Users/test/AppData/Roaming/com.codexmanager.desktop/codexmanager.rpc-token")
+    );
   }
 }

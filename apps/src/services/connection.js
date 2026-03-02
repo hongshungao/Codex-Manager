@@ -32,12 +32,34 @@ function formatConnectError(err) {
   const text = String(raw || "").trim();
   if (!text) return "unknown";
   const firstLine = text.split("\n")[0].trim();
-  const lower = firstLine.toLowerCase();
+  const normalized = firstLine
+    .replace(/^service_initialize task failed:\s*/i, "")
+    .replace(/^service_start task failed:\s*/i, "")
+    .replace(/^service_stop task failed:\s*/i, "")
+    .trim();
+  const lower = normalized.toLowerCase();
   if (lower.includes("timed out")) return "连接超时";
   if (lower.includes("connection refused") || lower.includes("actively refused")) return "连接被拒绝";
-  if (lower.includes("empty response")) return "空响应";
+  if (lower.includes("empty response")) {
+    return "服务返回空响应（可能启动未完成、已异常退出或端口被占用）";
+  }
+  if (lower.includes("port is in use") || lower.includes("unexpected service responded")) {
+    return "端口已被占用或响应来源不是 CodexManager service";
+  }
+  if (lower.includes("missing server_name")) {
+    return "响应缺少服务标识（疑似非 CodexManager service）";
+  }
+  if (
+    lower.includes("unexpected rpc response")
+    || lower.includes("expected value at line 1 column 1")
+    || lower.includes("invalid chunked body")
+  ) {
+    return "响应格式异常（疑似非 CodexManager service）";
+  }
+  if (lower.includes("no address resolved")) return "地址解析失败";
+  if (lower.includes("addr is empty")) return "地址为空";
   if (lower.includes("invalid service address")) return "地址不合法";
-  return firstLine.length > 120 ? `${firstLine.slice(0, 120)}...` : firstLine;
+  return normalized.length > 120 ? `${normalized.slice(0, 120)}...` : normalized;
 }
 
 function readServerNameFromInitialize(res) {

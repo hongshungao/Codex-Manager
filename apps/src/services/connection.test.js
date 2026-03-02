@@ -153,3 +153,58 @@ test("waitForConnection shows retry reason even when silent", async () => {
   assert.ok(hintCalls.some((item) => item[0] && item[0].includes("正在重试：")));
   assert.equal(hintCalls.some((item) => item[1] === true), false);
 });
+
+test("initializeService shows actionable hint for empty response", async () => {
+  const api = {
+    serviceInitialize: async () => {
+      throw new Error("Empty response from service (service not ready, exited, or port occupied)");
+    },
+    serviceStart: async () => {},
+    serviceStop: async () => {},
+  };
+  const state = { serviceConnected: false, serviceAddr: "" };
+  const hintCalls = [];
+
+  const service = createConnectionService({
+    api,
+    state,
+    setStatus: () => {},
+    setServiceHint: (text, isError) => hintCalls.push([text, isError]),
+    wait: async () => {},
+  });
+
+  const ok = await service.initializeService({ retries: 0, silent: false });
+
+  assert.equal(ok, false);
+  const finalHint = String(hintCalls.at(-1)?.[0] || "");
+  assert.ok(finalHint.includes("空响应"));
+  assert.ok(finalHint.includes("端口被占用"));
+  assert.equal(hintCalls.at(-1)?.[1], true);
+});
+
+test("initializeService identifies unexpected service response", async () => {
+  const api = {
+    serviceInitialize: async () => {
+      throw new Error("Port is in use or unexpected service responded (missing server_name)");
+    },
+    serviceStart: async () => {},
+    serviceStop: async () => {},
+  };
+  const state = { serviceConnected: false, serviceAddr: "" };
+  const hintCalls = [];
+
+  const service = createConnectionService({
+    api,
+    state,
+    setStatus: () => {},
+    setServiceHint: (text, isError) => hintCalls.push([text, isError]),
+    wait: async () => {},
+  });
+
+  const ok = await service.initializeService({ retries: 0, silent: false });
+
+  assert.equal(ok, false);
+  const finalHint = String(hintCalls.at(-1)?.[0] || "");
+  assert.ok(finalHint.includes("端口已被占用或响应来源不是 CodexManager service"));
+  assert.equal(hintCalls.at(-1)?.[1], true);
+});
