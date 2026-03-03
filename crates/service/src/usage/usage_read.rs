@@ -3,9 +3,7 @@ use codexmanager_core::storage::UsageSnapshotRecord;
 
 use crate::storage_helpers::open_storage;
 
-pub(crate) fn usage_snapshot_result_from_record(
-    snap: UsageSnapshotRecord,
-) -> UsageSnapshotResult {
+pub(crate) fn usage_snapshot_result_from_record(snap: UsageSnapshotRecord) -> UsageSnapshotResult {
     let availability_status = classify_availability_status(&snap).to_string();
     // 将存储记录转换为 API 返回结构
     UsageSnapshotResult {
@@ -27,12 +25,18 @@ fn classify_availability_status(snap: &UsageSnapshotRecord) -> &'static str {
     if primary_missing {
         return "unknown";
     }
-    if snap.used_percent.map(|value| value >= 100.0).unwrap_or(false) {
+    if snap
+        .used_percent
+        .map(|value| value >= 100.0)
+        .unwrap_or(false)
+    {
         return "unavailable";
     }
 
-    let secondary_present = snap.secondary_used_percent.is_some() || snap.secondary_window_minutes.is_some();
-    let secondary_complete = snap.secondary_used_percent.is_some() && snap.secondary_window_minutes.is_some();
+    let secondary_present =
+        snap.secondary_used_percent.is_some() || snap.secondary_window_minutes.is_some();
+    let secondary_complete =
+        snap.secondary_used_percent.is_some() && snap.secondary_window_minutes.is_some();
 
     if !secondary_present {
         return "primary_window_available_only";
@@ -54,7 +58,10 @@ pub(crate) fn read_usage_snapshot(account_id: Option<&str>) -> Option<UsageSnaps
     // 读取最新用量快照
     let storage = open_storage()?;
     let snap = match account_id {
-        Some(account_id) => storage.latest_usage_snapshot_for_account(account_id).ok().flatten(),
+        Some(account_id) => storage
+            .latest_usage_snapshot_for_account(account_id)
+            .ok()
+            .flatten(),
         None => storage.latest_usage_snapshot().ok().flatten(),
     }?;
     Some(usage_snapshot_result_from_record(snap))

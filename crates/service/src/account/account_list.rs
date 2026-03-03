@@ -18,4 +18,3 @@ pub(crate) fn read_accounts() -> Result<Vec<AccountSummary>, String> {
         })
         .collect())
 }
-

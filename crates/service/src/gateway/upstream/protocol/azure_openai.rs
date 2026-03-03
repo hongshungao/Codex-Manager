@@ -19,7 +19,9 @@ fn parse_static_headers_json(raw: Option<&str>) -> Result<Vec<(HeaderName, Heade
     let mut out = Vec::with_capacity(obj.len());
     for (name, value) in obj {
         let Some(value_text) = value.as_str() else {
-            return Err(format!("invalid staticHeadersJson: header {name} value must be string"));
+            return Err(format!(
+                "invalid staticHeadersJson: header {name} value must be string"
+            ));
         };
         let header_name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| format!("invalid staticHeadersJson: header {name} is invalid"))?;
@@ -227,8 +229,7 @@ pub(in super::super) fn proxy_azure_request(
     let attempt_started_at = Instant::now();
     let upstream = match builder.send() {
         Ok(resp) => {
-            let duration_ms =
-                super::super::super::duration_to_millis(attempt_started_at.elapsed());
+            let duration_ms = super::super::super::duration_to_millis(attempt_started_at.elapsed());
             super::super::super::metrics::record_gateway_upstream_attempt(duration_ms, false);
             resp
         }
@@ -237,7 +238,8 @@ pub(in super::super) fn proxy_azure_request(
             // 这里用 fresh client 再试一次，避免必须重启/重连。
             let fresh_client = super::super::super::fresh_upstream_client();
             let mut retry_builder = fresh_client.request(method.clone(), &url);
-            if let Some(timeout) = super::super::deadline::send_timeout(request_deadline, is_stream) {
+            if let Some(timeout) = super::super::deadline::send_timeout(request_deadline, is_stream)
+            {
                 retry_builder = retry_builder.timeout(timeout);
             }
             for (name, value) in request_headers.iter() {
@@ -259,13 +261,19 @@ pub(in super::super) fn proxy_azure_request(
                 Ok(resp) => {
                     let duration_ms =
                         super::super::super::duration_to_millis(attempt_started_at.elapsed());
-                    super::super::super::metrics::record_gateway_upstream_attempt(duration_ms, false);
+                    super::super::super::metrics::record_gateway_upstream_attempt(
+                        duration_ms,
+                        false,
+                    );
                     resp
                 }
                 Err(second_err) => {
                     let duration_ms =
                         super::super::super::duration_to_millis(attempt_started_at.elapsed());
-                    super::super::super::metrics::record_gateway_upstream_attempt(duration_ms, true);
+                    super::super::super::metrics::record_gateway_upstream_attempt(
+                        duration_ms,
+                        true,
+                    );
                     let message = format!(
                         "azure upstream error: {}; retry_after_fresh_client: {}",
                         first_err, second_err
@@ -329,7 +337,11 @@ pub(in super::super) fn proxy_azure_request(
         final_error_text = bridge_error;
     }
 
-    super::super::super::record_gateway_request_outcome(path, final_status_code, Some(PROTOCOL_AZURE_OPENAI));
+    super::super::super::record_gateway_request_outcome(
+        path,
+        final_status_code,
+        Some(PROTOCOL_AZURE_OPENAI),
+    );
     super::super::super::trace_log::log_request_final(
         trace_id,
         final_status_code,
@@ -363,4 +375,3 @@ pub(in super::super) fn proxy_azure_request(
 #[cfg(test)]
 #[path = "tests/azure_openai_tests.rs"]
 mod tests;
-

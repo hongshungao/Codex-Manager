@@ -41,4 +41,3 @@ pub fn read_asset_bytes(_path: &str) -> Option<&'static [u8]> {
 pub fn guess_mime(_path: &str) -> String {
     "application/octet-stream".to_string()
 }
-

@@ -209,4 +209,3 @@ fn cooldown_test_guard() -> std::sync::MutexGuard<'static, ()> {
 #[cfg(test)]
 #[path = "tests/cooldown_tests.rs"]
 mod tests;
-

@@ -14,7 +14,10 @@ pub(super) enum PrimaryFlowDecision {
     },
     RespondUpstream(reqwest::blocking::Response),
     Failover,
-    Terminal { status_code: u16, message: String },
+    Terminal {
+        status_code: u16,
+        message: String,
+    },
 }
 
 fn resolve_chatgpt_primary_bearer(token: &Token) -> Option<String> {
@@ -52,24 +55,28 @@ pub(super) fn run_primary_upstream_flow<F>(
 where
     F: FnMut(Option<&str>, u16, Option<&str>),
 {
-    let (auth_token, token_source) = if let Some(access_token) = resolve_chatgpt_primary_bearer(token) {
-        (access_token, "access_token")
-    } else {
-        match super::super::resolve_openai_bearer_token(storage, account, token) {
-            Ok(token) => (token, "openai_bearer_fallback"),
-            Err(err) => {
-                super::super::mark_account_cooldown(&account.id, super::super::CooldownReason::Network);
-                log_gateway_result(Some(primary_url), 502, Some(err.as_str()));
-                if has_more_candidates {
-                    return PrimaryFlowDecision::Failover;
+    let (auth_token, token_source) =
+        if let Some(access_token) = resolve_chatgpt_primary_bearer(token) {
+            (access_token, "access_token")
+        } else {
+            match super::super::resolve_openai_bearer_token(storage, account, token) {
+                Ok(token) => (token, "openai_bearer_fallback"),
+                Err(err) => {
+                    super::super::mark_account_cooldown(
+                        &account.id,
+                        super::super::CooldownReason::Network,
+                    );
+                    log_gateway_result(Some(primary_url), 502, Some(err.as_str()));
+                    if has_more_candidates {
+                        return PrimaryFlowDecision::Failover;
+                    }
+                    return PrimaryFlowDecision::Terminal {
+                        status_code: 502,
+                        message: format!("resolve upstream bearer token failed: {err}"),
+                    };
                 }
-                return PrimaryFlowDecision::Terminal {
-                    status_code: 502,
-                    message: format!("resolve upstream bearer token failed: {err}"),
-                };
             }
-        }
-    };
+        };
     if debug {
         log::debug!(
             "event=gateway_upstream_token_source path={} account_id={} token_source={} upstream_base={}",
@@ -151,4 +158,3 @@ where
 #[cfg(test)]
 #[path = "tests/primary_flow_tests.rs"]
 mod tests;
-

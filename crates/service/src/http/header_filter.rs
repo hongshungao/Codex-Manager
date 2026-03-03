@@ -34,4 +34,3 @@ pub(crate) fn should_skip_response_header(name: &HeaderName) -> bool {
 #[cfg(test)]
 #[path = "tests/header_filter_tests.rs"]
 mod tests;
-

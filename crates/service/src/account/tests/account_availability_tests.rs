@@ -32,7 +32,10 @@ fn availability_marks_missing_primary_unavailable() {
 #[test]
 fn availability_marks_missing_secondary_available_when_both_secondary_fields_absent() {
     let record = snap(Some(10.0), Some(300), None, None);
-    assert!(matches!(evaluate_snapshot(&record), Availability::Available));
+    assert!(matches!(
+        evaluate_snapshot(&record),
+        Availability::Available
+    ));
 }
 
 #[test]

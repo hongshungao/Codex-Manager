@@ -1,4 +1,5 @@
-use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
+use crate::apikey_profile::{PROTOCOL_ANTHROPIC_NATIVE, PROTOCOL_OPENAI_COMPAT};
+use serde_json::Value;
 
 mod prompt_cache;
 mod request_mapping;
@@ -9,6 +10,10 @@ pub(super) enum ResponseAdapter {
     Passthrough,
     AnthropicJson,
     AnthropicSse,
+    OpenAIChatCompletionsJson,
+    OpenAIChatCompletionsSse,
+    OpenAICompletionsJson,
+    OpenAICompletionsSse,
 }
 
 #[derive(Debug)]
@@ -23,6 +28,49 @@ pub(super) fn adapt_request_for_protocol(
     path: &str,
     body: Vec<u8>,
 ) -> Result<AdaptedGatewayRequest, String> {
+    if protocol_type == PROTOCOL_OPENAI_COMPAT
+        && (path == "/v1/chat/completions" || path.starts_with("/v1/chat/completions?"))
+    {
+        let (adapted_body, request_stream) =
+            request_mapping::convert_openai_chat_completions_request(&body)?;
+        let adapted_path = if let Some(suffix) = path.strip_prefix("/v1/chat/completions") {
+            format!("/v1/responses{suffix}")
+        } else {
+            "/v1/responses".to_string()
+        };
+        return Ok(AdaptedGatewayRequest {
+            path: adapted_path,
+            body: adapted_body,
+            response_adapter: if request_stream {
+                ResponseAdapter::OpenAIChatCompletionsSse
+            } else {
+                ResponseAdapter::OpenAIChatCompletionsJson
+            },
+        });
+    }
+
+    if protocol_type == PROTOCOL_OPENAI_COMPAT
+        && (path == "/v1/completions" || path.starts_with("/v1/completions?"))
+    {
+        let (chat_body, _) = request_mapping::convert_openai_completions_request(&body)?;
+        let (adapted_body, request_stream) =
+            request_mapping::convert_openai_chat_completions_request(&chat_body)?;
+        let adapted_path = if let Some(suffix) = path.strip_prefix("/v1/completions") {
+            format!("/v1/responses{suffix}")
+        } else {
+            "/v1/responses".to_string()
+        };
+        return Ok(AdaptedGatewayRequest {
+            path: adapted_path,
+            body: adapted_body,
+            response_adapter: if request_stream {
+                ResponseAdapter::OpenAICompletionsSse
+            } else {
+                ResponseAdapter::OpenAICompletionsJson
+            },
+        });
+    }
+
     if protocol_type != PROTOCOL_ANTHROPIC_NATIVE {
         return Ok(AdaptedGatewayRequest {
             path: path.to_string(),
@@ -65,6 +113,14 @@ pub(super) fn adapt_upstream_response(
 
 pub(super) fn build_anthropic_error_body(message: &str) -> Vec<u8> {
     response_conversion::build_anthropic_error_body(message)
+}
+
+pub(super) fn convert_openai_completions_stream_chunk(value: &Value) -> Option<Value> {
+    response_conversion::convert_openai_completions_stream_chunk(value)
+}
+
+pub(super) fn convert_openai_chat_stream_chunk(value: &Value) -> Option<Value> {
+    response_conversion::convert_openai_chat_stream_chunk(value)
 }
 
 #[cfg(test)]

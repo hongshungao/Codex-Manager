@@ -72,8 +72,14 @@ fn rpc_account_list_empty() {
         assert!(items.is_empty());
         return;
     }
-    let err = result.get("error").and_then(|value| value.as_str()).unwrap_or("");
-    assert!(!err.is_empty(), "expected items or explicit error, got: {result}");
+    let err = result
+        .get("error")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    assert!(
+        !err.is_empty(),
+        "expected items or explicit error, got: {result}"
+    );
 }
 
 #[test]
@@ -140,8 +146,14 @@ fn rpc_usage_list_empty() {
         assert!(items.is_empty());
         return;
     }
-    let err = result.get("error").and_then(|value| value.as_str()).unwrap_or("");
-    assert!(!err.is_empty(), "expected items or explicit error, got: {result}");
+    let err = result
+        .get("error")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    assert!(
+        !err.is_empty(),
+        "expected items or explicit error, got: {result}"
+    );
 }
 
 #[test]

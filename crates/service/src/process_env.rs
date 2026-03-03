@@ -1,8 +1,8 @@
 use rand::RngCore;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::fs::OpenOptions;
 
 const ENV_CANDIDATES: [&str; 3] = ["codexmanager.env", "CodexManager.env", ".env"];
 const DEFAULT_DB_FILENAME: &str = "codexmanager.db";
@@ -183,11 +183,7 @@ pub(crate) fn persist_rpc_token_if_missing(token: &str) -> Option<String> {
         }
     }
 
-    match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-    {
+    match OpenOptions::new().write(true).create_new(true).open(&path) {
         Ok(mut f) => {
             if let Err(err) = f.write_all(token.as_bytes()) {
                 log::warn!(
@@ -198,7 +194,9 @@ pub(crate) fn persist_rpc_token_if_missing(token: &str) -> Option<String> {
             }
             None
         }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => read_rpc_token_from_file(&path),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            read_rpc_token_from_file(&path)
+        }
         Err(err) => {
             log::warn!(
                 "persist rpc token failed: {} ({})",

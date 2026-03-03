@@ -22,51 +22,51 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
     let validated =
         match super::local_validation::prepare_local_request(&mut request, trace_id.clone(), debug)
         {
-        Ok(v) => v,
-        Err(err) => {
-            super::trace_log::log_request_start(
-                trace_id.as_str(),
-                "-",
-                request_method_for_log.as_str(),
-                request_path_for_log.as_str(),
-                None,
-                None,
-                false,
-                "-",
-            );
-            super::trace_log::log_request_final(
-                trace_id.as_str(),
-                err.status_code,
-                None,
-                None,
-                Some(err.message.as_str()),
-                0,
-            );
-            super::record_gateway_request_outcome(
-                request_path_for_log.as_str(),
-                err.status_code,
-                None,
-            );
-            if let Some(storage) = super::open_storage() {
-                super::write_request_log(
-                    &storage,
+            Ok(v) => v,
+            Err(err) => {
+                super::trace_log::log_request_start(
+                    trace_id.as_str(),
+                    "-",
+                    request_method_for_log.as_str(),
+                    request_path_for_log.as_str(),
                     None,
                     None,
-                    &request_path_for_log,
-                    &request_method_for_log,
-                    None,
-                    None,
-                    None,
-                    Some(err.status_code),
-                    super::request_log::RequestLogUsage::default(),
-                    Some(err.message.as_str()),
+                    false,
+                    "-",
                 );
+                super::trace_log::log_request_final(
+                    trace_id.as_str(),
+                    err.status_code,
+                    None,
+                    None,
+                    Some(err.message.as_str()),
+                    0,
+                );
+                super::record_gateway_request_outcome(
+                    request_path_for_log.as_str(),
+                    err.status_code,
+                    None,
+                );
+                if let Some(storage) = super::open_storage() {
+                    super::write_request_log(
+                        &storage,
+                        None,
+                        None,
+                        &request_path_for_log,
+                        &request_method_for_log,
+                        None,
+                        None,
+                        None,
+                        Some(err.status_code),
+                        super::request_log::RequestLogUsage::default(),
+                        Some(err.message.as_str()),
+                    );
+                }
+                let response = Response::from_string(err.message).with_status_code(err.status_code);
+                let _ = request.respond(response);
+                return Ok(());
             }
-            let response = Response::from_string(err.message).with_status_code(err.status_code);
-            let _ = request.respond(response);
-            return Ok(());
-        }
-    };
+        };
 
     let request = match super::maybe_respond_local_models(
         request,
@@ -108,4 +108,3 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
 
     super::proxy_validated_request(request, validated, debug)
 }
-

@@ -41,4 +41,3 @@ impl Storage {
         Ok(None)
     }
 }
-

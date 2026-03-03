@@ -44,8 +44,7 @@ fn parse_id_token_claims_extracts_email_and_sub() {
 
 #[test]
 fn extract_token_exp_reads_exp_claim() {
-    let token =
-        "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NzA0NjU4ODYsInN1YiI6InVzZXItMSJ9.sig";
+    let token = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NzA0NjU4ODYsInN1YiI6InVzZXItMSJ9.sig";
     let exp = codexmanager_core::auth::extract_token_exp(token);
     assert_eq!(exp, Some(1770465886));
 }

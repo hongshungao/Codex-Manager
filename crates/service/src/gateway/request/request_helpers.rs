@@ -55,7 +55,10 @@ pub(crate) fn parse_request_metadata(body: &[u8]) -> ParsedRequestMetadata {
     ParsedRequestMetadata {
         model,
         reasoning_effort,
-        is_stream: value.get("stream").and_then(Value::as_bool).unwrap_or(false),
+        is_stream: value
+            .get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         request_shape,
         has_prompt_cache_key,
     }
@@ -87,7 +90,11 @@ fn summarize_request_shape_from_object(object: &serde_json::Map<String, Value>) 
         Some(false) => "0",
         None => "-",
     };
-    let has_reasoning = if object.get("reasoning").is_some() { 1 } else { 0 };
+    let has_reasoning = if object.get("reasoning").is_some() {
+        1
+    } else {
+        0
+    };
     let has_instructions = if object
         .get("instructions")
         .and_then(Value::as_str)

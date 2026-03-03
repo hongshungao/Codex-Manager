@@ -13,8 +13,8 @@ pub struct UsageSnapshot {
 
 pub fn normalize_base_url(base_url: &str) -> String {
     let mut base = base_url.trim_end_matches('/').to_string();
-    let is_chatgpt_host = base.starts_with("https://chatgpt.com")
-        || base.starts_with("https://chat.openai.com");
+    let is_chatgpt_host =
+        base.starts_with("https://chatgpt.com") || base.starts_with("https://chat.openai.com");
     if is_chatgpt_host && !base.contains("/backend-api") {
         base.push_str("/backend-api");
     }
@@ -51,9 +51,13 @@ pub fn parse_usage_snapshot(value: &Value) -> UsageSnapshot {
     let secondary_resets_at = value
         .pointer("/rate_limit/secondary_window/reset_at")
         .and_then(Value::as_i64);
-    let credits_json = value
-        .get("credits")
-        .and_then(|v| if v.is_null() { None } else { Some(v.to_string()) });
+    let credits_json = value.get("credits").and_then(|v| {
+        if v.is_null() {
+            None
+        } else {
+            Some(v.to_string())
+        }
+    });
 
     UsageSnapshot {
         used_percent,

@@ -8,11 +8,14 @@ use std::time::Duration;
 static UPSTREAM_CLIENT: OnceLock<Client> = OnceLock::new();
 static UPSTREAM_CLIENT_POOL: OnceLock<UpstreamClientPool> = OnceLock::new();
 static RUNTIME_CONFIG_LOADED: OnceLock<()> = OnceLock::new();
-static REQUEST_GATE_WAIT_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS);
+static REQUEST_GATE_WAIT_TIMEOUT_MS: AtomicU64 =
+    AtomicU64::new(DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS);
 static TRACE_BODY_PREVIEW_MAX_BYTES: AtomicUsize =
     AtomicUsize::new(DEFAULT_TRACE_BODY_PREVIEW_MAX_BYTES);
-static FRONT_PROXY_MAX_BODY_BYTES: AtomicUsize = AtomicUsize::new(DEFAULT_FRONT_PROXY_MAX_BODY_BYTES);
-static UPSTREAM_CONNECT_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(DEFAULT_UPSTREAM_CONNECT_TIMEOUT_SECS);
+static FRONT_PROXY_MAX_BODY_BYTES: AtomicUsize =
+    AtomicUsize::new(DEFAULT_FRONT_PROXY_MAX_BODY_BYTES);
+static UPSTREAM_CONNECT_TIMEOUT_SECS: AtomicU64 =
+    AtomicU64::new(DEFAULT_UPSTREAM_CONNECT_TIMEOUT_SECS);
 static UPSTREAM_TOTAL_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_UPSTREAM_TOTAL_TIMEOUT_MS);
 static UPSTREAM_STREAM_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_UPSTREAM_STREAM_TIMEOUT_MS);
 static ACCOUNT_MAX_INFLIGHT: AtomicUsize = AtomicUsize::new(DEFAULT_ACCOUNT_MAX_INFLIGHT);
@@ -82,7 +85,8 @@ pub(crate) fn fresh_upstream_client() -> Client {
 pub(crate) fn upstream_client_for_account(account_id: &str) -> &'static Client {
     ensure_runtime_config_loaded();
     let pool = upstream_client_pool();
-    pool.client_for_account(account_id).unwrap_or_else(upstream_client)
+    pool.client_for_account(account_id)
+        .unwrap_or_else(upstream_client)
 }
 
 pub(crate) fn fresh_upstream_client_for_account(account_id: &str) -> Client {
@@ -205,7 +209,10 @@ pub(super) fn token_exchange_default_issuer() -> String {
 
 pub(super) fn reload_from_env() {
     REQUEST_GATE_WAIT_TIMEOUT_MS.store(
-        env_u64_or(ENV_REQUEST_GATE_WAIT_TIMEOUT_MS, DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS),
+        env_u64_or(
+            ENV_REQUEST_GATE_WAIT_TIMEOUT_MS,
+            DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS,
+        ),
         Ordering::Relaxed,
     );
     TRACE_BODY_PREVIEW_MAX_BYTES.store(
@@ -216,7 +223,10 @@ pub(super) fn reload_from_env() {
         Ordering::Relaxed,
     );
     FRONT_PROXY_MAX_BODY_BYTES.store(
-        env_usize_or(ENV_FRONT_PROXY_MAX_BODY_BYTES, DEFAULT_FRONT_PROXY_MAX_BODY_BYTES),
+        env_usize_or(
+            ENV_FRONT_PROXY_MAX_BODY_BYTES,
+            DEFAULT_FRONT_PROXY_MAX_BODY_BYTES,
+        ),
         Ordering::Relaxed,
     );
     UPSTREAM_CONNECT_TIMEOUT_SECS.store(
@@ -227,11 +237,17 @@ pub(super) fn reload_from_env() {
         Ordering::Relaxed,
     );
     UPSTREAM_TOTAL_TIMEOUT_MS.store(
-        env_u64_or(ENV_UPSTREAM_TOTAL_TIMEOUT_MS, DEFAULT_UPSTREAM_TOTAL_TIMEOUT_MS),
+        env_u64_or(
+            ENV_UPSTREAM_TOTAL_TIMEOUT_MS,
+            DEFAULT_UPSTREAM_TOTAL_TIMEOUT_MS,
+        ),
         Ordering::Relaxed,
     );
     UPSTREAM_STREAM_TIMEOUT_MS.store(
-        env_u64_or(ENV_UPSTREAM_STREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_STREAM_TIMEOUT_MS),
+        env_u64_or(
+            ENV_UPSTREAM_STREAM_TIMEOUT_MS,
+            DEFAULT_UPSTREAM_STREAM_TIMEOUT_MS,
+        ),
         Ordering::Relaxed,
     );
     ACCOUNT_MAX_INFLIGHT.store(
@@ -254,17 +270,20 @@ pub(super) fn reload_from_env() {
     );
 
     let cookie = env_non_empty(ENV_UPSTREAM_COOKIE);
-    let mut cached_cookie = crate::lock_utils::write_recover(upstream_cookie_cell(), "upstream_cookie");
+    let mut cached_cookie =
+        crate::lock_utils::write_recover(upstream_cookie_cell(), "upstream_cookie");
     *cached_cookie = cookie;
 
     let client_id = env_non_empty(ENV_TOKEN_EXCHANGE_CLIENT_ID)
         .unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string());
-    let mut cached_client_id =
-        crate::lock_utils::write_recover(token_exchange_client_id_cell(), "token_exchange_client_id");
+    let mut cached_client_id = crate::lock_utils::write_recover(
+        token_exchange_client_id_cell(),
+        "token_exchange_client_id",
+    );
     *cached_client_id = client_id;
 
-    let issuer = env_non_empty(ENV_TOKEN_EXCHANGE_ISSUER)
-        .unwrap_or_else(|| DEFAULT_ISSUER.to_string());
+    let issuer =
+        env_non_empty(ENV_TOKEN_EXCHANGE_ISSUER).unwrap_or_else(|| DEFAULT_ISSUER.to_string());
     let mut cached_issuer =
         crate::lock_utils::write_recover(token_exchange_issuer_cell(), "token_exchange_issuer");
     *cached_issuer = issuer;
@@ -304,7 +323,10 @@ fn build_upstream_client_pool() -> UpstreamClientPool {
     if clients.is_empty() {
         UpstreamClientPool::default()
     } else {
-        log::info!("event=gateway_proxy_pool_initialized size={}", clients.len());
+        log::info!(
+            "event=gateway_proxy_pool_initialized size={}",
+            clients.len()
+        );
         UpstreamClientPool { proxies, clients }
     }
 }
@@ -387,4 +409,3 @@ fn stable_account_hash(account_id: &str) -> u64 {
 #[cfg(test)]
 #[path = "tests/runtime_config_tests.rs"]
 mod tests;
-

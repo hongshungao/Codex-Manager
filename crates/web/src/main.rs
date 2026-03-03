@@ -156,9 +156,12 @@ async fn tcp_probe(addr: &str) -> bool {
     let addr = addr.strip_prefix("http://").unwrap_or(addr);
     let addr = addr.strip_prefix("https://").unwrap_or(addr);
     let addr = addr.split('/').next().unwrap_or(addr);
-    tokio::time::timeout(Duration::from_millis(250), tokio::net::TcpStream::connect(addr))
-        .await
-        .is_ok()
+    tokio::time::timeout(
+        Duration::from_millis(250),
+        tokio::net::TcpStream::connect(addr),
+    )
+    .await
+    .is_ok()
 }
 
 fn service_bin_path(dir: &Path) -> PathBuf {
@@ -197,7 +200,9 @@ async fn ensure_service_running(
         return None;
     }
     if !should_spawn_service() {
-        return Some(format!("service not reachable at {service_addr} (spawn disabled)"));
+        return Some(format!(
+            "service not reachable at {service_addr} (spawn disabled)"
+        ));
     }
 
     let bin = service_bin_path(dir);
@@ -219,7 +224,9 @@ async fn ensure_service_running(
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Some(format!("service still not reachable at {service_addr} after spawn"))
+    Some(format!(
+        "service still not reachable at {service_addr} after spawn"
+    ))
 }
 
 async fn rpc_proxy(
@@ -256,8 +263,10 @@ async fn rpc_proxy(
     };
     let mut out = Response::new(axum::body::Body::from(bytes));
     *out.status_mut() = status;
-    out.headers_mut()
-        .insert("content-type", axum::http::HeaderValue::from_static("application/json"));
+    out.headers_mut().insert(
+        "content-type",
+        axum::http::HeaderValue::from_static("application/json"),
+    );
     out
 }
 
@@ -281,9 +290,7 @@ async fn serve_embedded_index() -> Response {
     serve_embedded_path("index.html")
 }
 
-async fn serve_embedded_asset(
-    axum::extract::Path(path): axum::extract::Path<String>,
-) -> Response {
+async fn serve_embedded_asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
     serve_embedded_path(&path)
 }
 
@@ -397,8 +404,7 @@ async fn main() {
 
     let mut app = Router::new()
         .route("/api/rpc", post(rpc_proxy))
-        .route("/__quit", get(quit))
-        ;
+        .route("/__quit", get(quit));
 
     // 静态资源：优先磁盘（显式 root 或同目录 web/ 存在），否则使用内嵌资源（embedded-ui）。
     let disk_ok = ensure_index_file(&index);

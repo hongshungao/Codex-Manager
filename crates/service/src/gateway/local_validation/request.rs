@@ -22,6 +22,12 @@ fn resolve_effective_request_overrides(api_key: &ApiKey) -> (Option<String>, Opt
     (normalized_model, normalized_reasoning)
 }
 
+fn allow_openai_responses_path_rewrite(protocol_type: &str, normalized_path: &str) -> bool {
+    protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
+        && (normalized_path.starts_with("/v1/chat/completions")
+            || normalized_path.starts_with("/v1/completions"))
+}
+
 pub(super) fn build_local_validation_result(
     request: &Request,
     trace_id: String,
@@ -45,6 +51,7 @@ pub(super) fn build_local_validation_result(
     if api_key.protocol_type != PROTOCOL_ANTHROPIC_NATIVE
         && !normalized_path.starts_with("/v1/responses")
         && path.starts_with("/v1/responses")
+        && !allow_openai_responses_path_rewrite(&api_key.protocol_type, &normalized_path)
     {
         // 中文注释：防回归保护：仅 anthropic_native 的 /v1/messages 允许改写到 /v1/responses；
         // 其余协议和路径一律保持原路径透传，避免客户端按 chat/completions 语义却拿到 responses 流格式。

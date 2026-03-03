@@ -671,6 +671,16 @@ struct ChatCompletionSseSynthesis {
     saw_terminal: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ResponsesSseSynthesis {
+    id: Option<String>,
+    model: Option<String>,
+    created: Option<i64>,
+    usage: Option<Value>,
+    output_text: String,
+    saw_completed: bool,
+}
+
 fn append_chat_delta_content(buffer: &mut String, delta_content: &Value) {
     if let Some(text) = delta_content.as_str() {
         buffer.push_str(text);
@@ -740,6 +750,223 @@ fn update_chat_completion_sse_synthesis(synthesis: &mut ChatCompletionSseSynthes
     }
 }
 
+fn update_responses_sse_synthesis(synthesis: &mut ResponsesSseSynthesis, value: &Value) {
+    let Some(event_type) = value.get("type").and_then(Value::as_str) else {
+        return;
+    };
+
+    if synthesis.id.is_none() {
+        synthesis.id = value
+            .get("response_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                value
+                    .get("response")
+                    .and_then(|response| response.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .or_else(|| value.get("id").and_then(Value::as_str).map(str::to_string));
+    }
+    if synthesis.model.is_none() {
+        synthesis.model = value
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                value
+                    .get("response")
+                    .and_then(|response| response.get("model"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+    }
+    if synthesis.created.is_none() {
+        synthesis.created = value
+            .get("created")
+            .and_then(Value::as_i64)
+            .or_else(|| value.get("created_at").and_then(Value::as_i64))
+            .or_else(|| {
+                value
+                    .get("response")
+                    .and_then(|response| response.get("created"))
+                    .and_then(Value::as_i64)
+            })
+            .or_else(|| {
+                value
+                    .get("response")
+                    .and_then(|response| response.get("created_at"))
+                    .and_then(Value::as_i64)
+            });
+    }
+
+    if let Some(response_usage) = value
+        .get("response")
+        .and_then(|response| response.get("usage"))
+        .cloned()
+    {
+        synthesis.usage = Some(response_usage);
+    } else if synthesis.usage.is_none() {
+        if let Some(usage) = value.get("usage").cloned() {
+            synthesis.usage = Some(usage);
+        }
+    }
+
+    let mut text_out = String::new();
+    collect_output_text_from_event_fields(value, &mut text_out);
+    if let Some(delta) = value.get("delta") {
+        collect_response_output_text(delta, &mut text_out);
+    }
+    if let Some(response) = value.get("response") {
+        collect_response_output_text(response, &mut text_out);
+    }
+    if !text_out.trim().is_empty() {
+        append_output_text_raw(&mut synthesis.output_text, text_out.as_str());
+    }
+
+    if event_type == "response.completed" {
+        synthesis.saw_completed = true;
+    }
+}
+
+fn response_has_effective_output(response: &Value) -> bool {
+    let mut output_text = String::new();
+    if let Some(output) = response.get("output") {
+        collect_response_output_text(output, &mut output_text);
+    }
+    !output_text.trim().is_empty()
+}
+
+fn build_response_output_items_from_text(text: &str) -> Value {
+    Value::Array(vec![json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{
+            "type": "output_text",
+            "text": text
+        }]
+    })])
+}
+
+fn enrich_completed_response_with_sse_text(
+    completed_response: Value,
+    synthesis: &ResponsesSseSynthesis,
+) -> Value {
+    let mut response = completed_response;
+    let Some(response_obj) = response.as_object_mut() else {
+        return response;
+    };
+
+    if response_obj
+        .get("id")
+        .and_then(Value::as_str)
+        .is_none_or(|id| id.is_empty())
+    {
+        if let Some(id) = synthesis.id.as_ref() {
+            response_obj.insert("id".to_string(), Value::String(id.clone()));
+        }
+    }
+    if response_obj
+        .get("model")
+        .and_then(Value::as_str)
+        .is_none_or(|model| model.is_empty())
+    {
+        if let Some(model) = synthesis.model.as_ref() {
+            response_obj.insert("model".to_string(), Value::String(model.clone()));
+        }
+    }
+    if response_obj
+        .get("created")
+        .and_then(Value::as_i64)
+        .is_none()
+    {
+        if let Some(created) = synthesis.created {
+            response_obj.insert("created".to_string(), Value::Number(created.into()));
+        }
+    }
+    if !response_obj.contains_key("object") {
+        response_obj.insert("object".to_string(), Value::String("response".to_string()));
+    }
+    if !response_obj.contains_key("status") {
+        response_obj.insert("status".to_string(), Value::String("completed".to_string()));
+    }
+
+    if response_obj.get("usage").is_none() {
+        if let Some(usage) = synthesis.usage.as_ref() {
+            response_obj.insert("usage".to_string(), usage.clone());
+        }
+    }
+
+    let has_effective_output = response_has_effective_output(&Value::Object(response_obj.clone()));
+    if !has_effective_output && !synthesis.output_text.trim().is_empty() {
+        response_obj.insert(
+            "output".to_string(),
+            build_response_output_items_from_text(synthesis.output_text.as_str()),
+        );
+    }
+    if response_obj
+        .get("output_text")
+        .and_then(Value::as_str)
+        .is_none_or(|text| text.trim().is_empty())
+        && !synthesis.output_text.trim().is_empty()
+    {
+        response_obj.insert(
+            "output_text".to_string(),
+            Value::String(synthesis.output_text.trim().to_string()),
+        );
+    }
+
+    Value::Object(response_obj.clone())
+}
+
+fn synthesize_response_body_from_sse(synthesis: &ResponsesSseSynthesis) -> Option<Vec<u8>> {
+    if !synthesis.saw_completed || synthesis.output_text.trim().is_empty() {
+        return None;
+    }
+    let created = synthesis.created.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(0)
+    });
+    let mut out = serde_json::Map::new();
+    out.insert(
+        "id".to_string(),
+        Value::String(
+            synthesis
+                .id
+                .clone()
+                .unwrap_or_else(|| "resp_proxy".to_string()),
+        ),
+    );
+    out.insert("object".to_string(), Value::String("response".to_string()));
+    out.insert("created".to_string(), Value::Number(created.into()));
+    out.insert(
+        "model".to_string(),
+        Value::String(
+            synthesis
+                .model
+                .clone()
+                .unwrap_or_else(|| "gpt-5.3-codex".to_string()),
+        ),
+    );
+    out.insert("status".to_string(), Value::String("completed".to_string()));
+    out.insert(
+        "output".to_string(),
+        build_response_output_items_from_text(synthesis.output_text.trim()),
+    );
+    out.insert(
+        "output_text".to_string(),
+        Value::String(synthesis.output_text.trim().to_string()),
+    );
+    if let Some(usage) = synthesis.usage.clone() {
+        out.insert("usage".to_string(), usage);
+    }
+    serde_json::to_vec(&Value::Object(out)).ok()
+}
+
 fn synthesize_chat_completion_body(synthesis: &ChatCompletionSseSynthesis) -> Option<Vec<u8>> {
     if !synthesis.saw_terminal || synthesis.choices.is_empty() {
         return None;
@@ -800,7 +1027,28 @@ fn synthesize_chat_completion_body(synthesis: &ChatCompletionSseSynthesis) -> Op
     serde_json::to_vec(&Value::Object(out)).ok()
 }
 
-fn parse_sse_frame_json(lines: &[String]) -> Option<Value> {
+fn extract_sse_event_name(lines: &[String]) -> Option<String> {
+    for line in lines {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if let Some(rest) = trimmed.strip_prefix("event:") {
+            let event_name = rest.trim();
+            if !event_name.is_empty() {
+                return Some(event_name.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn normalize_sse_event_name_for_type(event_name: &str) -> Option<&str> {
+    let normalized = event_name.trim();
+    if normalized.is_empty() || normalized.eq_ignore_ascii_case("message") {
+        return None;
+    }
+    Some(normalized)
+}
+
+fn extract_sse_frame_payload(lines: &[String]) -> Option<String> {
     let mut data_lines = Vec::new();
     for line in lines {
         let trimmed = line.trim_end_matches(['\r', '\n']);
@@ -808,14 +1056,58 @@ fn parse_sse_frame_json(lines: &[String]) -> Option<Value> {
             data_lines.push(rest.trim_start().to_string());
         }
     }
-    if data_lines.is_empty() {
+    if !data_lines.is_empty() {
+        return Some(data_lines.join("\n"));
+    }
+
+    // 兼容非标准上游：有些网关会返回 JSONL（无 `data:` 前缀）。
+    let mut raw_lines = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with(':')
+            || trimmed.starts_with("event:")
+            || trimmed.starts_with("id:")
+            || trimmed.starts_with("retry:")
+        {
+            continue;
+        }
+        raw_lines.push(trimmed.to_string());
+    }
+    if raw_lines.is_empty() {
         return None;
     }
-    let data = data_lines.join("\n");
+    Some(raw_lines.join("\n"))
+}
+
+fn ensure_value_has_sse_event_type(lines: &[String], value: &mut Value) {
+    let Some(event_name) = extract_sse_event_name(lines) else {
+        return;
+    };
+    let Some(event_type) = normalize_sse_event_name_for_type(event_name.as_str()) else {
+        return;
+    };
+    let needs_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|kind| kind.trim().is_empty())
+        .unwrap_or(true);
+    if !needs_type {
+        return;
+    }
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("type".to_string(), Value::String(event_type.to_string()));
+    }
+}
+
+fn parse_sse_frame_json(lines: &[String]) -> Option<Value> {
+    let data = extract_sse_frame_payload(lines)?;
     if data.trim() == "[DONE]" {
         return None;
     }
-    serde_json::from_str::<Value>(&data).ok()
+    let mut value = serde_json::from_str::<Value>(&data).ok()?;
+    ensure_value_has_sse_event_type(lines, &mut value);
+    Some(value)
 }
 
 fn collect_non_stream_json_from_sse_bytes(
@@ -823,6 +1115,7 @@ fn collect_non_stream_json_from_sse_bytes(
 ) -> (Option<Vec<u8>>, UpstreamResponseUsage) {
     let mut usage = UpstreamResponseUsage::default();
     let mut completed_response: Option<Value> = None;
+    let mut responses_sse_synthesis = ResponsesSseSynthesis::default();
     let mut chat_completion_synthesis = ChatCompletionSseSynthesis::default();
     let mut frame_lines: Vec<String> = Vec::new();
 
@@ -846,6 +1139,7 @@ fn collect_non_stream_json_from_sse_bytes(
                 merge_usage(&mut usage, parsed_usage);
             }
             if let Some(value) = parse_sse_frame_json(&frame) {
+                update_responses_sse_synthesis(&mut responses_sse_synthesis, &value);
                 update_chat_completion_sse_synthesis(&mut chat_completion_synthesis, &value);
                 if value
                     .get("type")
@@ -868,6 +1162,7 @@ fn collect_non_stream_json_from_sse_bytes(
             merge_usage(&mut usage, parsed_usage);
         }
         if let Some(value) = parse_sse_frame_json(&frame_lines) {
+            update_responses_sse_synthesis(&mut responses_sse_synthesis, &value);
             update_chat_completion_sse_synthesis(&mut chat_completion_synthesis, &value);
             if value
                 .get("type")
@@ -882,7 +1177,9 @@ fn collect_non_stream_json_from_sse_bytes(
     }
 
     let body = completed_response
+        .map(|value| enrich_completed_response_with_sse_text(value, &responses_sse_synthesis))
         .and_then(|value| serde_json::to_vec(&value).ok())
+        .or_else(|| synthesize_response_body_from_sse(&responses_sse_synthesis))
         .or_else(|| synthesize_chat_completion_body(&chat_completion_synthesis));
     (body, usage)
 }
@@ -1054,6 +1351,181 @@ pub(super) fn respond_with_upstream(
                 upstream_error_hint: None,
             })
         }
+        super::ResponseAdapter::OpenAIChatCompletionsJson
+        | super::ResponseAdapter::OpenAIChatCompletionsSse
+        | super::ResponseAdapter::OpenAICompletionsJson
+        | super::ResponseAdapter::OpenAICompletionsSse => {
+            let status = StatusCode(upstream.status().as_u16());
+            let mut headers = Vec::new();
+            for (name, value) in upstream.headers().iter() {
+                let name_str = name.as_str();
+                if name_str.eq_ignore_ascii_case("transfer-encoding")
+                    || name_str.eq_ignore_ascii_case("content-length")
+                    || name_str.eq_ignore_ascii_case("connection")
+                    || name_str.eq_ignore_ascii_case("content-type")
+                {
+                    continue;
+                }
+                if let Ok(header) = Header::from_bytes(name_str.as_bytes(), value.as_bytes()) {
+                    headers.push(header);
+                }
+            }
+            let upstream_content_type = upstream
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.to_string());
+            let is_sse = upstream_content_type
+                .as_deref()
+                .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
+                .unwrap_or(false);
+            let use_openai_sse_adapter = matches!(
+                response_adapter,
+                super::ResponseAdapter::OpenAIChatCompletionsSse
+                    | super::ResponseAdapter::OpenAICompletionsSse
+            );
+
+            if use_openai_sse_adapter && is_stream && !is_sse {
+                log::warn!(
+                    "event=gateway_openai_stream_content_type_mismatch adapter={:?} upstream_content_type={}",
+                    response_adapter,
+                    upstream_content_type
+                        .as_deref()
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or("-")
+                );
+            }
+
+            if use_openai_sse_adapter && (is_stream || is_sse) && is_sse {
+                if let Ok(content_type_header) =
+                    Header::from_bytes(b"Content-Type".as_slice(), b"text/event-stream".as_slice())
+                {
+                    headers.push(content_type_header);
+                }
+                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+                let delivery_error = if response_adapter
+                    == super::ResponseAdapter::OpenAIChatCompletionsSse
+                {
+                    let response = Response::new(
+                        status,
+                        headers,
+                        OpenAIChatCompletionsSseReader::new(upstream, Arc::clone(&usage_collector)),
+                        None,
+                        None,
+                    );
+                    request.respond(response).err().map(|err| err.to_string())
+                } else {
+                    let response = Response::new(
+                        status,
+                        headers,
+                        OpenAICompletionsSseReader::new(upstream, Arc::clone(&usage_collector)),
+                        None,
+                        None,
+                    );
+                    request.respond(response).err().map(|err| err.to_string())
+                };
+                let collector = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let output_text_empty = collector
+                    .usage
+                    .output_text
+                    .as_deref()
+                    .map(str::trim)
+                    .is_none_or(str::is_empty);
+                if output_text_empty {
+                    log::warn!(
+                        "event=gateway_openai_stream_empty_output adapter={:?} terminal_seen={} terminal_error={} output_tokens={:?}",
+                        response_adapter,
+                        collector.saw_terminal,
+                        collector.terminal_error.as_deref().unwrap_or("-"),
+                        collector.usage.output_tokens
+                    );
+                }
+                return Ok(UpstreamResponseBridgeResult {
+                    usage: collector.usage,
+                    stream_terminal_seen: collector.saw_terminal,
+                    stream_terminal_error: collector.terminal_error,
+                    delivery_error,
+                    upstream_error_hint: None,
+                });
+            }
+
+            let upstream_body = upstream
+                .bytes()
+                .map_err(|err| format!("read upstream body failed: {err}"))?;
+            let mut usage = if is_sse {
+                let (_, parsed) = collect_non_stream_json_from_sse_bytes(upstream_body.as_ref());
+                parsed
+            } else {
+                UpstreamResponseUsage::default()
+            };
+            if let Ok(value) = serde_json::from_slice::<Value>(upstream_body.as_ref()) {
+                merge_usage(&mut usage, parse_usage_from_json(&value));
+            }
+            let (mut body, mut content_type) = match super::adapt_upstream_response(
+                response_adapter,
+                upstream_content_type.as_deref(),
+                upstream_body.as_ref(),
+            ) {
+                Ok(result) => result,
+                Err(err) => (
+                    serde_json::to_vec(&json!({
+                        "error": {
+                            "message": format!("response conversion failed: {err}"),
+                            "type": "server_error"
+                        }
+                    }))
+                    .unwrap_or_else(|_| {
+                        b"{\"error\":{\"message\":\"response conversion failed\",\"type\":\"server_error\"}}"
+                            .to_vec()
+                    }),
+                    "application/json",
+                ),
+            };
+            if use_openai_sse_adapter
+                && is_stream
+                && status.0 < 400
+                && !content_type.eq_ignore_ascii_case("text/event-stream")
+            {
+                if let Ok(mapped_json) = serde_json::from_slice::<Value>(body.as_ref()) {
+                    merge_usage(&mut usage, parse_usage_from_json(&mapped_json));
+                    body = if response_adapter == super::ResponseAdapter::OpenAIChatCompletionsSse {
+                        synthesize_chat_completion_sse_from_json(&mapped_json)
+                    } else {
+                        synthesize_completions_sse_from_json(&mapped_json)
+                    };
+                    content_type = "text/event-stream";
+                    log::warn!(
+                        "event=gateway_openai_stream_synthetic_sse adapter={:?} status={} upstream_content_type={}",
+                        response_adapter,
+                        status.0,
+                        upstream_content_type
+                            .as_deref()
+                            .filter(|value| !value.trim().is_empty())
+                            .unwrap_or("-")
+                    );
+                }
+            }
+            if let Ok(content_type_header) =
+                Header::from_bytes(b"Content-Type".as_slice(), content_type.as_bytes())
+            {
+                headers.push(content_type_header);
+            }
+            let len = Some(body.len());
+            let response = Response::new(status, headers, std::io::Cursor::new(body), len, None);
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            let upstream_error_hint =
+                extract_error_hint_from_body(status.0, upstream_body.as_ref());
+            Ok(UpstreamResponseBridgeResult {
+                usage,
+                stream_terminal_seen: true,
+                stream_terminal_error: None,
+                delivery_error,
+                upstream_error_hint,
+            })
+        }
         super::ResponseAdapter::AnthropicJson | super::ResponseAdapter::AnthropicSse => {
             let status = StatusCode(upstream.status().as_u16());
             let mut headers = Vec::new();
@@ -1160,6 +1632,440 @@ struct PassthroughSseCollector {
     terminal_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct OpenAIStreamMeta {
+    response_id: Option<String>,
+    model: Option<String>,
+    created: Option<i64>,
+}
+
+fn update_openai_stream_meta(meta: &mut OpenAIStreamMeta, value: &Value) {
+    let response = value.get("response");
+
+    if meta.response_id.is_none() {
+        meta.response_id = value
+            .get("response_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                response
+                    .and_then(|response| response.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_string)
+            });
+    }
+
+    if meta.model.is_none() {
+        meta.model = value
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                response
+                    .and_then(|response| response.get("model"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|model| !model.is_empty())
+                    .map(str::to_string)
+            });
+    }
+
+    if meta.created.is_none() {
+        meta.created = value
+            .get("created")
+            .and_then(Value::as_i64)
+            .or_else(|| value.get("created_at").and_then(Value::as_i64))
+            .or_else(|| {
+                response
+                    .and_then(|response| response.get("created"))
+                    .and_then(Value::as_i64)
+            })
+            .or_else(|| {
+                response
+                    .and_then(|response| response.get("created_at"))
+                    .and_then(Value::as_i64)
+            });
+    }
+}
+
+fn apply_openai_stream_meta_defaults(mapped: &mut Value, meta: &OpenAIStreamMeta) {
+    let Some(mapped_obj) = mapped.as_object_mut() else {
+        return;
+    };
+    if let Some(id) = meta.response_id.as_deref() {
+        let needs_id = mapped_obj
+            .get("id")
+            .and_then(Value::as_str)
+            .is_none_or(|current| current.is_empty());
+        if needs_id {
+            mapped_obj.insert("id".to_string(), Value::String(id.to_string()));
+        }
+    }
+    if let Some(model) = meta.model.as_deref() {
+        let needs_model = mapped_obj
+            .get("model")
+            .and_then(Value::as_str)
+            .is_none_or(|current| current.is_empty());
+        if needs_model {
+            mapped_obj.insert("model".to_string(), Value::String(model.to_string()));
+        }
+    }
+    if let Some(created) = meta.created {
+        let needs_created = mapped_obj
+            .get("created")
+            .and_then(Value::as_i64)
+            .is_none_or(|current| current == 0);
+        if needs_created {
+            mapped_obj.insert("created".to_string(), Value::Number(created.into()));
+        }
+    }
+}
+
+fn extract_openai_completed_output_text(value: &Value) -> Option<String> {
+    let response = value.get("response").unwrap_or(value);
+    let mut output_text = String::new();
+    collect_response_output_text(response, &mut output_text);
+    let trimmed = output_text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn map_chunk_has_chat_text(mapped: &Value) -> bool {
+    mapped
+        .get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                choice
+                    .get("delta")
+                    .and_then(Value::as_object)
+                    .and_then(|delta| delta.get("content"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| !content.is_empty())
+            })
+        })
+}
+
+fn map_chunk_has_completion_text(mapped: &Value) -> bool {
+    mapped
+        .get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                choice
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.is_empty())
+            })
+        })
+}
+
+fn is_function_call_output_item(value: &Value) -> bool {
+    value
+        .get("item")
+        .or_else(|| value.get("output_item"))
+        .and_then(|item| item.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|item_type| item_type == "function_call")
+}
+
+fn should_skip_chat_live_text_event(event_type: &str, value: &Value) -> bool {
+    match event_type {
+        // `done` / `content_part.*` 往往携带已聚合全文，直播模式再转发会导致重复拼接。
+        "response.output_text.done"
+        | "response.content_part.added"
+        | "response.content_part.delta"
+        | "response.content_part.done" => true,
+        // function_call 仍需透传；普通 message 的 output_item.* 文本在直播模式跳过避免重复。
+        "response.output_item.added" | "response.output_item.done" => {
+            !is_function_call_output_item(value)
+        }
+        _ => false,
+    }
+}
+
+fn should_skip_completion_live_text_event(event_type: &str, value: &Value) -> bool {
+    match event_type {
+        "response.output_text.done"
+        | "response.content_part.added"
+        | "response.content_part.delta"
+        | "response.content_part.done" => true,
+        "response.output_item.added" | "response.output_item.done" => {
+            !is_function_call_output_item(value)
+        }
+        _ => false,
+    }
+}
+
+fn normalize_chat_chunk_delta_role(mapped: &mut Value, role_emitted: &mut bool) {
+    let Some(choices) = mapped.get_mut("choices").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut saw_role = false;
+    for choice in choices {
+        let Some(delta) = choice.get_mut("delta").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        if delta.contains_key("role") {
+            if *role_emitted {
+                delta.remove("role");
+            } else {
+                saw_role = true;
+            }
+        }
+    }
+    if saw_role {
+        *role_emitted = true;
+    }
+}
+
+fn build_chat_fallback_content_chunk(meta: &OpenAIStreamMeta, content: &str) -> Value {
+    json!({
+        "id": meta.response_id.clone().unwrap_or_default(),
+        "object": "chat.completion.chunk",
+        "created": meta.created.unwrap_or(0),
+        "model": meta.model.clone().unwrap_or_default(),
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "role": "assistant",
+                "content": content
+            },
+            "finish_reason": Value::Null
+        }]
+    })
+}
+
+fn build_completion_fallback_text_chunk(meta: &OpenAIStreamMeta, text: &str) -> Value {
+    json!({
+        "id": meta.response_id.clone().unwrap_or_default(),
+        "object": "text_completion",
+        "created": meta.created.unwrap_or(0),
+        "model": meta.model.clone().unwrap_or_default(),
+        "choices": [{
+            "index": 0,
+            "text": text
+        }]
+    })
+}
+
+fn append_sse_data_frame(buffer: &mut String, payload: &Value) {
+    let data = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
+    buffer.push_str("data: ");
+    buffer.push_str(data.as_str());
+    buffer.push_str("\n\n");
+}
+
+fn collect_text_for_sse_delta(value: Option<&Value>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    let mut text = String::new();
+    collect_response_output_text(value, &mut text);
+    text.trim().to_string()
+}
+
+fn synthesize_chat_completion_sse_from_json(value: &Value) -> Vec<u8> {
+    let Some(root) = value.as_object() else {
+        return b"data: [DONE]\n\n".to_vec();
+    };
+    if root.contains_key("error") {
+        let mut out = String::new();
+        append_sse_data_frame(&mut out, value);
+        out.push_str("data: [DONE]\n\n");
+        return out.into_bytes();
+    }
+
+    let id = root
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
+    let created = root.get("created").and_then(Value::as_i64).unwrap_or(0);
+    let model = root
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
+
+    let mut out = String::new();
+    let mut finish_reason = Value::String("stop".to_string());
+    let usage = root.get("usage").cloned();
+
+    let first_choice = root
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .cloned();
+    if let Some(choice) = first_choice {
+        if let Some(reason) = choice.get("finish_reason") {
+            if !reason.is_null() {
+                finish_reason = reason.clone();
+            }
+        }
+
+        let mut delta = serde_json::Map::new();
+        delta.insert("role".to_string(), Value::String("assistant".to_string()));
+        let message = choice.get("message");
+        let content = collect_text_for_sse_delta(message.and_then(|msg| msg.get("content")));
+        if !content.is_empty() {
+            delta.insert("content".to_string(), Value::String(content));
+        }
+        if let Some(tool_calls) = message
+            .and_then(|msg| msg.get("tool_calls"))
+            .and_then(Value::as_array)
+            .filter(|tool_calls| !tool_calls.is_empty())
+        {
+            delta.insert("tool_calls".to_string(), Value::Array(tool_calls.to_vec()));
+        }
+        if delta.get("content").is_some() || delta.get("tool_calls").is_some() {
+            let content_chunk = json!({
+                "id": id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": Value::Object(delta),
+                    "finish_reason": Value::Null
+                }]
+            });
+            append_sse_data_frame(&mut out, &content_chunk);
+        }
+    }
+
+    let mut finish_chunk = json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": finish_reason
+        }]
+    });
+    if let Some(usage) = usage {
+        if let Some(finish_obj) = finish_chunk.as_object_mut() {
+            finish_obj.insert("usage".to_string(), usage);
+        }
+    }
+    append_sse_data_frame(&mut out, &finish_chunk);
+    out.push_str("data: [DONE]\n\n");
+    out.into_bytes()
+}
+
+fn synthesize_completions_sse_from_json(value: &Value) -> Vec<u8> {
+    let Some(root) = value.as_object() else {
+        return b"data: [DONE]\n\n".to_vec();
+    };
+    if root.contains_key("error") {
+        let mut out = String::new();
+        append_sse_data_frame(&mut out, value);
+        out.push_str("data: [DONE]\n\n");
+        return out.into_bytes();
+    }
+
+    let id = root
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
+    let created = root.get("created").and_then(Value::as_i64).unwrap_or(0);
+    let model = root
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
+
+    let mut out = String::new();
+    let mut finish_reason = Value::String("stop".to_string());
+    let usage = root.get("usage").cloned();
+
+    let first_choice = root
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .cloned();
+    if let Some(choice) = first_choice {
+        if let Some(reason) = choice.get("finish_reason") {
+            if !reason.is_null() {
+                finish_reason = reason.clone();
+            }
+        }
+        let text = collect_text_for_sse_delta(choice.get("text"));
+        if !text.is_empty() {
+            let content_chunk = json!({
+                "id": id,
+                "object": "text_completion",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "text": text,
+                    "finish_reason": Value::Null
+                }]
+            });
+            append_sse_data_frame(&mut out, &content_chunk);
+        }
+    }
+
+    let mut finish_chunk = json!({
+        "id": id,
+        "object": "text_completion",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "text": "",
+            "finish_reason": finish_reason
+        }]
+    });
+    if let Some(usage) = usage {
+        if let Some(finish_obj) = finish_chunk.as_object_mut() {
+            finish_obj.insert("usage".to_string(), usage);
+        }
+    }
+    append_sse_data_frame(&mut out, &finish_chunk);
+    out.push_str("data: [DONE]\n\n");
+    out.into_bytes()
+}
+
+fn collector_output_text_trimmed(
+    usage_collector: &Arc<Mutex<PassthroughSseCollector>>,
+) -> Option<String> {
+    usage_collector
+        .lock()
+        .ok()
+        .and_then(|collector| collector.usage.output_text.clone())
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+fn mark_collector_terminal_success(usage_collector: &Arc<Mutex<PassthroughSseCollector>>) {
+    if let Ok(mut collector) = usage_collector.lock() {
+        collector.saw_terminal = true;
+        collector.terminal_error = None;
+    }
+}
+
 struct PassthroughSseUsageReader {
     upstream: BufReader<reqwest::blocking::Response>,
     pending_frame_lines: Vec<String>,
@@ -1231,6 +2137,382 @@ impl PassthroughSseUsageReader {
 }
 
 impl Read for PassthroughSseUsageReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let read = self.out_cursor.read(buf)?;
+            if read > 0 {
+                return Ok(read);
+            }
+            if self.finished {
+                return Ok(0);
+            }
+            self.out_cursor = Cursor::new(self.next_chunk()?);
+        }
+    }
+}
+
+struct OpenAICompletionsSseReader {
+    upstream: BufReader<reqwest::blocking::Response>,
+    pending_frame_lines: Vec<String>,
+    out_cursor: Cursor<Vec<u8>>,
+    usage_collector: Arc<Mutex<PassthroughSseCollector>>,
+    stream_meta: OpenAIStreamMeta,
+    emitted_text_delta: bool,
+    finished: bool,
+}
+
+impl OpenAICompletionsSseReader {
+    fn new(
+        upstream: reqwest::blocking::Response,
+        usage_collector: Arc<Mutex<PassthroughSseCollector>>,
+    ) -> Self {
+        Self {
+            upstream: BufReader::new(upstream),
+            pending_frame_lines: Vec::new(),
+            out_cursor: Cursor::new(Vec::new()),
+            usage_collector,
+            stream_meta: OpenAIStreamMeta::default(),
+            emitted_text_delta: false,
+            finished: false,
+        }
+    }
+
+    fn update_usage_from_frame(&self, lines: &[String]) {
+        let inspection = inspect_sse_frame(lines);
+        if inspection.usage.is_none() && inspection.terminal.is_none() {
+            return;
+        }
+        if let Ok(mut collector) = self.usage_collector.lock() {
+            if let Some(parsed) = inspection.usage {
+                merge_usage(&mut collector.usage, parsed);
+            }
+            if let Some(terminal) = inspection.terminal {
+                collector.saw_terminal = true;
+                if let SseTerminal::Err(message) = terminal {
+                    collector.terminal_error = Some(message);
+                }
+            }
+        }
+    }
+
+    fn try_build_completion_fallback_stream(&mut self, include_done: bool) -> Option<Vec<u8>> {
+        if self.emitted_text_delta {
+            return None;
+        }
+        let fallback_text = collector_output_text_trimmed(&self.usage_collector)?;
+        let mut fallback_chunk =
+            build_completion_fallback_text_chunk(&self.stream_meta, fallback_text.as_str());
+        apply_openai_stream_meta_defaults(&mut fallback_chunk, &self.stream_meta);
+        let payload = serde_json::to_string(&fallback_chunk).unwrap_or_else(|_| "{}".to_string());
+        let mut out = format!("data: {payload}\n\n");
+        self.emitted_text_delta = true;
+        if include_done {
+            out.push_str("data: [DONE]\n\n");
+            self.finished = true;
+        }
+        mark_collector_terminal_success(&self.usage_collector);
+        Some(out.into_bytes())
+    }
+
+    fn map_frame_to_completions_sse(&mut self, lines: &[String]) -> Vec<u8> {
+        let Some(data) = extract_sse_frame_payload(lines) else {
+            return Vec::new();
+        };
+        if data.trim() == "[DONE]" {
+            if let Some(fallback) = self.try_build_completion_fallback_stream(true) {
+                return fallback;
+            }
+            self.finished = true;
+            return b"data: [DONE]\n\n".to_vec();
+        }
+
+        let Some(value) = parse_sse_frame_json(lines) else {
+            return Vec::new();
+        };
+        update_openai_stream_meta(&mut self.stream_meta, &value);
+        let event_type = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if event_type == "response.created" {
+            return Vec::new();
+        }
+
+        let mut out = String::new();
+        if event_type == "response.completed" && !self.emitted_text_delta {
+            if let Some(fallback_text) = extract_openai_completed_output_text(&value) {
+                let mut fallback_chunk =
+                    build_completion_fallback_text_chunk(&self.stream_meta, fallback_text.as_str());
+                apply_openai_stream_meta_defaults(&mut fallback_chunk, &self.stream_meta);
+                let payload =
+                    serde_json::to_string(&fallback_chunk).unwrap_or_else(|_| "{}".to_string());
+                out.push_str(format!("data: {payload}\n\n").as_str());
+                self.emitted_text_delta = true;
+            }
+        }
+
+        if should_skip_completion_live_text_event(event_type, &value) {
+            return out.into_bytes();
+        }
+
+        if let Some(mut mapped) = super::convert_openai_completions_stream_chunk(&value) {
+            apply_openai_stream_meta_defaults(&mut mapped, &self.stream_meta);
+            if map_chunk_has_completion_text(&mapped) {
+                self.emitted_text_delta = true;
+            }
+            let payload = serde_json::to_string(&mapped).unwrap_or_else(|_| "{}".to_string());
+            out.push_str(format!("data: {payload}\n\n").as_str());
+        }
+
+        if event_type == "response.completed" {
+            out.push_str("data: [DONE]\n\n");
+            self.finished = true;
+        }
+
+        out.into_bytes()
+    }
+
+    fn next_chunk(&mut self) -> std::io::Result<Vec<u8>> {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = self.upstream.read_line(&mut line)?;
+            if read == 0 {
+                if !self.pending_frame_lines.is_empty() {
+                    let frame = std::mem::take(&mut self.pending_frame_lines);
+                    self.update_usage_from_frame(&frame);
+                    let mapped = self.map_frame_to_completions_sse(&frame);
+                    if !mapped.is_empty() {
+                        return Ok(mapped);
+                    }
+                }
+                if let Some(fallback) = self.try_build_completion_fallback_stream(true) {
+                    return Ok(fallback);
+                }
+                if let Ok(mut collector) = self.usage_collector.lock() {
+                    if !collector.saw_terminal {
+                        if self.emitted_text_delta {
+                            collector.saw_terminal = true;
+                        } else {
+                            collector.terminal_error.get_or_insert_with(|| {
+                                "stream disconnected before completion".to_string()
+                            });
+                        }
+                    }
+                }
+                self.finished = true;
+                return Ok(Vec::new());
+            }
+            if line == "\n" || line == "\r\n" {
+                if self.pending_frame_lines.is_empty() {
+                    continue;
+                }
+                let frame = std::mem::take(&mut self.pending_frame_lines);
+                self.update_usage_from_frame(&frame);
+                let mapped = self.map_frame_to_completions_sse(&frame);
+                if !mapped.is_empty() {
+                    return Ok(mapped);
+                }
+                continue;
+            }
+            self.pending_frame_lines.push(line.clone());
+        }
+    }
+}
+
+impl Read for OpenAICompletionsSseReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let read = self.out_cursor.read(buf)?;
+            if read > 0 {
+                return Ok(read);
+            }
+            if self.finished {
+                return Ok(0);
+            }
+            self.out_cursor = Cursor::new(self.next_chunk()?);
+        }
+    }
+}
+
+struct OpenAIChatCompletionsSseReader {
+    upstream: BufReader<reqwest::blocking::Response>,
+    pending_frame_lines: Vec<String>,
+    out_cursor: Cursor<Vec<u8>>,
+    usage_collector: Arc<Mutex<PassthroughSseCollector>>,
+    stream_meta: OpenAIStreamMeta,
+    emitted_text_delta: bool,
+    emitted_assistant_role: bool,
+    finished: bool,
+}
+
+impl OpenAIChatCompletionsSseReader {
+    fn new(
+        upstream: reqwest::blocking::Response,
+        usage_collector: Arc<Mutex<PassthroughSseCollector>>,
+    ) -> Self {
+        Self {
+            upstream: BufReader::new(upstream),
+            pending_frame_lines: Vec::new(),
+            out_cursor: Cursor::new(Vec::new()),
+            usage_collector,
+            stream_meta: OpenAIStreamMeta::default(),
+            emitted_text_delta: false,
+            emitted_assistant_role: false,
+            finished: false,
+        }
+    }
+
+    fn update_usage_from_frame(&self, lines: &[String]) {
+        let inspection = inspect_sse_frame(lines);
+        if inspection.usage.is_none() && inspection.terminal.is_none() {
+            return;
+        }
+        if let Ok(mut collector) = self.usage_collector.lock() {
+            if let Some(parsed) = inspection.usage {
+                merge_usage(&mut collector.usage, parsed);
+            }
+            if let Some(terminal) = inspection.terminal {
+                collector.saw_terminal = true;
+                if let SseTerminal::Err(message) = terminal {
+                    collector.terminal_error = Some(message);
+                }
+            }
+        }
+    }
+
+    fn try_build_chat_fallback_stream(&mut self, include_done: bool) -> Option<Vec<u8>> {
+        if self.emitted_text_delta {
+            return None;
+        }
+        let fallback_content = collector_output_text_trimmed(&self.usage_collector)?;
+        let mut fallback_chunk =
+            build_chat_fallback_content_chunk(&self.stream_meta, fallback_content.as_str());
+        apply_openai_stream_meta_defaults(&mut fallback_chunk, &self.stream_meta);
+        normalize_chat_chunk_delta_role(&mut fallback_chunk, &mut self.emitted_assistant_role);
+        let payload = serde_json::to_string(&fallback_chunk).unwrap_or_else(|_| "{}".to_string());
+        let mut out = format!("data: {payload}\n\n");
+        self.emitted_text_delta = true;
+        if include_done {
+            out.push_str("data: [DONE]\n\n");
+            self.finished = true;
+        }
+        mark_collector_terminal_success(&self.usage_collector);
+        Some(out.into_bytes())
+    }
+
+    fn map_frame_to_chat_completions_sse(&mut self, lines: &[String]) -> Vec<u8> {
+        let Some(data) = extract_sse_frame_payload(lines) else {
+            return Vec::new();
+        };
+        if data.trim() == "[DONE]" {
+            if let Some(fallback) = self.try_build_chat_fallback_stream(true) {
+                return fallback;
+            }
+            self.finished = true;
+            return b"data: [DONE]\n\n".to_vec();
+        }
+
+        let Some(value) = parse_sse_frame_json(lines) else {
+            return Vec::new();
+        };
+        update_openai_stream_meta(&mut self.stream_meta, &value);
+        let event_type = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if event_type == "response.created" {
+            return Vec::new();
+        }
+
+        let mut out = String::new();
+        if event_type == "response.completed" && !self.emitted_text_delta {
+            if let Some(fallback_content) = extract_openai_completed_output_text(&value) {
+                let mut fallback_chunk =
+                    build_chat_fallback_content_chunk(&self.stream_meta, fallback_content.as_str());
+                apply_openai_stream_meta_defaults(&mut fallback_chunk, &self.stream_meta);
+                normalize_chat_chunk_delta_role(
+                    &mut fallback_chunk,
+                    &mut self.emitted_assistant_role,
+                );
+                let payload =
+                    serde_json::to_string(&fallback_chunk).unwrap_or_else(|_| "{}".to_string());
+                out.push_str(format!("data: {payload}\n\n").as_str());
+                self.emitted_text_delta = true;
+            }
+        }
+
+        if should_skip_chat_live_text_event(event_type, &value) {
+            return out.into_bytes();
+        }
+
+        if let Some(mut mapped) = super::convert_openai_chat_stream_chunk(&value) {
+            apply_openai_stream_meta_defaults(&mut mapped, &self.stream_meta);
+            normalize_chat_chunk_delta_role(&mut mapped, &mut self.emitted_assistant_role);
+            if map_chunk_has_chat_text(&mapped) {
+                self.emitted_text_delta = true;
+            }
+            let payload = serde_json::to_string(&mapped).unwrap_or_else(|_| "{}".to_string());
+            out.push_str(format!("data: {payload}\n\n").as_str());
+        }
+
+        if event_type == "response.completed" {
+            out.push_str("data: [DONE]\n\n");
+            self.finished = true;
+        }
+
+        out.into_bytes()
+    }
+
+    fn next_chunk(&mut self) -> std::io::Result<Vec<u8>> {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = self.upstream.read_line(&mut line)?;
+            if read == 0 {
+                if !self.pending_frame_lines.is_empty() {
+                    let frame = std::mem::take(&mut self.pending_frame_lines);
+                    self.update_usage_from_frame(&frame);
+                    let mapped = self.map_frame_to_chat_completions_sse(&frame);
+                    if !mapped.is_empty() {
+                        return Ok(mapped);
+                    }
+                }
+                if let Some(fallback) = self.try_build_chat_fallback_stream(true) {
+                    return Ok(fallback);
+                }
+                if let Ok(mut collector) = self.usage_collector.lock() {
+                    if !collector.saw_terminal {
+                        if self.emitted_text_delta {
+                            collector.saw_terminal = true;
+                        } else {
+                            collector.terminal_error.get_or_insert_with(|| {
+                                "stream disconnected before completion".to_string()
+                            });
+                        }
+                    }
+                }
+                self.finished = true;
+                return Ok(Vec::new());
+            }
+            if line == "\n" || line == "\r\n" {
+                if self.pending_frame_lines.is_empty() {
+                    continue;
+                }
+                let frame = std::mem::take(&mut self.pending_frame_lines);
+                self.update_usage_from_frame(&frame);
+                let mapped = self.map_frame_to_chat_completions_sse(&frame);
+                if !mapped.is_empty() {
+                    return Ok(mapped);
+                }
+                continue;
+            }
+            self.pending_frame_lines.push(line.clone());
+        }
+    }
+}
+
+impl Read for OpenAIChatCompletionsSseReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         loop {
             let read = self.out_cursor.read(buf)?;
@@ -1439,25 +2721,28 @@ impl AnthropicSseReader {
                     let mut extracted_output_text = String::new();
                     collect_response_output_text(response, &mut extracted_output_text);
                     if !extracted_output_text.trim().is_empty() {
-                        append_output_text(
-                            &mut self.state.output_text,
-                            extracted_output_text.as_str(),
-                        );
-                        self.ensure_message_start(&mut out);
-                        self.ensure_text_block_start(&mut out);
-                        let text_index = self.state.text_block_index.unwrap_or(0);
-                        append_sse_event(
-                            &mut out,
-                            "content_block_delta",
-                            &json!({
-                                "type": "content_block_delta",
-                                "index": text_index,
-                                "delta": {
-                                    "type": "text_delta",
-                                    "text": extracted_output_text
-                                }
-                            }),
-                        );
+                        // 若已在流式过程中发过文本增量，不再重复把 completed 全文再发一遍。
+                        if self.state.text_block_index.is_none() {
+                            append_output_text(
+                                &mut self.state.output_text,
+                                extracted_output_text.as_str(),
+                            );
+                            self.ensure_message_start(&mut out);
+                            self.ensure_text_block_start(&mut out);
+                            let text_index = self.state.text_block_index.unwrap_or(0);
+                            append_sse_event(
+                                &mut out,
+                                "content_block_delta",
+                                &json!({
+                                    "type": "content_block_delta",
+                                    "index": text_index,
+                                    "delta": {
+                                        "type": "text_delta",
+                                        "text": extracted_output_text
+                                    }
+                                }),
+                            );
+                        }
                         self.state.stop_reason.get_or_insert("end_turn");
                     }
                 }

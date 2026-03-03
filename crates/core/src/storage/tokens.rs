@@ -58,11 +58,7 @@ impl Storage {
         Ok(())
     }
 
-    pub fn touch_token_refresh_attempt(
-        &self,
-        account_id: &str,
-        attempt_ts: i64,
-    ) -> Result<()> {
+    pub fn touch_token_refresh_attempt(&self, account_id: &str, attempt_ts: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE tokens
              SET last_refresh_attempt_at = ?1

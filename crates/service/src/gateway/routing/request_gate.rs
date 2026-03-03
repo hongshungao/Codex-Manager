@@ -115,11 +115,18 @@ fn gate_key(key_id: &str, path: &str, model: Option<&str>) -> String {
         "{}|{}|{}",
         key_id.trim(),
         path.trim(),
-        model.map(str::trim).filter(|v| !v.is_empty()).unwrap_or("-")
+        model
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .unwrap_or("-")
     )
 }
 
-pub(crate) fn request_gate_lock(key_id: &str, path: &str, model: Option<&str>) -> Arc<RequestGateLock> {
+pub(crate) fn request_gate_lock(
+    key_id: &str,
+    path: &str,
+    model: Option<&str>,
+) -> Arc<RequestGateLock> {
     let lock = REQUEST_GATE_LOCKS.get_or_init(|| Mutex::new(RequestGateLockTable::default()));
     let mut table = crate::lock_utils::lock_recover(lock, "request_gate_locks");
     let now = now_ts();
@@ -169,4 +176,3 @@ fn request_gate_test_guard() -> std::sync::MutexGuard<'static, ()> {
 #[cfg(test)]
 #[path = "tests/request_gate_tests.rs"]
 mod tests;
-

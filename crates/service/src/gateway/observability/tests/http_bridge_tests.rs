@@ -1,6 +1,10 @@
 use super::{
-    collect_non_stream_json_from_sse_bytes, inspect_sse_frame, parse_usage_from_json,
-    parse_usage_from_sse_frame,
+    apply_openai_stream_meta_defaults, collect_non_stream_json_from_sse_bytes,
+    extract_openai_completed_output_text, inspect_sse_frame, normalize_chat_chunk_delta_role,
+    parse_sse_frame_json, parse_usage_from_json, parse_usage_from_sse_frame,
+    should_skip_chat_live_text_event, should_skip_completion_live_text_event,
+    synthesize_chat_completion_sse_from_json, synthesize_completions_sse_from_json,
+    OpenAIStreamMeta,
 };
 use serde_json::json;
 
@@ -228,4 +232,275 @@ fn collect_non_stream_json_from_sse_bytes_synthesizes_chat_completion_chunks() {
     assert_eq!(usage.input_tokens, Some(7));
     assert_eq!(usage.output_tokens, Some(3));
     assert_eq!(usage.total_tokens, Some(10));
+}
+
+#[test]
+fn extract_openai_completed_output_text_reads_completed_output_message_text() {
+    let payload = json!({
+        "type": "response.completed",
+        "response": {
+            "output": [{
+                "type": "message",
+                "content": [{
+                    "type": "output_text",
+                    "text": "hello from completed"
+                }]
+            }]
+        }
+    });
+    let text = extract_openai_completed_output_text(&payload).unwrap_or_default();
+    assert_eq!(text, "hello from completed");
+}
+
+#[test]
+fn apply_openai_stream_meta_defaults_fills_missing_chunk_meta() {
+    let mut mapped = json!({
+        "id": "",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "",
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "hello"},
+            "finish_reason": null
+        }]
+    });
+    let meta = OpenAIStreamMeta {
+        response_id: Some("resp_meta_1".to_string()),
+        model: Some("gpt-5.3-codex".to_string()),
+        created: Some(1700000123),
+    };
+    apply_openai_stream_meta_defaults(&mut mapped, &meta);
+    assert_eq!(mapped["id"], "resp_meta_1");
+    assert_eq!(mapped["model"], "gpt-5.3-codex");
+    assert_eq!(mapped["created"], 1700000123);
+}
+
+#[test]
+fn collect_non_stream_json_from_sse_bytes_backfills_response_output_from_deltas() {
+    let sse = concat!(
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_delta_1\",\"created\":2,\"model\":\"gpt-5.3-codex\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_delta_1\",\"delta\":\"hello \"}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_delta_1\",\"delta\":\"world\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_delta_1\",\"created\":2,\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2,\"total_tokens\":11}}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let (body, usage) = collect_non_stream_json_from_sse_bytes(sse.as_bytes());
+    let body = body.expect("synthesized response json");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("parse synthesized body");
+    assert_eq!(value["id"], "resp_delta_1");
+    assert_eq!(value["object"], "response");
+    assert_eq!(
+        value["output"][0]["content"][0]["text"],
+        serde_json::Value::String("hello world".to_string())
+    );
+    assert_eq!(
+        value["output_text"],
+        serde_json::Value::String("hello world".to_string())
+    );
+    assert_eq!(usage.input_tokens, Some(9));
+    assert_eq!(usage.output_tokens, Some(2));
+    assert_eq!(usage.total_tokens, Some(11));
+}
+
+#[test]
+fn parse_sse_frame_json_infers_type_from_event_name() {
+    let frame_lines = vec![
+        "event: response.output_text.delta\n".to_string(),
+        r#"data: {"response_id":"resp_evt_1","delta":"hello"}"#.to_string(),
+        "\n".to_string(),
+    ];
+    let value = parse_sse_frame_json(&frame_lines).expect("parse sse frame");
+    assert_eq!(value["type"], "response.output_text.delta");
+    assert_eq!(value["delta"], "hello");
+}
+
+#[test]
+fn collect_non_stream_json_from_sse_bytes_supports_event_only_type_frames() {
+    let sse = concat!(
+        "event: response.output_text.delta\n",
+        "data: {\"response_id\":\"resp_evt_1\",\"delta\":\"hello \"}\n\n",
+        "event: response.output_text.delta\n",
+        "data: {\"response_id\":\"resp_evt_1\",\"delta\":\"world\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"response\":{\"id\":\"resp_evt_1\",\"created\":3,\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let (body, usage) = collect_non_stream_json_from_sse_bytes(sse.as_bytes());
+    let body = body.expect("synthesized response json");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("parse synthesized body");
+    assert_eq!(value["id"], "resp_evt_1");
+    assert_eq!(
+        value["output_text"],
+        serde_json::Value::String("hello world".to_string())
+    );
+    assert_eq!(usage.input_tokens, Some(3));
+    assert_eq!(usage.output_tokens, Some(2));
+    assert_eq!(usage.total_tokens, Some(5));
+}
+
+#[test]
+fn parse_sse_frame_json_supports_json_lines_without_data_prefix() {
+    let frame_lines = vec![
+        r#"{"type":"response.output_text.delta","response_id":"resp_jsonl_1","delta":"hi"}"#
+            .to_string(),
+        "\n".to_string(),
+    ];
+    let value = parse_sse_frame_json(&frame_lines).expect("parse jsonl frame");
+    assert_eq!(value["type"], "response.output_text.delta");
+    assert_eq!(value["delta"], "hi");
+}
+
+#[test]
+fn synthesize_chat_completion_sse_from_json_emits_done_stream() {
+    let payload = json!({
+        "id": "chatcmpl_test_1",
+        "object": "chat.completion",
+        "created": 1772519000,
+        "model": "gpt-5.3-codex",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "OK"
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 7,
+            "completion_tokens": 1,
+            "total_tokens": 8
+        }
+    });
+    let sse = synthesize_chat_completion_sse_from_json(&payload);
+    let sse_text = String::from_utf8_lossy(&sse);
+    assert!(sse_text.contains("chat.completion.chunk"));
+    assert!(sse_text.contains("data: [DONE]"));
+
+    let (json_body, usage) = collect_non_stream_json_from_sse_bytes(&sse);
+    let json_body = json_body.expect("synthesized chat json");
+    let value: serde_json::Value = serde_json::from_slice(&json_body).expect("parse chat json");
+    assert_eq!(value["object"], "chat.completion");
+    assert_eq!(value["choices"][0]["message"]["content"], "OK");
+    assert_eq!(usage.output_tokens, Some(1));
+}
+
+#[test]
+fn synthesize_completions_sse_from_json_emits_done_stream() {
+    let payload = json!({
+        "id": "cmpl_test_1",
+        "object": "text_completion",
+        "created": 1772519001,
+        "model": "gpt-5.3-codex",
+        "choices": [{
+            "index": 0,
+            "text": "Hello",
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 6,
+            "completion_tokens": 1,
+            "total_tokens": 7
+        }
+    });
+    let sse = synthesize_completions_sse_from_json(&payload);
+    let sse_text = String::from_utf8_lossy(&sse);
+    assert!(sse_text.contains("text_completion"));
+    assert!(sse_text.contains("\"text\":\"Hello\""));
+    assert!(sse_text.contains("\"finish_reason\":\"stop\""));
+    assert!(sse_text.contains("data: [DONE]"));
+}
+
+#[test]
+fn live_chat_stream_skips_done_and_message_item_text_events() {
+    let output_text_done = json!({
+        "type": "response.output_text.done",
+        "text": "full text"
+    });
+    assert!(should_skip_chat_live_text_event(
+        "response.output_text.done",
+        &output_text_done
+    ));
+
+    let message_item_done = json!({
+        "type": "response.output_item.done",
+        "item": {
+            "type": "message",
+            "content": [{"type":"output_text","text":"full text"}]
+        }
+    });
+    assert!(should_skip_chat_live_text_event(
+        "response.output_item.done",
+        &message_item_done
+    ));
+
+    let function_item_done = json!({
+        "type": "response.output_item.done",
+        "item": {
+            "type": "function_call",
+            "name": "tool",
+            "arguments": "{}"
+        }
+    });
+    assert!(!should_skip_chat_live_text_event(
+        "response.output_item.done",
+        &function_item_done
+    ));
+}
+
+#[test]
+fn live_completion_stream_skips_done_and_message_item_text_events() {
+    let output_text_done = json!({
+        "type": "response.output_text.done",
+        "text": "full text"
+    });
+    assert!(should_skip_completion_live_text_event(
+        "response.output_text.done",
+        &output_text_done
+    ));
+
+    let message_item_added = json!({
+        "type": "response.output_item.added",
+        "item": {
+            "type": "message",
+            "content": [{"type":"output_text","text":"full text"}]
+        }
+    });
+    assert!(should_skip_completion_live_text_event(
+        "response.output_item.added",
+        &message_item_added
+    ));
+
+    let function_item_added = json!({
+        "type": "response.output_item.added",
+        "item": {
+            "type": "function_call",
+            "name": "tool",
+            "arguments": "{}"
+        }
+    });
+    assert!(!should_skip_completion_live_text_event(
+        "response.output_item.added",
+        &function_item_added
+    ));
+}
+
+#[test]
+fn normalize_chat_chunk_delta_role_keeps_first_and_removes_later() {
+    let mut role_emitted = false;
+    let mut first = json!({
+        "object":"chat.completion.chunk",
+        "choices":[{"index":0,"delta":{"role":"assistant","content":"你"}}]
+    });
+    normalize_chat_chunk_delta_role(&mut first, &mut role_emitted);
+    assert_eq!(first["choices"][0]["delta"]["role"], "assistant");
+    assert!(role_emitted);
+
+    let mut second = json!({
+        "object":"chat.completion.chunk",
+        "choices":[{"index":0,"delta":{"role":"assistant","content":"好"}}]
+    });
+    normalize_chat_chunk_delta_role(&mut second, &mut role_emitted);
+    assert!(second["choices"][0]["delta"].get("role").is_none());
+    assert_eq!(second["choices"][0]["delta"]["content"], "好");
 }

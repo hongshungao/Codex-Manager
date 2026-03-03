@@ -2,8 +2,8 @@ use crate::apikey_profile::{
     normalize_protocol_type, normalize_static_headers_json, normalize_upstream_base_url,
     profile_from_protocol,
 };
-use crate::storage_helpers::open_storage;
 use crate::reasoning_effort::normalize_reasoning_effort;
+use crate::storage_helpers::open_storage;
 
 pub(crate) fn update_api_key_model(
     key_id: &str,

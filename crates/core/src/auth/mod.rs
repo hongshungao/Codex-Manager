@@ -108,7 +108,12 @@ pub fn extract_workspace_id(token: &str) -> Option<String> {
         .ok()?;
     let json = std::str::from_utf8(&decoded).ok()?;
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
-    let keys = ["workspace_id", "chatgpt_account_id", "organization_id", "org_id"];
+    let keys = [
+        "workspace_id",
+        "chatgpt_account_id",
+        "organization_id",
+        "org_id",
+    ];
     for key in keys {
         if let Some(v) = value.get(key).and_then(|v| v.as_str()) {
             if !v.trim().is_empty() {
@@ -202,10 +207,7 @@ pub fn build_authorize_url(
         ("response_type", "code".to_string()),
         ("client_id", client_id.to_string()),
         ("redirect_uri", redirect_uri.to_string()),
-        (
-            "scope",
-            "openid profile email offline_access".to_string(),
-        ),
+        ("scope", "openid profile email offline_access".to_string()),
         ("code_challenge", code_challenge.to_string()),
         ("code_challenge_method", "S256".to_string()),
         ("id_token_add_organizations", "true".to_string()),
@@ -251,11 +253,17 @@ pub fn token_exchange_body_token_exchange(id_token: &str, client_id: &str) -> St
 }
 
 pub fn device_usercode_url(issuer: &str) -> String {
-    format!("{}/api/accounts/deviceauth/usercode", issuer.trim_end_matches('/'))
+    format!(
+        "{}/api/accounts/deviceauth/usercode",
+        issuer.trim_end_matches('/')
+    )
 }
 
 pub fn device_token_url(issuer: &str) -> String {
-    format!("{}/api/accounts/deviceauth/token", issuer.trim_end_matches('/'))
+    format!(
+        "{}/api/accounts/deviceauth/token",
+        issuer.trim_end_matches('/')
+    )
 }
 
 pub fn device_verification_url(issuer: &str) -> String {

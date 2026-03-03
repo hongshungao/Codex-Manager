@@ -1,6 +1,6 @@
 use codexmanager_core::storage::Storage;
 
-use crate::account_availability::{Availability, evaluate_snapshot};
+use crate::account_availability::{evaluate_snapshot, Availability};
 use crate::account_status::set_account_status;
 
 #[allow(dead_code)]

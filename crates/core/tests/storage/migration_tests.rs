@@ -130,9 +130,15 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
         .expect("count 025 migration");
     assert_eq!(applied_025, 1);
 
-    assert!(!storage.has_column("accounts", "note").expect("check accounts.note"));
-    assert!(!storage.has_column("accounts", "tags").expect("check accounts.tags"));
-    assert!(!storage.has_column("accounts", "workspace_name").expect("check accounts.workspace_name"));
+    assert!(!storage
+        .has_column("accounts", "note")
+        .expect("check accounts.note"));
+    assert!(!storage
+        .has_column("accounts", "tags")
+        .expect("check accounts.tags"));
+    assert!(!storage
+        .has_column("accounts", "workspace_name")
+        .expect("check accounts.workspace_name"));
     assert!(storage
         .has_column("request_token_stats", "total_tokens")
         .expect("check request_token_stats.total_tokens"));
@@ -395,4 +401,3 @@ fn accounts_sort_index_migration_adds_sort_updated_at_index() {
     assert!(index_sql.contains("sort ASC"));
     assert!(index_sql.contains("updated_at DESC"));
 }
-

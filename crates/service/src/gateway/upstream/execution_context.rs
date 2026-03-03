@@ -145,5 +145,3 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
         );
     }
 }
-
-

@@ -42,4 +42,3 @@ pub(crate) fn is_available(snap: Option<&UsageSnapshotRecord>) -> bool {
 #[cfg(test)]
 #[path = "tests/account_availability_tests.rs"]
 mod tests;
-

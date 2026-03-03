@@ -86,7 +86,10 @@ fn rotate_to_manual_preferred_account(candidates: &mut [(Account, Token)]) -> bo
     let Some(account_id) = state.manual_preferred_account_id.as_deref() else {
         return false;
     };
-    let Some(index) = candidates.iter().position(|(account, _)| account.id.eq(account_id)) else {
+    let Some(index) = candidates
+        .iter()
+        .position(|(account, _)| account.id.eq(account_id))
+    else {
         // 中文注释：手动指定账号已不在可用候选池（可能用尽/不可用），自动回退到常规轮转。
         state.manual_preferred_account_id = None;
         return false;
@@ -363,11 +366,7 @@ fn enforce_capacity_pair<T: Copy, U: Copy>(
 
 fn find_oldest_key<T: Copy>(map: &HashMap<String, RouteStateEntry<T>>) -> Option<String> {
     map.iter()
-        .min_by(|(ka, ea), (kb, eb)| {
-            ea.last_seen
-                .cmp(&eb.last_seen)
-                .then_with(|| ka.cmp(kb))
-        })
+        .min_by(|(ka, ea), (kb, eb)| ea.last_seen.cmp(&eb.last_seen).then_with(|| ka.cmp(kb)))
         .map(|(key, _)| key.clone())
 }
 
@@ -375,7 +374,10 @@ fn key_model_key(key_id: &str, model: Option<&str>) -> String {
     format!(
         "{}|{}",
         key_id.trim(),
-        model.map(str::trim).filter(|v| !v.is_empty()).unwrap_or("-")
+        model
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .unwrap_or("-")
     )
 }
 
@@ -384,7 +386,10 @@ pub(super) fn reload_from_env() {
     let mode = parse_route_mode(raw.as_str()).unwrap_or(ROUTE_MODE_ORDERED);
     ROUTE_MODE.store(mode, Ordering::Relaxed);
     ROUTE_HEALTH_P2C_ENABLED.store(
-        env_bool_or(ROUTE_HEALTH_P2C_ENABLED_ENV, DEFAULT_ROUTE_HEALTH_P2C_ENABLED),
+        env_bool_or(
+            ROUTE_HEALTH_P2C_ENABLED_ENV,
+            DEFAULT_ROUTE_HEALTH_P2C_ENABLED,
+        ),
         Ordering::Relaxed,
     );
     ROUTE_HEALTH_P2C_ORDERED_WINDOW.store(
@@ -495,4 +500,3 @@ fn route_strategy_test_guard() -> std::sync::MutexGuard<'static, ()> {
 #[cfg(test)]
 #[path = "tests/route_hint_tests.rs"]
 mod tests;
-

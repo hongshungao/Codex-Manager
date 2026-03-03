@@ -32,7 +32,8 @@ pub(super) fn load_active_api_key(
         if debug {
             log::warn!(
                 "event=gateway_auth_disabled path={} status=403 key_id={}",
-                request_url, api_key.id
+                request_url,
+                api_key.id
             );
         }
         return Err(super::LocalValidationError::new(403, "api key disabled"));

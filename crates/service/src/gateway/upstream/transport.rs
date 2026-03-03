@@ -60,14 +60,15 @@ pub(super) fn send_upstream_request(
     } else {
         None
     };
-    let mut derived_conversation_id = if !strip_session_affinity && incoming_conversation_id.is_none() {
-        super::header_profile::derive_sticky_conversation_id_from_headers_with_remote(
-            incoming_headers,
-            remote.copied(),
-        )
-    } else {
-        None
-    };
+    let mut derived_conversation_id =
+        if !strip_session_affinity && incoming_conversation_id.is_none() {
+            super::header_profile::derive_sticky_conversation_id_from_headers_with_remote(
+                incoming_headers,
+                remote.copied(),
+            )
+        } else {
+            None
+        };
 
     // 中文注释：参考 CLIProxyAPI 的 claude 兼容逻辑：当 prompt_cache_key 存在时，
     // 需要将 Session_id/Conversation_id 与其对齐，否则更容易触发 upstream challenge。
@@ -81,8 +82,7 @@ pub(super) fn send_upstream_request(
         .chatgpt_account_id
         .as_deref()
         .or_else(|| account.workspace_id.as_deref());
-    let include_account_id =
-        !compact_headers_mode && !super::super::is_openai_api_base(target_url);
+    let include_account_id = !compact_headers_mode && !super::super::is_openai_api_base(target_url);
     let header_input = super::header_profile::CodexUpstreamHeaderInput {
         auth_token,
         account_id,
@@ -131,5 +131,3 @@ pub(super) fn send_upstream_request(
     super::super::metrics::record_gateway_upstream_attempt(duration_ms, result.is_err());
     result
 }
-
-

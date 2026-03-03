@@ -1,11 +1,6 @@
 use codexmanager_core::storage::{now_ts, Event, Storage};
 
-pub(crate) fn set_account_status(
-    storage: &Storage,
-    account_id: &str,
-    status: &str,
-    reason: &str,
-) {
+pub(crate) fn set_account_status(storage: &Storage, account_id: &str, status: &str, reason: &str) {
     if matches!(
         storage.update_account_status_if_changed(account_id, status),
         Ok(true)

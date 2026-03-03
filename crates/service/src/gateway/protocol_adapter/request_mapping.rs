@@ -7,6 +7,375 @@ const DEFAULT_ANTHROPIC_REASONING: &str = "high";
 const DEFAULT_ANTHROPIC_INSTRUCTIONS: &str =
     "You are Codex, a coding assistant that responds clearly and safely.";
 const MAX_ANTHROPIC_TOOLS: usize = 16;
+const DEFAULT_COMPLETIONS_PROMPT: &str = "Complete this:";
+const DEFAULT_OPENAI_REASONING: &str = "medium";
+
+fn normalize_openai_role_for_responses(role: &str) -> Option<&'static str> {
+    match role {
+        "system" | "developer" => Some("system"),
+        "user" => Some("user"),
+        "assistant" => Some("assistant"),
+        "tool" => Some("tool"),
+        _ => None,
+    }
+}
+
+fn extract_openai_message_content_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(items) => {
+            let mut out = String::new();
+            for item in items {
+                if let Some(text) = item.as_str() {
+                    out.push_str(text);
+                    continue;
+                }
+                let Some(item_obj) = item.as_object() else {
+                    continue;
+                };
+                let item_type = item_obj
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                match item_type {
+                    "text" | "input_text" | "output_text" => {
+                        if let Some(text) = item_obj.get("text").and_then(Value::as_str) {
+                            out.push_str(text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            out
+        }
+        Value::Null => String::new(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
+fn normalize_openai_chat_messages_for_responses(messages: &[Value]) -> Vec<Value> {
+    let mut normalized = Vec::new();
+    for message in messages {
+        let Some(message_obj) = message.as_object() else {
+            continue;
+        };
+        let Some(role) = message_obj.get("role").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(normalized_role) = normalize_openai_role_for_responses(role) else {
+            continue;
+        };
+        let mut out = serde_json::Map::new();
+        out.insert(
+            "role".to_string(),
+            Value::String(normalized_role.to_string()),
+        );
+
+        if normalized_role == "tool" {
+            if let Some(call_id) = message_obj
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                out.insert(
+                    "tool_call_id".to_string(),
+                    Value::String(call_id.to_string()),
+                );
+            }
+        }
+
+        if let Some(content) = message_obj.get("content") {
+            let content_text = extract_openai_message_content_text(content);
+            if !content_text.trim().is_empty() {
+                out.insert("content".to_string(), Value::String(content_text));
+            }
+        }
+
+        if normalized_role == "assistant" {
+            if let Some(tool_calls) = message_obj.get("tool_calls").and_then(Value::as_array) {
+                let mapped_calls = tool_calls
+                    .iter()
+                    .filter_map(|tool_call| {
+                        let tool_obj = tool_call.as_object()?;
+                        let id = tool_obj
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or("call_0");
+                        let fn_obj = tool_obj.get("function").and_then(Value::as_object)?;
+                        let name = fn_obj
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())?;
+                        let arguments = fn_obj
+                            .get("arguments")
+                            .map(|value| {
+                                if let Some(text) = value.as_str() {
+                                    text.to_string()
+                                } else {
+                                    serde_json::to_string(value)
+                                        .unwrap_or_else(|_| "{}".to_string())
+                                }
+                            })
+                            .unwrap_or_else(|| "{}".to_string());
+                        Some(json!({
+                            "id": id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": arguments
+                            }
+                        }))
+                    })
+                    .collect::<Vec<_>>();
+                if !mapped_calls.is_empty() {
+                    out.insert("tool_calls".to_string(), Value::Array(mapped_calls));
+                }
+            }
+        }
+
+        normalized.push(Value::Object(out));
+    }
+    normalized
+}
+
+fn map_openai_chat_tools_to_responses(obj: &serde_json::Map<String, Value>) -> Option<Vec<Value>> {
+    let tools = obj.get("tools")?.as_array()?;
+    let mut out = Vec::new();
+    for tool in tools {
+        let Some(tool_obj) = tool.as_object() else {
+            continue;
+        };
+        let tool_type = tool_obj
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if tool_type != "function" {
+            out.push(tool.clone());
+            continue;
+        }
+        let Some(function) = tool_obj.get("function").and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(name) = function
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let mut mapped = serde_json::Map::new();
+        mapped.insert("type".to_string(), Value::String("function".to_string()));
+        mapped.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(description) = function.get("description") {
+            mapped.insert("description".to_string(), description.clone());
+        }
+        if let Some(parameters) = function.get("parameters") {
+            mapped.insert("parameters".to_string(), parameters.clone());
+        }
+        if let Some(strict) = function.get("strict") {
+            mapped.insert("strict".to_string(), strict.clone());
+        }
+        out.push(Value::Object(mapped));
+    }
+    Some(out)
+}
+
+fn map_openai_chat_tool_choice_to_responses(value: &Value) -> Option<Value> {
+    if let Some(raw) = value.as_str() {
+        return Some(Value::String(raw.to_string()));
+    }
+    let obj = value.as_object()?;
+    let tool_type = obj.get("type").and_then(Value::as_str).unwrap_or_default();
+    if tool_type != "function" {
+        return Some(value.clone());
+    }
+    let name = obj
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())?;
+    Some(json!({
+        "type": "function",
+        "name": name
+    }))
+}
+
+pub(super) fn convert_openai_chat_completions_request(
+    body: &[u8],
+) -> Result<(Vec<u8>, bool), String> {
+    let payload: Value = serde_json::from_slice(body)
+        .map_err(|_| "invalid chat.completions request json".to_string())?;
+    let Some(obj) = payload.as_object() else {
+        return Err("chat.completions request body must be an object".to_string());
+    };
+
+    let stream = obj.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let source_messages = obj
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "chat.completions messages field is required".to_string())?;
+    let normalized_messages = normalize_openai_chat_messages_for_responses(source_messages);
+    let (instructions, input_items) =
+        convert_chat_messages_to_responses_input(&normalized_messages)?;
+
+    let mut out = serde_json::Map::new();
+    if let Some(model) = obj.get("model") {
+        out.insert("model".to_string(), model.clone());
+    }
+    out.insert(
+        "instructions".to_string(),
+        Value::String(instructions.unwrap_or_default()),
+    );
+    out.insert("input".to_string(), Value::Array(input_items));
+    out.insert("stream".to_string(), Value::Bool(stream));
+    out.insert("store".to_string(), Value::Bool(false));
+    // 对齐 CPA：
+    // - /v1/chat/completions 与 /v1/completions 的 stream 语义默认跟随客户端；
+    // - stream_passthrough 默认 false，仅当客户端显式传 true 时才透传其 stream=false。
+    let stream_passthrough = obj
+        .get("stream_passthrough")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    out.insert(
+        "stream_passthrough".to_string(),
+        Value::Bool(stream_passthrough),
+    );
+
+    let reasoning_effort = obj
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .and_then(crate::reasoning_effort::normalize_reasoning_effort)
+        .or_else(|| {
+            obj.get("reasoning")
+                .and_then(|reasoning| reasoning.get("effort"))
+                .and_then(Value::as_str)
+                .and_then(crate::reasoning_effort::normalize_reasoning_effort)
+        })
+        .unwrap_or(DEFAULT_OPENAI_REASONING)
+        .to_string();
+    out.insert(
+        "reasoning".to_string(),
+        json!({
+            "effort": reasoning_effort
+        }),
+    );
+
+    let parallel_tool_calls = obj
+        .get("parallel_tool_calls")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    out.insert(
+        "parallel_tool_calls".to_string(),
+        Value::Bool(parallel_tool_calls),
+    );
+    out.insert(
+        "include".to_string(),
+        Value::Array(vec![Value::String(
+            "reasoning.encrypted_content".to_string(),
+        )]),
+    );
+
+    if let Some(tools) = map_openai_chat_tools_to_responses(obj) {
+        if !tools.is_empty() {
+            out.insert("tools".to_string(), Value::Array(tools));
+        }
+    }
+    if let Some(tool_choice) = obj
+        .get("tool_choice")
+        .and_then(map_openai_chat_tool_choice_to_responses)
+    {
+        out.insert("tool_choice".to_string(), tool_choice);
+    }
+    if let Some(text) = obj.get("response_format").cloned() {
+        out.insert("text".to_string(), json!({ "format": text }));
+    }
+
+    serde_json::to_vec(&Value::Object(out))
+        .map(|bytes| (bytes, stream))
+        .map_err(|err| format!("convert chat.completions request failed: {err}"))
+}
+
+fn stringify_completion_prompt(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        Value::Array(items) => {
+            let parts = items
+                .iter()
+                .filter_map(stringify_completion_prompt)
+                .collect::<Vec<_>>();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join("\n"))
+            }
+        }
+        Value::Null => None,
+        other => serde_json::to_string(other).ok(),
+    }
+}
+
+pub(super) fn convert_openai_completions_request(body: &[u8]) -> Result<(Vec<u8>, bool), String> {
+    let payload: Value =
+        serde_json::from_slice(body).map_err(|_| "invalid completions request json".to_string())?;
+    let Some(obj) = payload.as_object() else {
+        return Err("completions request body must be an object".to_string());
+    };
+
+    let stream = obj.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let prompt = obj
+        .get("prompt")
+        .and_then(stringify_completion_prompt)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_COMPLETIONS_PROMPT.to_string());
+
+    let mut out = serde_json::Map::new();
+    if let Some(model) = obj.get("model") {
+        out.insert("model".to_string(), model.clone());
+    }
+    out.insert(
+        "messages".to_string(),
+        json!([
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]),
+    );
+
+    const COPIED_KEYS: [&str; 12] = [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "stream",
+        "logprobs",
+        "top_logprobs",
+        "n",
+        "user",
+        "stream_passthrough",
+    ];
+    for key in COPIED_KEYS {
+        if let Some(value) = obj.get(key) {
+            out.insert(key.to_string(), value.clone());
+        }
+    }
+
+    serde_json::to_vec(&Value::Object(out))
+        .map(|bytes| (bytes, stream))
+        .map_err(|err| format!("convert completions request failed: {err}"))
+}
 
 pub(super) fn convert_anthropic_messages_request(body: &[u8]) -> Result<(Vec<u8>, bool), String> {
     let payload: Value =

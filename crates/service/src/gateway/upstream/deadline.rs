@@ -56,4 +56,3 @@ pub(super) fn send_timeout(deadline: Option<Instant>, is_stream: bool) -> Option
 #[cfg(test)]
 #[path = "tests/deadline_tests.rs"]
 mod tests;
-

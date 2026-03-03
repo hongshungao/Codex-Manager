@@ -39,10 +39,7 @@ fn codex_header_profile_sets_required_headers_for_stream() {
         find_header(&headers, "Accept").as_deref(),
         Some("text/event-stream")
     );
-    assert_eq!(
-        find_header(&headers, "Version").as_deref(),
-        Some("0.101.0")
-    );
+    assert_eq!(find_header(&headers, "Version").as_deref(), Some("0.101.0"));
     assert_eq!(
         find_header(&headers, "Openai-Beta").as_deref(),
         Some("responses=experimental")

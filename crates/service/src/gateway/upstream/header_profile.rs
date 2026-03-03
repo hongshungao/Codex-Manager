@@ -142,7 +142,10 @@ pub(crate) fn build_codex_upstream_headers(
             headers.push(("Chatgpt-Account-Id".to_string(), account_id.to_string()));
         }
     }
-    if let Some(cookie) = input.upstream_cookie.filter(|value| !value.trim().is_empty()) {
+    if let Some(cookie) = input
+        .upstream_cookie
+        .filter(|value| !value.trim().is_empty())
+    {
         headers.push(("Cookie".to_string(), cookie.to_string()));
     }
     headers
@@ -189,7 +192,9 @@ fn stable_session_id_from_material(value: &str) -> String {
 
 fn derive_sticky_id_from_material(key_material: Option<&str>, salt: &str) -> Option<String> {
     let key_material = key_material?;
-    Some(stable_session_id_from_material(&format!("{salt}:{key_material}")))
+    Some(stable_session_id_from_material(&format!(
+        "{salt}:{key_material}"
+    )))
 }
 
 fn derive_sticky_id_from_material_with_remote(

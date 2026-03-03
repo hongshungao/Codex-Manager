@@ -9,10 +9,7 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-async fn serve_proxy_on_listener(
-    listener: tokio::net::TcpListener,
-    app: Router,
-) -> io::Result<()> {
+async fn serve_proxy_on_listener(listener: tokio::net::TcpListener, app: Router) -> io::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(wait_for_shutdown_signal())
         .await

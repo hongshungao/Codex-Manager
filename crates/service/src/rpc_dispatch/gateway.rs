@@ -42,7 +42,9 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                 "cpaNoCookieHeaderModeEnabled": crate::gateway::set_cpa_no_cookie_header_mode(enabled),
             }))
         }
-        "gateway/backgroundTasks/get" => super::as_json(crate::usage_refresh::background_tasks_settings()),
+        "gateway/backgroundTasks/get" => {
+            super::as_json(crate::usage_refresh::background_tasks_settings())
+        }
         "gateway/backgroundTasks/set" => {
             let patch = crate::usage_refresh::BackgroundTasksSettingsPatch {
                 usage_polling_enabled: super::bool_param(req, "usagePollingEnabled")

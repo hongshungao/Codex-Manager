@@ -91,9 +91,12 @@ fn drop_incoming_header_keeps_session_affinity_for_primary_attempt() {
 
 #[test]
 fn drop_incoming_header_for_failover_strips_session_affinity() {
-    assert!(should_drop_incoming_header_for_failover("ChatGPT-Account-Id"));
+    assert!(should_drop_incoming_header_for_failover(
+        "ChatGPT-Account-Id"
+    ));
     assert!(should_drop_incoming_header_for_failover("session_id"));
-    assert!(should_drop_incoming_header_for_failover("x-codex-turn-state"));
+    assert!(should_drop_incoming_header_for_failover(
+        "x-codex-turn-state"
+    ));
     assert!(!should_drop_incoming_header_for_failover("Content-Type"));
 }
-

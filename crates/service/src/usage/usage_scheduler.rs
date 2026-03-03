@@ -107,7 +107,9 @@ fn next_poll_delay(
     } else {
         sampled_jitter.min(jitter_cap)
     };
-    base_delay.checked_add(bounded_jitter).unwrap_or(Duration::MAX)
+    base_delay
+        .checked_add(bounded_jitter)
+        .unwrap_or(Duration::MAX)
 }
 
 #[allow(dead_code)]
@@ -152,4 +154,3 @@ pub(crate) fn parse_interval_secs(raw: Option<&str>, default_secs: u64, min_secs
 #[cfg(test)]
 #[path = "tests/usage_scheduler_tests.rs"]
 mod tests;
-

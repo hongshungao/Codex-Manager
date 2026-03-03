@@ -130,4 +130,3 @@ pub(super) fn maybe_respond_local_count_tokens(
 #[cfg(test)]
 #[path = "tests/local_count_tokens_tests.rs"]
 mod tests;
-

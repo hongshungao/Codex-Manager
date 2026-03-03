@@ -129,4 +129,3 @@ pub(crate) fn refresh_access_token(
 #[cfg(test)]
 #[path = "tests/usage_http_tests.rs"]
 mod tests;
-

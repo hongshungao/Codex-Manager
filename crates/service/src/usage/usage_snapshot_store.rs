@@ -4,7 +4,8 @@ use codexmanager_core::storage::{now_ts, Storage, UsageSnapshotRecord};
 use codexmanager_core::usage::parse_usage_snapshot;
 
 const DEFAULT_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT: usize = 200;
-const USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT_ENV: &str = "CODEXMANAGER_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT";
+const USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT_ENV: &str =
+    "CODEXMANAGER_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT";
 
 fn usage_snapshots_retain_per_account() -> usize {
     std::env::var(USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT_ENV)

@@ -62,7 +62,10 @@ pub(super) fn send_models_request(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_default();
-        return Err(format!("models upstream failed: status={} body={}", status, body));
+        return Err(format!(
+            "models upstream failed: status={} body={}",
+            status, body
+        ));
     }
     let content_type = response
         .headers()
@@ -73,5 +76,8 @@ pub(super) fn send_models_request(
         return Err("models upstream returned text/html (cloudflare challenge)".to_string());
     }
 
-    response.bytes().map(|v| v.to_vec()).map_err(|e| e.to_string())
+    response
+        .bytes()
+        .map(|v| v.to_vec())
+        .map_err(|e| e.to_string())
 }

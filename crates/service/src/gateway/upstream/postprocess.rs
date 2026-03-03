@@ -6,9 +6,7 @@ use tiny_http::Request;
 use super::fallback_branch::{handle_openai_fallback_branch, FallbackBranchResult};
 use super::outcome::{decide_upstream_outcome, UpstreamOutcomeDecision};
 use super::retry::{retry_with_alternate_path, AltPathRetryResult};
-use super::stateless_retry::{
-    retry_stateless_then_optional_alt, StatelessRetryResult,
-};
+use super::stateless_retry::{retry_stateless_then_optional_alt, StatelessRetryResult};
 
 pub(super) enum PostRetryFlowDecision {
     Failover,
@@ -191,9 +189,8 @@ where
             status_code,
             message,
         },
-        UpstreamOutcomeDecision::RespondUpstream => PostRetryFlowDecision::RespondUpstream(upstream),
+        UpstreamOutcomeDecision::RespondUpstream => {
+            PostRetryFlowDecision::RespondUpstream(upstream)
+        }
     }
 }
-
-
-

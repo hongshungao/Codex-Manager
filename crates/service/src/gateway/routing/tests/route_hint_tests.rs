@@ -72,7 +72,10 @@ fn candidate_list() -> Vec<(Account, Token)> {
 }
 
 fn account_ids(candidates: &[(Account, Token)]) -> Vec<String> {
-    candidates.iter().map(|(account, _)| account.id.clone()).collect()
+    candidates
+        .iter()
+        .map(|(account, _)| account.id.clone())
+        .collect()
 }
 
 #[test]
@@ -87,7 +90,11 @@ fn defaults_to_ordered_strategy() {
     apply_route_strategy(&mut candidates, "gk_1", Some("gpt-5.3-codex"));
     assert_eq!(
         account_ids(&candidates),
-        vec!["acc-a".to_string(), "acc-b".to_string(), "acc-c".to_string()]
+        vec![
+            "acc-a".to_string(),
+            "acc-b".to_string(),
+            "acc-c".to_string()
+        ]
     );
 
     if let Some(value) = previous {
@@ -110,21 +117,33 @@ fn balanced_round_robin_rotates_start_by_key_and_model() {
     apply_route_strategy(&mut first, "gk_1", Some("gpt-5.3-codex"));
     assert_eq!(
         account_ids(&first),
-        vec!["acc-a".to_string(), "acc-b".to_string(), "acc-c".to_string()]
+        vec![
+            "acc-a".to_string(),
+            "acc-b".to_string(),
+            "acc-c".to_string()
+        ]
     );
 
     let mut second = candidate_list();
     apply_route_strategy(&mut second, "gk_1", Some("gpt-5.3-codex"));
     assert_eq!(
         account_ids(&second),
-        vec!["acc-b".to_string(), "acc-c".to_string(), "acc-a".to_string()]
+        vec![
+            "acc-b".to_string(),
+            "acc-c".to_string(),
+            "acc-a".to_string()
+        ]
     );
 
     let mut third = candidate_list();
     apply_route_strategy(&mut third, "gk_1", Some("gpt-5.3-codex"));
     assert_eq!(
         account_ids(&third),
-        vec!["acc-c".to_string(), "acc-a".to_string(), "acc-b".to_string()]
+        vec![
+            "acc-c".to_string(),
+            "acc-a".to_string(),
+            "acc-b".to_string()
+        ]
     );
 
     if let Some(value) = previous {
@@ -171,7 +190,10 @@ fn balanced_round_robin_isolated_by_key_and_model() {
 fn set_route_strategy_accepts_aliases_and_reports_canonical_name() {
     let _guard = route_strategy_test_guard();
     clear_route_state_for_tests();
-    assert_eq!(set_route_strategy("ordered").expect("set ordered"), "ordered");
+    assert_eq!(
+        set_route_strategy("ordered").expect("set ordered"),
+        "ordered"
+    );
     assert_eq!(
         set_route_strategy("round_robin").expect("set rr alias"),
         "balanced"

@@ -32,4 +32,3 @@ pub(crate) fn write_recover<'a, T>(lock: &'a RwLock<T>, name: &str) -> RwLockWri
         }
     }
 }
-

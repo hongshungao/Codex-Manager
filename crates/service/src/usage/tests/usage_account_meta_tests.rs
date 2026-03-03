@@ -5,7 +5,11 @@ use super::{
 use codexmanager_core::storage::{now_ts, Account, Storage};
 use std::collections::HashMap;
 
-fn build_account(id: &str, workspace_id: Option<&str>, chatgpt_account_id: Option<&str>) -> Account {
+fn build_account(
+    id: &str,
+    workspace_id: Option<&str>,
+    chatgpt_account_id: Option<&str>,
+) -> Account {
     Account {
         id: id.to_string(),
         label: format!("label-{id}"),
@@ -22,7 +26,10 @@ fn build_account(id: &str, workspace_id: Option<&str>, chatgpt_account_id: Optio
 
 #[test]
 fn clean_header_value_trims_and_drops_empty() {
-    assert_eq!(clean_header_value(Some(" abc ".to_string())), Some("abc".to_string()));
+    assert_eq!(
+        clean_header_value(Some(" abc ".to_string())),
+        Some("abc".to_string())
+    );
     assert_eq!(clean_header_value(Some("   ".to_string())), None);
     assert_eq!(clean_header_value(None), None);
 }
@@ -47,7 +54,10 @@ fn build_workspace_map_falls_back_to_chatgpt_account_id() {
         .expect("insert");
 
     let workspace_map = build_workspace_map(&storage);
-    assert_eq!(workspace_map.get("acc-2").cloned(), Some(Some("chatgpt-2".to_string())));
+    assert_eq!(
+        workspace_map.get("acc-2").cloned(),
+        Some(Some("chatgpt-2".to_string()))
+    );
 }
 
 #[test]

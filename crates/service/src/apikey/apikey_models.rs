@@ -29,7 +29,8 @@ pub(crate) fn read_model_options(refresh_remote: bool) -> Result<ApiKeyModelList
 }
 
 fn save_model_options_cache(items: &[ModelOption]) -> Result<(), String> {
-    let storage = storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let storage =
+        storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let items_json = serde_json::to_string(items).map_err(|e| e.to_string())?;
     storage
         .upsert_model_options_cache(MODEL_CACHE_SCOPE_DEFAULT, &items_json, now_ts())
@@ -37,7 +38,8 @@ fn save_model_options_cache(items: &[ModelOption]) -> Result<(), String> {
 }
 
 fn read_cached_model_options() -> Result<Vec<ModelOption>, String> {
-    let storage = storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let storage =
+        storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let Some(cache) = storage
         .get_model_options_cache(MODEL_CACHE_SCOPE_DEFAULT)
         .map_err(|e| e.to_string())?

@@ -75,7 +75,10 @@ fn storage_can_find_token_and_account_by_account_id() {
         .expect("find token")
         .expect("token exists");
     assert_eq!(found_token.account_id, "acc-find-1");
-    assert_eq!(found_token.api_key_access_token.as_deref(), Some("api-key-find"));
+    assert_eq!(
+        found_token.api_key_access_token.as_deref(),
+        Some("api-key-find")
+    );
 
     assert!(storage
         .find_account_by_id("missing-account")
@@ -393,7 +396,10 @@ fn request_logs_support_prefixed_query_filters() {
         .list_request_logs(Some("timeout"), 100)
         .expect("fallback fuzzy query");
     assert_eq!(fallback_filtered.len(), 1);
-    assert_eq!(fallback_filtered[0].error.as_deref(), Some("upstream timeout"));
+    assert_eq!(
+        fallback_filtered[0].error.as_deref(),
+        Some("upstream timeout")
+    );
 }
 
 #[test]
@@ -497,7 +503,9 @@ fn insert_request_log_with_token_stat_writes_both_tables_in_one_call() {
         token_stat_error
     );
 
-    let logs = storage.list_request_logs(Some("key:=key-atomic"), 10).expect("list logs");
+    let logs = storage
+        .list_request_logs(Some("key:=key-atomic"), 10)
+        .expect("list logs");
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].key_id.as_deref(), Some("key-atomic"));
     assert_eq!(logs[0].input_tokens, Some(10));
@@ -688,4 +696,3 @@ fn storage_can_roundtrip_api_key_secret() {
         .expect("load removed secret");
     assert!(removed.is_none());
 }
-

@@ -6,7 +6,9 @@ use crate::apikey_profile::{
     profile_from_protocol,
 };
 use crate::reasoning_effort::normalize_reasoning_effort_owned;
-use crate::storage_helpers::{generate_key_id, generate_platform_key, hash_platform_key, open_storage};
+use crate::storage_helpers::{
+    generate_key_id, generate_platform_key, hash_platform_key, open_storage,
+};
 
 pub(crate) fn create_api_key(
     name: Option<String>,

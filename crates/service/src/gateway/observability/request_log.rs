@@ -117,23 +117,23 @@ pub(super) fn write_request_log(
     // 记录请求最终结果（而非内部重试明细），保证 UI 一次请求只展示一条记录。
     let (request_log_id, token_stat_error) = match storage.insert_request_log_with_token_stat(
         &RequestLog {
-        key_id: key_id.map(|v| v.to_string()),
-        account_id: account_id.map(|v| v.to_string()),
-        request_path: request_path.to_string(),
-        method: method.to_string(),
-        model: model.map(|v| v.to_string()),
-        reasoning_effort: reasoning_effort.map(|v| v.to_string()),
-        upstream_url: upstream_url.map(|v| v.to_string()),
-        status_code: status_code.map(|v| i64::from(v)),
-        input_tokens: None,
-        cached_input_tokens: None,
-        output_tokens: None,
-        total_tokens: None,
-        reasoning_output_tokens: None,
-        estimated_cost_usd: None,
-        error: error.map(|v| v.to_string()),
-        created_at,
-    },
+            key_id: key_id.map(|v| v.to_string()),
+            account_id: account_id.map(|v| v.to_string()),
+            request_path: request_path.to_string(),
+            method: method.to_string(),
+            model: model.map(|v| v.to_string()),
+            reasoning_effort: reasoning_effort.map(|v| v.to_string()),
+            upstream_url: upstream_url.map(|v| v.to_string()),
+            status_code: status_code.map(|v| i64::from(v)),
+            input_tokens: None,
+            cached_input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_output_tokens: None,
+            estimated_cost_usd: None,
+            error: error.map(|v| v.to_string()),
+            created_at,
+        },
         &RequestTokenStat {
             request_log_id: 0,
             key_id: key_id.map(|v| v.to_string()),
@@ -182,4 +182,3 @@ pub(super) fn write_request_log(
 #[cfg(test)]
 #[path = "tests/request_log_tests.rs"]
 mod tests;
-

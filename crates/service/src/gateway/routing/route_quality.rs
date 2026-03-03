@@ -46,7 +46,8 @@ pub(crate) fn record_route_quality(account_id: &str, status_code: u16) {
         }
         record.updated_at = now;
         let delta = route_health_delta(status_code);
-        record.health_score = (record.health_score + delta).clamp(MIN_ROUTE_HEALTH_SCORE, MAX_ROUTE_HEALTH_SCORE);
+        record.health_score =
+            (record.health_score + delta).clamp(MIN_ROUTE_HEALTH_SCORE, MAX_ROUTE_HEALTH_SCORE);
         match status_code {
             200..=299 => {
                 record.success_2xx = record.success_2xx.saturating_add(1);
@@ -148,4 +149,3 @@ fn route_health_delta(status_code: u16) -> i32 {
 #[cfg(test)]
 #[path = "tests/route_quality_tests.rs"]
 mod tests;
-

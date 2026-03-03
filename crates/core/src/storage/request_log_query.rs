@@ -2,8 +2,14 @@
 pub(super) enum RequestLogQuery {
     All,
     GlobalLike(String),
-    FieldLike { column: &'static str, pattern: String },
-    FieldExact { column: &'static str, value: String },
+    FieldLike {
+        column: &'static str,
+        pattern: String,
+    },
+    FieldExact {
+        column: &'static str,
+        value: String,
+    },
     StatusExact(i64),
     StatusRange(i64, i64),
 }
@@ -89,4 +95,3 @@ fn parse_status_query(raw: &str) -> Option<RequestLogQuery> {
 #[cfg(test)]
 #[path = "tests/request_log_query_tests.rs"]
 mod tests;
-

@@ -297,4 +297,3 @@ fn map_request_log_row(row: &Row<'_>) -> Result<RequestLog> {
 #[cfg(test)]
 #[path = "tests/request_logs_tests.rs"]
 mod tests;
-

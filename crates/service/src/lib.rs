@@ -6,25 +6,18 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
-mod lock_utils;
-mod http;
-pub mod process_env;
-#[path = "storage/storage_helpers.rs"]
-mod storage_helpers;
 #[path = "account/account_availability.rs"]
 mod account_availability;
-#[path = "account/account_status.rs"]
-mod account_status;
-#[path = "account/account_list.rs"]
-mod account_list;
 #[path = "account/account_delete.rs"]
 mod account_delete;
-#[path = "account/account_update.rs"]
-mod account_update;
 #[path = "account/account_import.rs"]
 mod account_import;
-#[path = "apikey/apikey_list.rs"]
-mod apikey_list;
+#[path = "account/account_list.rs"]
+mod account_list;
+#[path = "account/account_status.rs"]
+mod account_status;
+#[path = "account/account_update.rs"]
+mod account_update;
 #[path = "apikey/apikey_create.rs"]
 mod apikey_create;
 #[path = "apikey/apikey_delete.rs"]
@@ -33,47 +26,54 @@ mod apikey_delete;
 mod apikey_disable;
 #[path = "apikey/apikey_enable.rs"]
 mod apikey_enable;
+#[path = "apikey/apikey_list.rs"]
+mod apikey_list;
 #[path = "apikey/apikey_models.rs"]
 mod apikey_models;
 #[path = "apikey/apikey_profile.rs"]
 mod apikey_profile;
-#[path = "apikey/apikey_update_model.rs"]
-mod apikey_update_model;
 #[path = "apikey/apikey_read_secret.rs"]
 mod apikey_read_secret;
-#[path = "auth/auth_login.rs"]
-mod auth_login;
+#[path = "apikey/apikey_update_model.rs"]
+mod apikey_update_model;
 #[path = "auth/auth_callback.rs"]
 mod auth_callback;
+#[path = "auth/auth_login.rs"]
+mod auth_login;
 #[path = "auth/auth_tokens.rs"]
 mod auth_tokens;
-#[path = "usage/usage_read.rs"]
-mod usage_read;
-#[path = "usage/usage_list.rs"]
-mod usage_list;
-#[path = "usage/usage_scheduler.rs"]
-mod usage_scheduler;
-#[path = "usage/usage_http.rs"]
-mod usage_http;
+mod gateway;
+mod http;
+mod lock_utils;
+pub mod process_env;
+mod reasoning_effort;
+#[path = "requestlog/requestlog_clear.rs"]
+mod requestlog_clear;
+#[path = "requestlog/requestlog_list.rs"]
+mod requestlog_list;
+#[path = "requestlog/requestlog_today_summary.rs"]
+mod requestlog_today_summary;
+mod rpc_dispatch;
+#[path = "storage/storage_helpers.rs"]
+mod storage_helpers;
 #[path = "usage/usage_account_meta.rs"]
 mod usage_account_meta;
+#[path = "usage/usage_http.rs"]
+mod usage_http;
 #[path = "usage/usage_keepalive.rs"]
 mod usage_keepalive;
+#[path = "usage/usage_list.rs"]
+mod usage_list;
+#[path = "usage/usage_read.rs"]
+mod usage_read;
+#[path = "usage/usage_refresh.rs"]
+mod usage_refresh;
+#[path = "usage/usage_scheduler.rs"]
+mod usage_scheduler;
 #[path = "usage/usage_snapshot_store.rs"]
 mod usage_snapshot_store;
 #[path = "usage/usage_token_refresh.rs"]
 mod usage_token_refresh;
-#[path = "usage/usage_refresh.rs"]
-mod usage_refresh;
-mod gateway;
-#[path = "requestlog/requestlog_list.rs"]
-mod requestlog_list;
-#[path = "requestlog/requestlog_clear.rs"]
-mod requestlog_clear;
-#[path = "requestlog/requestlog_today_summary.rs"]
-mod requestlog_today_summary;
-mod reasoning_effort;
-mod rpc_dispatch;
 
 pub const DEFAULT_ADDR: &str = "localhost:48760";
 
@@ -207,9 +207,7 @@ fn send_shutdown_request(addr: &str) -> std::io::Result<()> {
     let mut stream = TcpStream::connect(addr)?;
     let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
     let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
-    let request = format!(
-        "GET /__shutdown HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
-    );
+    let request = format!("GET /__shutdown HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes())?;
     Ok(())
 }
@@ -221,4 +219,3 @@ pub(crate) fn handle_request(req: JsonRpcRequest) -> JsonRpcResponse {
 #[cfg(test)]
 #[path = "tests/lib_tests.rs"]
 mod tests;
-

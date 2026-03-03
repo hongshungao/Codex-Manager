@@ -22,7 +22,9 @@ pub(crate) fn normalize_protocol_type(value: Option<String>) -> Result<String, S
     }
 }
 
-pub(crate) fn profile_from_protocol(protocol_type: &str) -> Result<(String, String, String), String> {
+pub(crate) fn profile_from_protocol(
+    protocol_type: &str,
+) -> Result<(String, String, String), String> {
     let protocol = normalize_protocol_type(Some(protocol_type.to_string()))?;
     let auth_scheme = if protocol == PROTOCOL_ANTHROPIC_NATIVE {
         AUTH_X_API_KEY.to_string()
@@ -34,9 +36,7 @@ pub(crate) fn profile_from_protocol(protocol_type: &str) -> Result<(String, Stri
     Ok((CLIENT_CODEX.to_string(), protocol, auth_scheme))
 }
 
-pub(crate) fn normalize_upstream_base_url(
-    value: Option<String>,
-) -> Result<Option<String>, String> {
+pub(crate) fn normalize_upstream_base_url(value: Option<String>) -> Result<Option<String>, String> {
     let Some(raw) = value else {
         return Ok(None);
     };

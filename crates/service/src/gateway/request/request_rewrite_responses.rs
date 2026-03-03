@@ -66,6 +66,18 @@ pub(super) fn ensure_stream_true(path: &str, obj: &mut serde_json::Map<String, V
     true
 }
 
+pub(super) fn take_stream_passthrough_flag(
+    path: &str,
+    obj: &mut serde_json::Map<String, Value>,
+) -> bool {
+    if !is_responses_path(path) {
+        return false;
+    }
+    obj.remove("stream_passthrough")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
 pub(super) fn ensure_store_false(path: &str, obj: &mut serde_json::Map<String, Value>) -> bool {
     if !is_responses_path(path) {
         return false;
@@ -127,6 +139,7 @@ fn is_supported_openai_responses_key(key: &str) -> bool {
             | "top_p"
             | "truncation"
             | "user"
+            | "stream_passthrough"
     )
 }
 

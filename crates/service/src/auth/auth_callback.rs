@@ -6,7 +6,6 @@ use url::Url;
 
 use crate::auth_tokens::complete_login;
 
-
 pub(crate) fn resolve_redirect_uri() -> Option<String> {
     // 优先使用显式配置的回调地址
     if let Ok(uri) = std::env::var("CODEXMANAGER_REDIRECT_URI") {
@@ -144,12 +143,9 @@ fn bind_localhost_login_servers(port: u16) -> Result<(Vec<Server>, LoginServerIn
     let mut selected_port = port;
 
     if port == 0 {
-        if let Some(v4_port) = try_bind_login_server(
-            "127.0.0.1:0",
-            &mut servers,
-            &mut addr_in_use,
-            &mut last_err,
-        )? {
+        if let Some(v4_port) =
+            try_bind_login_server("127.0.0.1:0", &mut servers, &mut addr_in_use, &mut last_err)?
+        {
             selected_port = v4_port;
             let _ = try_bind_login_server(
                 &format!("[::1]:{selected_port}"),
@@ -187,7 +183,12 @@ fn bind_localhost_login_servers(port: u16) -> Result<(Vec<Server>, LoginServerIn
         if selected_port == 0 {
             selected_port = server_port(&servers[0])?;
         }
-        return Ok((servers, LoginServerInfo { port: selected_port }));
+        return Ok((
+            servers,
+            LoginServerInfo {
+                port: selected_port,
+            },
+        ));
     }
     if addr_in_use {
         return Err(format!(
@@ -236,11 +237,3 @@ fn run_login_server(server: Server) {
 #[cfg(test)]
 #[path = "../../tests/auth/auth_callback_tests.rs"]
 mod tests;
-
-
-
-
-
-
-
-

@@ -6,12 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod accounts;
 mod api_keys;
 mod events;
+mod model_options;
 mod request_log_query;
 mod request_logs;
 mod request_token_stats;
 mod tokens;
 mod usage;
-mod model_options;
 
 #[derive(Debug, Clone)]
 pub struct Account {

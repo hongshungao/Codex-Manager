@@ -66,10 +66,7 @@ impl ExistingAccountIndex {
         Ok(idx)
     }
 
-    fn find_existing_account_id(
-        &self,
-        logical_account_id: &str,
-    ) -> Option<String> {
+    fn find_existing_account_id(&self, logical_account_id: &str) -> Option<String> {
         if self.by_id.contains_key(logical_account_id) {
             return Some(logical_account_id.to_string());
         }
@@ -88,7 +85,9 @@ impl ExistingAccountIndex {
     }
 }
 
-pub(crate) fn import_account_auth_json(contents: Vec<String>) -> Result<AccountImportResult, String> {
+pub(crate) fn import_account_auth_json(
+    contents: Vec<String>,
+) -> Result<AccountImportResult, String> {
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let mut index = ExistingAccountIndex::build(&storage)?;
     let mut result = AccountImportResult {
@@ -274,8 +273,8 @@ fn parse_items_from_content(content: &str) -> Result<Vec<Value>, String> {
     }
 
     if trimmed.starts_with('[') {
-        let values: Vec<Value> = serde_json::from_str(trimmed)
-            .map_err(|err| format!("invalid JSON array: {err}"))?;
+        let values: Vec<Value> =
+            serde_json::from_str(trimmed).map_err(|err| format!("invalid JSON array: {err}"))?;
         return Ok(values);
     }
 
@@ -303,7 +302,11 @@ fn import_single_item(
         payload
             .account_id_hint
             .clone()
-            .or_else(|| claims.as_ref().and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone()))
+            .or_else(|| {
+                claims
+                    .as_ref()
+                    .and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone())
+            })
             .or_else(|| extract_chatgpt_account_id(&payload.id_token))
             .or_else(|| extract_chatgpt_account_id(&payload.access_token)),
     );
@@ -393,7 +396,9 @@ fn import_single_item(
         (logical_account_id.clone(), created, true)
     };
 
-    storage.insert_account(&account).map_err(|e| e.to_string())?;
+    storage
+        .insert_account(&account)
+        .map_err(|e| e.to_string())?;
     let token = Token {
         account_id: account_id.clone(),
         id_token: payload.id_token,
@@ -437,7 +442,11 @@ fn resolve_logical_account_id(
             .map(str::to_string)
     }
 
-    let account_id_hint = payload.account_id_hint.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let account_id_hint = payload
+        .account_id_hint
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
     let hint_suffix = account_id_hint.and_then(|value| {
         value
             .split_once("::")
@@ -540,4 +549,3 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "tests/account_import_tests.rs"]
 mod tests;
-

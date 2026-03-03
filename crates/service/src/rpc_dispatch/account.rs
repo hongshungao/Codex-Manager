@@ -1,6 +1,8 @@
 use codexmanager_core::rpc::types::{AccountListResult, JsonRpcRequest, JsonRpcResponse};
 
-use crate::{account_delete, account_import, account_list, account_update, auth_login, auth_tokens};
+use crate::{
+    account_delete, account_import, account_list, account_update, auth_login, auth_tokens,
+};
 
 pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
     let result = match req.method.as_str() {
@@ -43,8 +45,13 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             let note = super::string_param(req, "note");
             let tags = super::string_param(req, "tags");
             let group_name = super::string_param(req, "groupName");
-            let workspace_id = super::string_param(req, "workspaceId")
-                .and_then(|v| if v.trim().is_empty() { None } else { Some(v) });
+            let workspace_id = super::string_param(req, "workspaceId").and_then(|v| {
+                if v.trim().is_empty() {
+                    None
+                } else {
+                    Some(v)
+                }
+            });
             super::value_or_error(auth_login::login_start(
                 login_type,
                 open_browser,

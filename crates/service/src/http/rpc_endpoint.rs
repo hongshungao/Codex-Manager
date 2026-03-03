@@ -6,7 +6,10 @@ fn rpc_response_failed(resp: &codexmanager_core::rpc::types::JsonRpcResponse) ->
     if resp.result.get("error").is_some() {
         return true;
     }
-    matches!(resp.result.get("ok").and_then(|value| value.as_bool()), Some(false))
+    matches!(
+        resp.result.get("ok").and_then(|value| value.as_bool()),
+        Some(false)
+    )
 }
 
 fn get_header_value<'a>(request: &'a Request, name: &str) -> Option<&'a str> {

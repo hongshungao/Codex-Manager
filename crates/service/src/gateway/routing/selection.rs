@@ -21,7 +21,9 @@ struct CandidateSnapshotCache {
     candidates: Vec<(Account, Token)>,
 }
 
-pub(crate) fn collect_gateway_candidates(storage: &Storage) -> Result<Vec<(Account, Token)>, String> {
+pub(crate) fn collect_gateway_candidates(
+    storage: &Storage,
+) -> Result<Vec<(Account, Token)>, String> {
     if let Some(cached) = read_candidate_cache() {
         return Ok(cached);
     }
@@ -62,11 +64,7 @@ fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account
         }
         let mut candidate_account = account.clone();
         let (chatgpt_account_id, workspace_id) = derive_account_meta(&token);
-        if patch_account_meta_in_place(
-            &mut candidate_account,
-            chatgpt_account_id,
-            workspace_id,
-        ) {
+        if patch_account_meta_in_place(&mut candidate_account, chatgpt_account_id, workspace_id) {
             candidate_account.updated_at = now_ts();
             let _ = storage.insert_account(&candidate_account);
         }
@@ -201,4 +199,3 @@ fn clear_candidate_cache_for_tests() {
 #[cfg(test)]
 #[path = "tests/selection_tests.rs"]
 mod tests;
-

@@ -75,16 +75,16 @@ pub(super) fn try_openai_fallback(
     // (often a different org than the ChatGPT workspace), forwarding it can trigger:
     // `invalid_encrypted_content` / organization_id mismatch. In that case, prefer
     // resetting session affinity to keep the request usable.
-    let strip_session_affinity = strip_session_affinity
-        || incoming_headers.turn_state().is_some()
-        || is_openai_api_target;
-    let body_for_request = if strip_session_affinity && body_has_encrypted_content_hint(body.as_ref()) {
-        strip_encrypted_content_from_body(body.as_ref())
-            .map(Bytes::from)
-            .unwrap_or_else(|| body.clone())
-    } else {
-        body.clone()
-    };
+    let strip_session_affinity =
+        strip_session_affinity || incoming_headers.turn_state().is_some() || is_openai_api_target;
+    let body_for_request =
+        if strip_session_affinity && body_has_encrypted_content_hint(body.as_ref()) {
+            strip_encrypted_content_from_body(body.as_ref())
+                .map(Bytes::from)
+                .unwrap_or_else(|| body.clone())
+        } else {
+            body.clone()
+        };
 
     let account_id = account
         .chatgpt_account_id

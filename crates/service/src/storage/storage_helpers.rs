@@ -1,11 +1,11 @@
 use codexmanager_core::storage::Storage;
-use std::path::Path;
+use rand::RngCore;
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 #[cfg(test)]
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use rand::RngCore;
-use sha2::{Digest, Sha256};
+use std::path::Path;
 
 struct CachedStorage {
     path: String,
@@ -178,8 +178,8 @@ pub(crate) fn initialize_storage() -> Result<(), String> {
     if !Path::new(&path).exists() {
         log::warn!("storage path missing: {}", path);
     }
-    let storage = Storage::open(&path)
-        .map_err(|err| format!("open storage failed: {} ({})", path, err))?;
+    let storage =
+        Storage::open(&path).map_err(|err| format!("open storage failed: {} ({})", path, err))?;
     storage
         .init()
         .map_err(|err| format!("storage init failed: {} ({})", path, err))?;
@@ -248,4 +248,3 @@ fn clear_storage_open_count_for_tests(path: &str) {
 #[cfg(test)]
 #[path = "tests/storage_helpers_tests.rs"]
 mod tests;
-

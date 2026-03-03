@@ -78,7 +78,8 @@ pub(super) fn prepare_candidates_for_proxy(
         return CandidatePrecheckResult::Responded;
     }
 
-    CandidatePrecheckResult::Ready { request, candidates }
+    CandidatePrecheckResult::Ready {
+        request,
+        candidates,
+    }
 }
-
-

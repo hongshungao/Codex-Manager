@@ -48,8 +48,10 @@ fn rpc_metrics_track_failures_and_duration() {
     let before = gateway_metrics_prometheus();
     let before_total = metric_value(&before, "codexmanager_rpc_requests_total");
     let before_failed = metric_value(&before, "codexmanager_rpc_requests_failed_total");
-    let before_duration =
-        metric_value(&before, "codexmanager_rpc_request_duration_milliseconds_total");
+    let before_duration = metric_value(
+        &before,
+        "codexmanager_rpc_request_duration_milliseconds_total",
+    );
 
     {
         let mut guard = begin_rpc_request();
@@ -63,7 +65,10 @@ fn rpc_metrics_track_failures_and_duration() {
     let after = gateway_metrics_prometheus();
     let after_total = metric_value(&after, "codexmanager_rpc_requests_total");
     let after_failed = metric_value(&after, "codexmanager_rpc_requests_failed_total");
-    let after_duration = metric_value(&after, "codexmanager_rpc_request_duration_milliseconds_total");
+    let after_duration = metric_value(
+        &after,
+        "codexmanager_rpc_request_duration_milliseconds_total",
+    );
 
     assert!(after_total >= before_total + 2);
     assert!(after_failed >= before_failed + 1);
@@ -76,8 +81,10 @@ fn usage_refresh_metrics_track_success_and_failure() {
     let before_attempts = metric_value(&before, "codexmanager_usage_refresh_attempts_total");
     let before_success = metric_value(&before, "codexmanager_usage_refresh_success_total");
     let before_failures = metric_value(&before, "codexmanager_usage_refresh_failures_total");
-    let before_duration =
-        metric_value(&before, "codexmanager_usage_refresh_duration_milliseconds_total");
+    let before_duration = metric_value(
+        &before,
+        "codexmanager_usage_refresh_duration_milliseconds_total",
+    );
 
     record_usage_refresh_outcome(true, 3);
     record_usage_refresh_outcome(false, 7);
@@ -86,7 +93,10 @@ fn usage_refresh_metrics_track_success_and_failure() {
     let after_attempts = metric_value(&after, "codexmanager_usage_refresh_attempts_total");
     let after_success = metric_value(&after, "codexmanager_usage_refresh_success_total");
     let after_failures = metric_value(&after, "codexmanager_usage_refresh_failures_total");
-    let after_duration = metric_value(&after, "codexmanager_usage_refresh_duration_milliseconds_total");
+    let after_duration = metric_value(
+        &after,
+        "codexmanager_usage_refresh_duration_milliseconds_total",
+    );
 
     assert!(after_attempts >= before_attempts + 2);
     assert!(after_success >= before_success + 1);

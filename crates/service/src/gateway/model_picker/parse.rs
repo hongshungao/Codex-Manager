@@ -8,8 +8,16 @@ pub(super) fn parse_model_options(body: &[u8]) -> Vec<ModelOption> {
     let mut seen = HashSet::new();
 
     if let Ok(value) = serde_json::from_slice::<Value>(body) {
-        parse_models_array(value.get("models").and_then(|v| v.as_array()), &mut seen, &mut items);
-        parse_data_array(value.get("data").and_then(|v| v.as_array()), &mut seen, &mut items);
+        parse_models_array(
+            value.get("models").and_then(|v| v.as_array()),
+            &mut seen,
+            &mut items,
+        );
+        parse_data_array(
+            value.get("data").and_then(|v| v.as_array()),
+            &mut seen,
+            &mut items,
+        );
     }
 
     items.sort_by(|a, b| a.slug.cmp(&b.slug));

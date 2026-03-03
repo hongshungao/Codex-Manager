@@ -2,8 +2,8 @@ use codexmanager_core::storage::now_ts;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -386,6 +386,36 @@ pub(crate) fn log_attempt_result(
         status_code,
         sanitize_text(url),
         sanitize_text(error),
+    );
+    append_trace_line(line, false);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn log_bridge_result(
+    trace_id: &str,
+    adapter: &str,
+    path: &str,
+    is_stream: bool,
+    stream_terminal_seen: bool,
+    stream_terminal_error: Option<&str>,
+    delivery_error: Option<&str>,
+    output_text_len: usize,
+    output_tokens: Option<i64>,
+) {
+    let ts = now_ts();
+    let line = format!(
+        "ts={ts} event=BRIDGE_RESULT trace_id={} adapter={} path={} stream={} terminal_seen={} terminal_error={} delivery_error={} output_text_len={} output_tokens={}",
+        sanitize_text(trace_id),
+        sanitize_text(adapter),
+        sanitize_text(path),
+        is_stream,
+        stream_terminal_seen,
+        sanitize_text(stream_terminal_error.unwrap_or("-")),
+        sanitize_text(delivery_error.unwrap_or("-")),
+        output_text_len,
+        output_tokens
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
     );
     append_trace_line(line, false);
 }

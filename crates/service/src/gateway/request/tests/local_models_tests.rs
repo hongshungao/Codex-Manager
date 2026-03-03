@@ -16,7 +16,10 @@ fn build_openai_models_list_outputs_expected_shape() {
     let output = build_openai_models_list(&items);
     let value: Value = serde_json::from_str(&output).expect("valid json");
     assert_eq!(value.get("object").and_then(Value::as_str), Some("list"));
-    let data = value.get("data").and_then(Value::as_array).expect("data array");
+    let data = value
+        .get("data")
+        .and_then(Value::as_array)
+        .expect("data array");
     assert_eq!(data.len(), 2);
     for item in data {
         assert_eq!(item.get("object").and_then(Value::as_str), Some("model"));

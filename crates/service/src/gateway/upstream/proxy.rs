@@ -522,6 +522,24 @@ pub(in super::super) fn proxy_validated_request(
                     response_adapter,
                     client_is_stream,
                 )?;
+                let bridge_output_text_len = bridge
+                    .usage
+                    .output_text
+                    .as_deref()
+                    .map(str::trim)
+                    .map(str::len)
+                    .unwrap_or(0);
+                super::super::trace_log::log_bridge_result(
+                    trace_id.as_str(),
+                    format!("{response_adapter:?}").as_str(),
+                    path.as_str(),
+                    client_is_stream,
+                    bridge.stream_terminal_seen,
+                    bridge.stream_terminal_error.as_deref(),
+                    bridge.delivery_error.as_deref(),
+                    bridge_output_text_len,
+                    bridge.usage.output_tokens,
+                );
                 let bridge_ok = bridge.is_ok(client_is_stream);
                 let bridge_error_message = if bridge_ok {
                     None

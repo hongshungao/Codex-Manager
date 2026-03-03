@@ -12,4 +12,3 @@ pub(crate) fn is_keepalive_error_ignorable(err: &str) -> bool {
 #[cfg(test)]
 #[path = "tests/usage_keepalive_tests.rs"]
 mod tests;
-

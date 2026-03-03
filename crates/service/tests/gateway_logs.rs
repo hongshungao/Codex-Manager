@@ -1,9 +1,9 @@
 use codexmanager_core::rpc::types::ModelOption;
 use codexmanager_core::storage::{now_ts, Account, ApiKey, Storage, Token};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
-use std::collections::HashMap;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -23,7 +23,9 @@ static TEST_DIR_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn lock_env() -> std::sync::MutexGuard<'static, ()> {
     // 中文注释：若某个测试 panic 导致锁被 poison，不应让后续测试直接二次失败。
-    ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn new_test_dir(prefix: &str) -> PathBuf {
@@ -65,7 +67,9 @@ fn decode_chunked_body_if_needed(body: &str) -> String {
             Some(rel) => idx + rel,
             None => bytes.len(),
         };
-        let size_text = std::str::from_utf8(&bytes[idx..size_end]).ok().map(str::trim);
+        let size_text = std::str::from_utf8(&bytes[idx..size_end])
+            .ok()
+            .map(str::trim);
         let Some(size_text) = size_text else {
             return normalized;
         };
@@ -73,7 +77,11 @@ fn decode_chunked_body_if_needed(body: &str) -> String {
             return normalized;
         };
         saw_chunk = true;
-        idx = if size_end < bytes.len() { size_end + 1 } else { size_end };
+        idx = if size_end < bytes.len() {
+            size_end + 1
+        } else {
+            size_end
+        };
         if size == 0 {
             break;
         }
@@ -94,18 +102,12 @@ fn decode_chunked_body_if_needed(body: &str) -> String {
     String::from_utf8(out).unwrap_or(normalized)
 }
 
-fn post_http_raw(
-    addr: &str,
-    path: &str,
-    body: &str,
-    headers: &[(&str, &str)],
-) -> (u16, String) {
+fn post_http_raw(addr: &str, path: &str, body: &str, headers: &[(&str, &str)]) -> (u16, String) {
     let mut last_raw = String::new();
     for _ in 0..20 {
         let mut stream = TcpStream::connect(addr).expect("connect server");
         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let mut request =
-            format!("POST {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+        let mut request = format!("POST {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
         for (name, value) in headers {
             request.push_str(name);
             request.push_str(": ");
@@ -138,8 +140,7 @@ fn get_http_raw(addr: &str, path: &str, headers: &[(&str, &str)]) -> (u16, Strin
     for _ in 0..20 {
         let mut stream = TcpStream::connect(addr).expect("connect server");
         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let mut request =
-            format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+        let mut request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
         for (name, value) in headers {
             request.push_str(name);
             request.push_str(": ");
@@ -242,14 +243,24 @@ fn read_http_request_once(stream: &mut TcpStream) -> CapturedUpstreamRequest {
     }
 }
 
-fn start_mock_upstream_once(response_json: &str) -> (String, Receiver<CapturedUpstreamRequest>, thread::JoinHandle<()>) {
+fn start_mock_upstream_once(
+    response_json: &str,
+) -> (
+    String,
+    Receiver<CapturedUpstreamRequest>,
+    thread::JoinHandle<()>,
+) {
     start_mock_upstream_once_with_content_type(response_json, "application/json")
 }
 
 fn start_mock_upstream_once_with_content_type(
     response_body: &str,
     content_type: &str,
-) -> (String, Receiver<CapturedUpstreamRequest>, thread::JoinHandle<()>) {
+) -> (
+    String,
+    Receiver<CapturedUpstreamRequest>,
+    thread::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock upstream");
     let addr = listener.local_addr().expect("mock upstream addr");
     let response = response_body.as_bytes().to_vec();
@@ -265,7 +276,9 @@ fn start_mock_upstream_once_with_content_type(
             "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             response.len()
         );
-        stream.write_all(header.as_bytes()).expect("write upstream status");
+        stream
+            .write_all(header.as_bytes())
+            .expect("write upstream status");
         stream.write_all(&response).expect("write upstream body");
         let _ = stream.flush();
     });
@@ -275,7 +288,11 @@ fn start_mock_upstream_once_with_content_type(
 
 fn start_mock_upstream_sequence(
     responses: Vec<(u16, String)>,
-) -> (String, Receiver<CapturedUpstreamRequest>, thread::JoinHandle<()>) {
+) -> (
+    String,
+    Receiver<CapturedUpstreamRequest>,
+    thread::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock upstream");
     let addr = listener.local_addr().expect("mock upstream addr");
     let (tx, rx) = mpsc::channel();
@@ -292,7 +309,9 @@ fn start_mock_upstream_sequence(
                 status,
                 body_bytes.len()
             );
-            stream.write_all(header.as_bytes()).expect("write upstream status");
+            stream
+                .write_all(header.as_bytes())
+                .expect("write upstream status");
             stream
                 .write_all(&body_bytes)
                 .expect("write upstream response body");
@@ -306,7 +325,11 @@ fn start_mock_upstream_sequence(
 fn start_mock_upstream_sequence_lenient(
     responses: Vec<(u16, String)>,
     idle_timeout: Duration,
-) -> (String, Receiver<CapturedUpstreamRequest>, thread::JoinHandle<()>) {
+) -> (
+    String,
+    Receiver<CapturedUpstreamRequest>,
+    thread::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock upstream");
     listener
         .set_nonblocking(true)
@@ -332,7 +355,9 @@ fn start_mock_upstream_sequence_lenient(
                         status,
                         body_bytes.len()
                     );
-                    stream.write_all(header.as_bytes()).expect("write upstream status");
+                    stream
+                        .write_all(header.as_bytes())
+                        .expect("write upstream status");
                     stream
                         .write_all(&body_bytes)
                         .expect("write upstream response body");
@@ -363,9 +388,7 @@ fn check_health(addr: &str) -> bool {
         return false;
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    let request = format!(
-        "GET /health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
-    );
+    let request = format!("GET /health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
@@ -444,7 +467,9 @@ fn gateway_logs_invalid_api_key_error() {
     storage.init().expect("init schema");
     let mut logs = Vec::new();
     for _ in 0..40 {
-        logs = storage.list_request_logs(None, 100).expect("list request logs");
+        logs = storage
+            .list_request_logs(None, 100)
+            .expect("list request logs");
         if !logs.is_empty() {
             break;
         }
@@ -760,7 +785,9 @@ fn gateway_openai_stream_logs_cached_and_reasoning_tokens() {
         let logs = storage
             .list_request_logs(Some("key:=gk_openai_stream_usage"), 20)
             .expect("list request logs");
-        matched = logs.into_iter().find(|item| item.request_path == "/v1/responses");
+        matched = logs
+            .into_iter()
+            .find(|item| item.request_path == "/v1/responses");
         if matched.is_some() {
             break;
         }
@@ -872,7 +899,9 @@ fn gateway_openai_stream_usage_with_plain_content_type() {
         let logs = storage
             .list_request_logs(Some("key:=gk_openai_stream_plain_ct"), 20)
             .expect("list request logs");
-        matched = logs.into_iter().find(|item| item.request_path == "/v1/responses");
+        matched = logs
+            .into_iter()
+            .find(|item| item.request_path == "/v1/responses");
         if matched.is_some() {
             break;
         }
@@ -992,7 +1021,9 @@ fn gateway_openai_non_stream_without_usage_keeps_tokens_null() {
         let logs = storage
             .list_request_logs(Some("key:=gk_openai_no_usage"), 20)
             .expect("list request logs");
-        matched = logs.into_iter().find(|item| item.request_path == "/v1/responses");
+        matched = logs
+            .into_iter()
+            .find(|item| item.request_path == "/v1/responses");
         if matched.is_some() {
             break;
         }
@@ -1108,8 +1139,7 @@ fn gateway_openai_fallback_strips_turn_state_headers() {
     let upstream_base = format!("http://{upstream_addr}/chatgpt.com/backend-api/codex");
     let fallback_base = format!("http://{upstream_addr}/v1");
     let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
-    let _fallback_guard =
-        EnvGuard::set("CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL", &fallback_base);
+    let _fallback_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_FALLBACK_BASE_URL", &fallback_base);
 
     let storage = Storage::open(&db_path).expect("open db");
     storage.init().expect("init db");
@@ -1319,7 +1349,10 @@ fn gateway_cpa_no_cookie_header_mode_suppresses_affinity_headers_on_responses() 
     assert!(upstream_payload["input"].is_array());
     assert_eq!(upstream_payload["input"][0]["type"], "message");
     assert_eq!(upstream_payload["input"][0]["role"], "user");
-    assert_eq!(upstream_payload["input"][0]["content"][0]["type"], "input_text");
+    assert_eq!(
+        upstream_payload["input"][0]["content"][0]["type"],
+        "input_text"
+    );
     assert_eq!(upstream_payload["input"][0]["content"][0]["text"], "hello");
 }
 
@@ -1407,7 +1440,10 @@ fn gateway_cpa_no_cookie_header_mode_binds_prompt_cache_key_to_session_only() {
             ("Content-Type", "application/json"),
             ("Authorization", &format!("Bearer {platform_key}")),
             ("Session_id", "legacy_session_should_be_overridden"),
-            ("Conversation_id", "legacy_conversation_should_be_overridden"),
+            (
+                "Conversation_id",
+                "legacy_conversation_should_be_overridden",
+            ),
             ("x-codex-turn-state", "legacy_turn_state_should_be_dropped"),
         ],
     );
@@ -1824,21 +1860,13 @@ fn gateway_claude_failover_cross_workspace_strips_session_affinity_headers() {
     let ws_a_stateful = captured
         .iter()
         .find(|req| {
-            req.headers
-                .get("chatgpt-account-id")
-                .map(String::as_str)
-                == Some("wsA")
+            req.headers.get("chatgpt-account-id").map(String::as_str) == Some("wsA")
                 && req.headers.contains_key("x-codex-turn-state")
         })
         .expect("expected wsA stateful upstream request");
     let ws_b = captured
         .iter()
-        .find(|req| {
-            req.headers
-                .get("chatgpt-account-id")
-                .map(String::as_str)
-                == Some("wsB")
-        })
+        .find(|req| req.headers.get("chatgpt-account-id").map(String::as_str) == Some("wsB"))
         .expect("expected wsB upstream request");
 
     assert_eq!(
@@ -2022,10 +2050,7 @@ fn gateway_claude_failover_same_workspace_preserves_session_affinity_headers() {
         Some("turn_state_same_ws")
     );
     assert_eq!(
-        account_2
-            .headers
-            .get("conversation_id")
-            .map(String::as_str),
+        account_2.headers.get("conversation_id").map(String::as_str),
         Some("conv_same_ws")
     );
 }
@@ -2148,7 +2173,9 @@ fn gateway_request_log_keeps_only_final_result_for_multi_attempt_flow() {
         .expect("receive second upstream request");
     upstream_join.join().expect("join upstream");
 
-    let logs = storage.list_request_logs(Some("key:gk_final_result_only"), 20).expect("list logs");
+    let logs = storage
+        .list_request_logs(Some("key:gk_final_result_only"), 20)
+        .expect("list logs");
     let final_logs = logs
         .iter()
         .filter(|item| {

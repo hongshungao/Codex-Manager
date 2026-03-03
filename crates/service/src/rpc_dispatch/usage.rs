@@ -1,4 +1,6 @@
-use codexmanager_core::rpc::types::{JsonRpcRequest, JsonRpcResponse, UsageListResult, UsageReadResult};
+use codexmanager_core::rpc::types::{
+    JsonRpcRequest, JsonRpcResponse, UsageListResult, UsageReadResult,
+};
 
 use crate::{usage_list, usage_read, usage_refresh};
 

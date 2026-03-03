@@ -27,7 +27,10 @@ fn build_openai_models_list(items: &[ModelOption]) -> String {
 }
 
 fn fallback_model_options(model_for_log: Option<&str>) -> Vec<ModelOption> {
-    let Some(slug) = model_for_log.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(slug) = model_for_log
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return Vec::new();
     };
     vec![ModelOption {
@@ -62,7 +65,14 @@ pub(super) fn maybe_respond_local_models(
         Err(err) => {
             let message = format!("model options cache read failed: {err}");
             super::trace_log::log_attempt_result(trace_id, "-", None, 503, Some(message.as_str()));
-            super::trace_log::log_request_final(trace_id, 503, None, None, Some(message.as_str()), 0);
+            super::trace_log::log_request_final(
+                trace_id,
+                503,
+                None,
+                None,
+                Some(message.as_str()),
+                0,
+            );
             super::record_gateway_request_outcome(path, 503, Some(protocol_type));
             super::write_request_log(
                 storage,
@@ -149,4 +159,3 @@ pub(super) fn maybe_respond_local_models(
 #[cfg(test)]
 #[path = "tests/local_models_tests.rs"]
 mod tests;
-

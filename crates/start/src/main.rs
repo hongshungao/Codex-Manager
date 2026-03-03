@@ -157,9 +157,14 @@ fn simple_get_best_effort(addr: &str, path: &str) {
         return;
     }
     let addr_trimmed = addr_trimmed.strip_prefix("http://").unwrap_or(addr_trimmed);
-    let addr_trimmed = addr_trimmed.strip_prefix("https://").unwrap_or(addr_trimmed);
+    let addr_trimmed = addr_trimmed
+        .strip_prefix("https://")
+        .unwrap_or(addr_trimmed);
     let addr_trimmed = addr_trimmed.split('/').next().unwrap_or(addr_trimmed);
-    let Some(sock) = resolve_socket_addrs_best_effort(addr_trimmed).into_iter().next() else {
+    let Some(sock) = resolve_socket_addrs_best_effort(addr_trimmed)
+        .into_iter()
+        .next()
+    else {
         return;
     };
     let Ok(mut stream) = TcpStream::connect_timeout(&sock, Duration::from_millis(300)) else {
@@ -167,9 +172,7 @@ fn simple_get_best_effort(addr: &str, path: &str) {
     };
     let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
     let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
-    let req = format!(
-        "GET {path} HTTP/1.1\r\nHost: {addr_trimmed}\r\nConnection: close\r\n\r\n"
-    );
+    let req = format!("GET {path} HTTP/1.1\r\nHost: {addr_trimmed}\r\nConnection: close\r\n\r\n");
     let _ = stream.write_all(req.as_bytes());
 }
 

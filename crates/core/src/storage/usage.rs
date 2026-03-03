@@ -21,7 +21,11 @@ impl Storage {
         Ok(())
     }
 
-    pub fn prune_usage_snapshots_for_account(&self, account_id: &str, retain: usize) -> Result<usize> {
+    pub fn prune_usage_snapshots_for_account(
+        &self,
+        account_id: &str,
+        retain: usize,
+    ) -> Result<usize> {
         if retain == 0 {
             return Ok(0);
         }

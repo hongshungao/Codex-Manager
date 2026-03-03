@@ -17,8 +17,8 @@ fn stale_unshared_exchange_lock_entry_is_reclaimed() {
     let weak = Arc::downgrade(&first);
     drop(first);
 
-    let lock =
-        ACCOUNT_TOKEN_EXCHANGE_LOCKS.get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
+    let lock = ACCOUNT_TOKEN_EXCHANGE_LOCKS
+        .get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
     let mut table = lock.lock().expect("token exchange table lock");
     let now = now_ts();
     table
@@ -39,8 +39,8 @@ fn stale_shared_exchange_lock_entry_is_not_reclaimed() {
     clear_account_token_exchange_locks_for_tests();
     let first = account_token_exchange_lock("acc-1");
 
-    let lock =
-        ACCOUNT_TOKEN_EXCHANGE_LOCKS.get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
+    let lock = ACCOUNT_TOKEN_EXCHANGE_LOCKS
+        .get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
     let mut table = lock.lock().expect("token exchange table lock");
     let now = now_ts();
     table

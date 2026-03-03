@@ -46,7 +46,3 @@ pub(crate) fn candidate_skip_reason_for_proxy(
 
     None
 }
-
-
-
-

@@ -20,7 +20,10 @@ fn build_backend_base_url(backend_addr: &str) -> String {
     format!("http://{backend_addr}")
 }
 
-async fn proxy_handler(State(state): State<ProxyState>, request: HttpRequest<Body>) -> Response<Body> {
+async fn proxy_handler(
+    State(state): State<ProxyState>,
+    request: HttpRequest<Body>,
+) -> Response<Body> {
     let (parts, body) = request.into_parts();
     let target_url = build_target_url(&state.backend_base_url, &parts.uri);
     let max_body_bytes = crate::gateway::front_proxy_max_body_bytes();
@@ -57,7 +60,10 @@ async fn proxy_handler(State(state): State<ProxyState>, request: HttpRequest<Bod
     let upstream = match builder.send().await {
         Ok(response) => response,
         Err(err) => {
-            return text_response(StatusCode::BAD_GATEWAY, format!("backend proxy error: {err}"));
+            return text_response(
+                StatusCode::BAD_GATEWAY,
+                format!("backend proxy error: {err}"),
+            );
         }
     };
 
@@ -97,4 +103,3 @@ pub(crate) fn run_front_proxy(addr: &str, backend_addr: &str) -> io::Result<()> 
 #[cfg(test)]
 #[path = "tests/proxy_runtime_tests.rs"]
 mod tests;
-

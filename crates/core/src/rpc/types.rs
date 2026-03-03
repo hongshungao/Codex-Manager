@@ -170,4 +170,3 @@ pub struct RequestLogTodaySummaryResult {
 #[cfg(test)]
 #[path = "tests/types_tests.rs"]
 mod tests;
-

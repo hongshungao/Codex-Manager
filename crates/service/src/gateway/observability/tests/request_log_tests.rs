@@ -22,8 +22,7 @@ fn estimate_cost_matches_openai_gpt5_family_prices() {
         "gpt-5.1-codex-max",
     ];
     for model in models {
-        let actual =
-            estimate_cost_usd(Some(model), Some(1000), Some(200), Some(500));
+        let actual = estimate_cost_usd(Some(model), Some(1000), Some(200), Some(500));
         assert_close(actual, expected);
     }
 }
@@ -32,20 +31,14 @@ fn estimate_cost_matches_openai_gpt5_family_prices() {
 fn estimate_cost_matches_openai_gpt5_mini_and_52_prices() {
     // mini：输入 0.25/M，缓存 0.025/M，输出 2/M
     // 样本同上 => 0.001205
-    let mini_cost = estimate_cost_usd(
-        Some("gpt-5.1-codex-mini"),
-        Some(1000),
-        Some(200),
-        Some(500),
-    );
+    let mini_cost = estimate_cost_usd(Some("gpt-5.1-codex-mini"), Some(1000), Some(200), Some(500));
     assert_close(mini_cost, 0.001205);
 
     // 5.2：输入 1.75/M，缓存 0.175/M，输出 14/M
     // 样本同上 => 0.008435
     let v52_models = ["gpt-5.2", "gpt-5.2-codex"];
     for model in v52_models {
-        let actual =
-            estimate_cost_usd(Some(model), Some(1000), Some(200), Some(500));
+        let actual = estimate_cost_usd(Some(model), Some(1000), Some(200), Some(500));
         assert_close(actual, 0.008435);
     }
 }

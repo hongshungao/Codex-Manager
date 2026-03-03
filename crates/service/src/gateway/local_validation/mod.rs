@@ -52,5 +52,12 @@ pub(super) fn prepare_local_request(
     let storage = auth::open_storage_or_error()?;
     let api_key = auth::load_active_api_key(&storage, &platform_key, request.url(), debug)?;
 
-    request::build_local_validation_result(request, trace_id, incoming_headers, storage, body, api_key)
+    request::build_local_validation_result(
+        request,
+        trace_id,
+        incoming_headers,
+        storage,
+        body,
+        api_key,
+    )
 }

@@ -24,8 +24,8 @@ static ACCOUNT_TOKEN_EXCHANGE_LOCKS: OnceLock<Mutex<AccountTokenExchangeLockTabl
     OnceLock::new();
 
 pub(super) fn account_token_exchange_lock(account_id: &str) -> Arc<Mutex<()>> {
-    let lock =
-        ACCOUNT_TOKEN_EXCHANGE_LOCKS.get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
+    let lock = ACCOUNT_TOKEN_EXCHANGE_LOCKS
+        .get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
     let mut table = crate::lock_utils::lock_recover(lock, "account_token_exchange_locks");
     let now = now_ts();
     maybe_cleanup_exchange_locks(&mut table, now);
@@ -42,7 +42,8 @@ pub(super) fn account_token_exchange_lock(account_id: &str) -> Arc<Mutex<()>> {
 
 fn maybe_cleanup_exchange_locks(table: &mut AccountTokenExchangeLockTable, now: i64) {
     if table.last_cleanup_at != 0
-        && now.saturating_sub(table.last_cleanup_at) < ACCOUNT_TOKEN_EXCHANGE_LOCK_CLEANUP_INTERVAL_SECS
+        && now.saturating_sub(table.last_cleanup_at)
+            < ACCOUNT_TOKEN_EXCHANGE_LOCK_CLEANUP_INTERVAL_SECS
     {
         return;
     }
@@ -101,7 +102,8 @@ pub(super) fn resolve_openai_bearer_token(
     }
 
     let exchange_lock = account_token_exchange_lock(&account.id);
-    let _guard = crate::lock_utils::lock_recover(exchange_lock.as_ref(), "account_token_exchange_lock");
+    let _guard =
+        crate::lock_utils::lock_recover(exchange_lock.as_ref(), "account_token_exchange_lock");
 
     if let Some(existing) = token
         .api_key_access_token
@@ -165,8 +167,8 @@ pub(super) fn resolve_openai_bearer_token(
 
 #[cfg(test)]
 fn clear_account_token_exchange_locks_for_tests() {
-    let lock =
-        ACCOUNT_TOKEN_EXCHANGE_LOCKS.get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
+    let lock = ACCOUNT_TOKEN_EXCHANGE_LOCKS
+        .get_or_init(|| Mutex::new(AccountTokenExchangeLockTable::default()));
     if let Ok(mut table) = lock.lock() {
         table.entries.clear();
         table.last_cleanup_at = 0;
@@ -185,4 +187,3 @@ fn token_exchange_test_guard() -> std::sync::MutexGuard<'static, ()> {
 #[cfg(test)]
 #[path = "tests/token_exchange_tests.rs"]
 mod tests;
-

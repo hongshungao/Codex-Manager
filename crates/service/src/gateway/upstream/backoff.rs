@@ -5,11 +5,7 @@ fn as_millis_u64(duration: Duration) -> u64 {
     duration.as_millis().min(u64::MAX as u128) as u64
 }
 
-pub(super) fn exponential_jitter_delay(
-    base: Duration,
-    cap: Duration,
-    attempt: u32,
-) -> Duration {
+pub(super) fn exponential_jitter_delay(base: Duration, cap: Duration, attempt: u32) -> Duration {
     let base_ms = as_millis_u64(base);
     let cap_ms = as_millis_u64(cap);
     if base_ms == 0 || cap_ms == 0 {
@@ -40,4 +36,3 @@ pub(super) fn sleep_with_exponential_jitter(
 #[cfg(test)]
 #[path = "tests/backoff_tests.rs"]
 mod tests;
-

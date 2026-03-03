@@ -32,14 +32,18 @@ pub(crate) struct BackendServer {
 
 fn http_worker_count() -> usize {
     // 中文注释：长流请求会占用处理线程；这里固定 worker 上限，避免并发时无限 spawn 拖垮进程。
-    let cpus = thread::available_parallelism().map(|value| value.get()).unwrap_or(4);
+    let cpus = thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(4);
     let factor = env_usize_or(ENV_HTTP_WORKER_FACTOR, HTTP_WORKER_FACTOR).max(1);
     let min = env_usize_or(ENV_HTTP_WORKER_MIN, HTTP_WORKER_MIN).max(1);
     (cpus.saturating_mul(factor)).max(min)
 }
 
 fn http_stream_worker_count() -> usize {
-    let cpus = thread::available_parallelism().map(|value| value.get()).unwrap_or(4);
+    let cpus = thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(4);
     let factor = env_usize_or(ENV_HTTP_STREAM_WORKER_FACTOR, HTTP_STREAM_WORKER_FACTOR).max(1);
     let min = env_usize_or(ENV_HTTP_STREAM_WORKER_MIN, HTTP_STREAM_WORKER_MIN).max(1);
     (cpus.saturating_mul(factor)).max(min)
@@ -88,8 +92,7 @@ fn request_accept_header(request: &Request) -> Option<String> {
 }
 
 fn request_is_stream_like(request: &Request) -> bool {
-    request_accept_header(request)
-        .is_some_and(|value| value.contains("text/event-stream"))
+    request_accept_header(request).is_some_and(|value| value.contains("text/event-stream"))
 }
 
 fn enqueue_request(
@@ -149,7 +152,8 @@ fn run_backend_server(server: Server) {
 }
 
 pub(crate) fn start_backend_server() -> io::Result<BackendServer> {
-    let server = Server::http("127.0.0.1:0").map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    let server =
+        Server::http("127.0.0.1:0").map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
     let addr = server
         .server_addr()
         .to_ip()
@@ -174,4 +178,3 @@ pub(crate) fn wake_backend_shutdown(addr: &str) {
 #[cfg(test)]
 #[path = "tests/backend_runtime_tests.rs"]
 mod tests;
-

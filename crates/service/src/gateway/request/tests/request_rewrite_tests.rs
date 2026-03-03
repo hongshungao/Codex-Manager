@@ -86,6 +86,110 @@ fn chat_completions_uses_reasoning_effort_and_drops_non_official_keys() {
 }
 
 #[test]
+fn chat_completions_accepts_responses_style_payload() {
+    let body = json!({
+        "model": "gpt-4.1",
+        "instructions": "act as reviewer",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    { "type": "input_text", "text": "hello" }
+                ]
+            }
+        ],
+        "reasoning": { "effort": "high" },
+        "stream": true
+    });
+    let out = apply_request_overrides(
+        "/v1/chat/completions",
+        serde_json::to_vec(&body).expect("serialize request body"),
+        None,
+        None,
+        None,
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+    assert!(value.get("instructions").is_none());
+    assert!(value.get("input").is_none());
+    assert_eq!(
+        value
+            .get("messages")
+            .and_then(|v| v.get(0))
+            .and_then(|v| v.get("role"))
+            .and_then(serde_json::Value::as_str),
+        Some("system")
+    );
+    assert_eq!(
+        value
+            .get("messages")
+            .and_then(|v| v.get(1))
+            .and_then(|v| v.get("content"))
+            .and_then(serde_json::Value::as_str),
+        Some("hello")
+    );
+    assert_eq!(
+        value
+            .get("reasoning_effort")
+            .and_then(serde_json::Value::as_str),
+        Some("high")
+    );
+    assert_eq!(
+        value
+            .get("stream_options")
+            .and_then(|v| v.get("include_usage"))
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn chat_completions_normalizes_responses_function_tools() {
+    let body = json!({
+        "model": "gpt-4.1",
+        "input": "ping",
+        "tools": [
+            {
+                "type": "function",
+                "name": "ping",
+                "description": "ping tool",
+                "parameters": { "type": "object", "properties": {} },
+                "strict": true
+            }
+        ],
+        "tool_choice": {
+            "type": "function",
+            "name": "ping"
+        }
+    });
+    let out = apply_request_overrides(
+        "/v1/chat/completions",
+        serde_json::to_vec(&body).expect("serialize request body"),
+        None,
+        None,
+        None,
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+    assert_eq!(
+        value
+            .get("tools")
+            .and_then(|v| v.get(0))
+            .and_then(|v| v.get("function"))
+            .and_then(|v| v.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("ping")
+    );
+    assert_eq!(
+        value
+            .get("tool_choice")
+            .and_then(|v| v.get("function"))
+            .and_then(|v| v.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("ping")
+    );
+}
+
+#[test]
 fn responses_overrides_model_and_reasoning_effort() {
     let body = json!({
         "model": "gpt-5.3-codex",
@@ -112,7 +216,9 @@ fn responses_overrides_model_and_reasoning_effort() {
         Some("medium")
     );
     assert_eq!(
-        value.get("instructions").and_then(serde_json::Value::as_str),
+        value
+            .get("instructions")
+            .and_then(serde_json::Value::as_str),
         Some("")
     );
 }
@@ -165,6 +271,34 @@ fn responses_stream_and_store_are_forced_for_codex_backend() {
         value.get("store").and_then(serde_json::Value::as_bool),
         Some(false)
     );
+}
+
+#[test]
+fn responses_stream_passthrough_keeps_client_stream_flag_when_enabled() {
+    let body = json!({
+        "model": "gpt-5.3-codex",
+        "input": "hello",
+        "stream": false,
+        "stream_passthrough": true,
+        "store": true
+    });
+    let out = apply_request_overrides(
+        "/v1/responses",
+        serde_json::to_vec(&body).expect("serialize request body"),
+        None,
+        None,
+        Some("https://chatgpt.com/backend-api/codex"),
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+    assert_eq!(
+        value.get("stream").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value.get("store").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert!(value.get("stream_passthrough").is_none());
 }
 
 #[test]

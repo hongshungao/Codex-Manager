@@ -1,6 +1,6 @@
 use codexmanager_core::auth::{
-    extract_chatgpt_account_id, extract_workspace_id, parse_id_token_claims,
-    DEFAULT_CLIENT_ID, DEFAULT_ISSUER,
+    extract_chatgpt_account_id, extract_workspace_id, parse_id_token_claims, DEFAULT_CLIENT_ID,
+    DEFAULT_ISSUER,
 };
 use codexmanager_core::storage::{now_ts, Account, Token};
 use reqwest::blocking::Client;
@@ -173,9 +173,10 @@ fn pick_existing_account_id_by_identity(
             .map(|acc| acc.id.clone());
     }
     if let Some(workspace) = preferred_workspace.as_ref() {
-        if let Some(found) = accounts.iter().find(|acc| {
-            same_normalized(acc.workspace_id.as_deref(), Some(workspace.as_str()))
-        }) {
+        if let Some(found) = accounts
+            .iter()
+            .find(|acc| same_normalized(acc.workspace_id.as_deref(), Some(workspace.as_str())))
+        {
             return Some(found.id.clone());
         }
         return None;
@@ -222,7 +223,8 @@ pub(crate) fn complete_login_with_redirect(
         .ok_or_else(|| "unknown login session".to_string())?;
 
     // 读取 OAuth 配置
-    let issuer = std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
+    let issuer =
+        std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
     let client_id =
         std::env::var("CODEXMANAGER_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string());
     let redirect_uri = redirect_uri
@@ -252,7 +254,10 @@ pub(crate) fn complete_login_with_redirect(
 
     // 生成账户记录
     let subject_account_id = claims.sub.clone();
-    let label = claims.email.clone().unwrap_or_else(|| subject_account_id.clone());
+    let label = claims
+        .email
+        .clone()
+        .unwrap_or_else(|| subject_account_id.clone());
     let chatgpt_account_id = clean_value(
         claims
             .auth
@@ -308,7 +313,9 @@ pub(crate) fn complete_login_with_redirect(
         created_at,
         updated_at: now,
     };
-    storage.insert_account(&account).map_err(|e| e.to_string())?;
+    storage
+        .insert_account(&account)
+        .map_err(|e| e.to_string())?;
 
     // 写入 token
     let token = Token {
@@ -361,7 +368,11 @@ fn exchange_code_for_tokens(
     read_json_with_timeout(resp, OPENAI_AUTH_READ_TIMEOUT)
 }
 
-pub(crate) fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> Result<String, String> {
+pub(crate) fn obtain_api_key(
+    issuer: &str,
+    client_id: &str,
+    id_token: &str,
+) -> Result<String, String> {
     #[derive(serde::Deserialize)]
     struct ExchangeResp {
         access_token: String,
@@ -397,4 +408,3 @@ pub(crate) fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> R
 #[cfg(test)]
 #[path = "tests/auth_tokens_tests.rs"]
 mod tests;
-

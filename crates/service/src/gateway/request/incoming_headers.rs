@@ -120,4 +120,3 @@ fn case_insensitive_bearer_token(value: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "tests/incoming_headers_tests.rs"]
 mod tests;
-

@@ -33,7 +33,11 @@ where
         // 中文注释：模型/路径 404 在多账号场景下通常是“该账号不可用”，
         // 优先切换候选账号，最后一个候选再透传原始 404 给客户端。
         super::super::mark_account_cooldown_for_status(account_id, status.as_u16());
-        log_gateway_result(Some(url), status.as_u16(), Some("upstream not-found failover"));
+        log_gateway_result(
+            Some(url),
+            status.as_u16(),
+            Some("upstream not-found failover"),
+        );
         return UpstreamOutcomeDecision::Failover;
     }
     if status.as_u16() == 429 {
@@ -44,10 +48,15 @@ where
         return UpstreamOutcomeDecision::RespondUpstream;
     }
 
-    let is_challenge = super::super::is_upstream_challenge_response(status.as_u16(), upstream_content_type);
+    let is_challenge =
+        super::super::is_upstream_challenge_response(status.as_u16(), upstream_content_type);
     if is_challenge {
         super::super::mark_account_cooldown(account_id, super::super::CooldownReason::Challenge);
-        log_gateway_result(Some(url), status.as_u16(), Some("upstream challenge blocked"));
+        log_gateway_result(
+            Some(url),
+            status.as_u16(),
+            Some("upstream challenge blocked"),
+        );
         if has_more_candidates {
             return UpstreamOutcomeDecision::Failover;
         }
@@ -73,4 +82,3 @@ where
 #[cfg(test)]
 #[path = "tests/outcome_tests.rs"]
 mod tests;
-
