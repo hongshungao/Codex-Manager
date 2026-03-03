@@ -22,11 +22,44 @@ export function bindModalActionEvents({
   refreshApiModelsNow,
   populateApiKeyModelSelect,
   importAccountsFromFiles,
+  deleteUnavailableFreeAccounts,
+  exportAccountsByFile,
 }) {
   if (modalActionEventsBound) {
     return;
   }
   modalActionEventsBound = true;
+
+  const setAccountOpsMenuOpen = (open) => {
+    if (!dom.accountOpsMenu || !dom.accountOpsToggle) return;
+    const nextOpen = Boolean(open);
+    dom.accountOpsMenu.hidden = !nextOpen;
+    dom.accountOpsToggle.setAttribute("aria-expanded", nextOpen ? "true" : "false");
+    dom.accountOps?.classList?.toggle("is-open", nextOpen);
+  };
+
+  const closeAccountOpsMenu = () => {
+    setAccountOpsMenuOpen(false);
+  };
+
+  if (dom.accountOpsToggle && dom.accountOpsMenu) {
+    dom.accountOpsToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const shouldOpen = dom.accountOpsMenu.hidden;
+      setAccountOpsMenuOpen(shouldOpen);
+    });
+    document.addEventListener("click", (event) => {
+      const target = event?.target;
+      if (!dom.accountOps || !(target instanceof Node) || !dom.accountOps.contains(target)) {
+        closeAccountOpsMenu();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeAccountOpsMenu();
+      }
+    });
+  }
 
   if (dom.addAccountBtn) dom.addAccountBtn.addEventListener("click", openAccountModal);
   if (dom.importAccountsBtn && dom.importAccountsInput) {
@@ -39,6 +72,29 @@ export function bindModalActionEvents({
       event.target.value = "";
     });
   }
+  if (dom.removeUnavailableFreeBtn) {
+    dom.removeUnavailableFreeBtn.addEventListener("click", () => {
+      void deleteUnavailableFreeAccounts?.();
+    });
+  }
+  if (dom.exportAccountsBtn) {
+    dom.exportAccountsBtn.addEventListener("click", () => {
+      void exportAccountsByFile?.();
+    });
+  }
+
+  const closeAccountOpsButtons = [
+    dom.addAccountBtn,
+    dom.importAccountsBtn,
+    dom.removeUnavailableFreeBtn,
+    dom.exportAccountsBtn,
+    dom.refreshAll,
+  ];
+  for (const btn of closeAccountOpsButtons) {
+    if (!btn) continue;
+    btn.addEventListener("click", closeAccountOpsMenu);
+  }
+
   if (dom.refreshApiModelsBtn) {
     dom.refreshApiModelsBtn.addEventListener("click", () => {
       void refreshApiModelsNow?.();

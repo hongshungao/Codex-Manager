@@ -1,7 +1,8 @@
 use codexmanager_core::rpc::types::{AccountListResult, JsonRpcRequest, JsonRpcResponse};
 
 use crate::{
-    account_delete, account_import, account_list, account_update, auth_login, auth_tokens,
+    account_cleanup, account_delete, account_export, account_import, account_list, account_update,
+    auth_login, auth_tokens,
 };
 
 pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
@@ -12,6 +13,9 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
         "account/delete" => {
             let account_id = super::str_param(req, "accountId").unwrap_or("");
             super::ok_or_error(account_delete::delete_account(account_id))
+        }
+        "account/deleteUnavailableFree" => {
+            super::value_or_error(account_cleanup::delete_unavailable_free_accounts())
         }
         "account/update" => {
             let account_id = super::str_param(req, "accountId").unwrap_or("");
@@ -38,6 +42,10 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                 }
             }
             super::value_or_error(account_import::import_account_auth_json(contents))
+        }
+        "account/export" => {
+            let output_dir = super::str_param(req, "outputDir").unwrap_or("");
+            super::value_or_error(account_export::export_accounts_to_directory(output_dir))
         }
         "account/login/start" => {
             let login_type = super::str_param(req, "type").unwrap_or("chatgpt");

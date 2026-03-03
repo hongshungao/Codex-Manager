@@ -413,13 +413,44 @@ fn import_single_item(
 }
 
 fn extract_token_payload(item: &Value) -> Result<ImportTokenPayload, String> {
-    let tokens = item
-        .get("tokens")
-        .ok_or_else(|| "missing field: tokens".to_string())?;
-    let access_token = required_string(tokens, "access_token")?;
-    let id_token = required_string(tokens, "id_token")?;
-    let refresh_token = required_string(tokens, "refresh_token")?;
-    let account_id_hint = optional_string(tokens, "account_id");
+    let tokens = item.get("tokens").unwrap_or(item);
+    let access_token = required_string_any(
+        &[
+            (tokens, "access_token"),
+            (tokens, "accessToken"),
+            (item, "access_token"),
+            (item, "accessToken"),
+        ],
+        "access_token/accessToken",
+    )?;
+    let id_token = required_string_any(
+        &[
+            (tokens, "id_token"),
+            (tokens, "idToken"),
+            (item, "id_token"),
+            (item, "idToken"),
+        ],
+        "id_token/idToken",
+    )?;
+    let refresh_token = required_string_any(
+        &[
+            (tokens, "refresh_token"),
+            (tokens, "refreshToken"),
+            (item, "refresh_token"),
+            (item, "refreshToken"),
+        ],
+        "refresh_token/refreshToken",
+    )?;
+    let account_id_hint = optional_string_any(&[
+        (tokens, "account_id"),
+        (tokens, "accountId"),
+        (tokens, "chatgpt_account_id"),
+        (tokens, "chatgptAccountId"),
+        (item, "account_id"),
+        (item, "accountId"),
+        (item, "chatgpt_account_id"),
+        (item, "chatgptAccountId"),
+    ]);
     Ok(ImportTokenPayload {
         access_token,
         id_token,
@@ -537,6 +568,15 @@ fn required_string(value: &Value, key: &str) -> Result<String, String> {
     Ok(out.to_string())
 }
 
+fn required_string_any(candidates: &[(&Value, &str)], label: &str) -> Result<String, String> {
+    for (value, key) in candidates {
+        if let Ok(found) = required_string(value, key) {
+            return Ok(found);
+        }
+    }
+    Err(format!("missing field: {label}"))
+}
+
 fn optional_string(value: &Value, key: &str) -> Option<String> {
     value
         .get(key)
@@ -544,6 +584,15 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
+}
+
+fn optional_string_any(candidates: &[(&Value, &str)]) -> Option<String> {
+    for (value, key) in candidates {
+        if let Some(found) = optional_string(value, key) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

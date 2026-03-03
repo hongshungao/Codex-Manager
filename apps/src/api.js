@@ -289,6 +289,13 @@ export async function serviceAccountDelete(accountId) {
   return invoke("service_account_delete", withAddr({ accountId }));
 }
 
+export async function serviceAccountDeleteUnavailableFree() {
+  if (!isTauriRuntime()) {
+    return rpcInvoke("account/deleteUnavailableFree");
+  }
+  return invoke("service_account_delete_unavailable_free", withAddr());
+}
+
 export async function serviceAccountUpdate(accountId, sort) {
   if (!isTauriRuntime()) {
     return rpcInvoke("account/update", { accountId, sort });
@@ -301,6 +308,13 @@ export async function serviceAccountImport(contents) {
     return rpcInvoke("account/import", { contents });
   }
   return invoke("service_account_import", withAddr({ contents }));
+}
+
+export async function serviceAccountExportByAccountFiles() {
+  if (!isTauriRuntime()) {
+    throw new Error("浏览器模式暂不支持目录导出，请使用桌面端");
+  }
+  return invoke("service_account_export_by_account_files", withAddr());
 }
 
 export async function localAccountDelete(accountId) {

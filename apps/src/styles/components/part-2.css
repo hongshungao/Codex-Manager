@@ -367,12 +367,57 @@
 }
 
 #pageAccounts .actions {
+  position: relative;
+  justify-content: flex-end;
   align-items: center;
   flex-wrap: nowrap;
 }
 
-#refreshAll {
-  min-width: 104px;
+.account-ops {
+  position: relative;
+}
+
+.account-ops-toggle {
+  min-width: 108px;
+}
+
+.account-ops-toggle::after {
+  content: "▾";
+  margin-left: 8px;
+  font-size: 11px;
+  transition: transform 0.18s ease;
+}
+
+.account-ops.is-open .account-ops-toggle::after {
+  transform: rotate(180deg);
+}
+
+.account-ops-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  z-index: 25;
+}
+
+.account-ops-menu[hidden] {
+  display: none;
+}
+
+.account-ops-menu button {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  text-align: left;
+  box-shadow: none;
 }
 
 /* 各页面主操作按钮统一为紧凑尺寸，避免视觉不一致。 */

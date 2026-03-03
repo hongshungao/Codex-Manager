@@ -1,14 +1,15 @@
 use codexmanager_core::rpc::types::JsonRpcRequest;
 use codexmanager_core::storage::Storage;
+use rfd::FileDialog;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::thread;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
-use std::thread;
 
 mod updater;
 
@@ -91,6 +92,13 @@ async fn service_account_delete(
 }
 
 #[tauri::command]
+async fn service_account_delete_unavailable_free(
+  addr: Option<String>,
+) -> Result<serde_json::Value, String> {
+  rpc_call_in_background("account/deleteUnavailableFree", addr, None).await
+}
+
+#[tauri::command]
 async fn service_account_update(
   addr: Option<String>,
   account_id: String,
@@ -114,6 +122,31 @@ async fn service_account_import(
   }
   let params = serde_json::json!({ "contents": payload_contents });
   rpc_call_in_background("account/import", addr, Some(params)).await
+}
+
+#[tauri::command]
+async fn service_account_export_by_account_files(
+  addr: Option<String>,
+) -> Result<serde_json::Value, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let selected_dir = FileDialog::new()
+      .set_title("选择账号导出目录")
+      .pick_folder();
+    let Some(dir_path) = selected_dir else {
+      return Ok(serde_json::json!({
+        "result": {
+          "ok": true,
+          "canceled": true
+        }
+      }));
+    };
+    let params = serde_json::json!({
+      "outputDir": dir_path.to_string_lossy().to_string()
+    });
+    rpc_call("account/export", addr, Some(params))
+  })
+  .await
+  .map_err(|err| format!("service_account_export_by_account_files task failed: {err}"))?
 }
 
 #[tauri::command]
@@ -460,8 +493,10 @@ pub fn run() {
       service_initialize,
       service_account_list,
       service_account_delete,
+      service_account_delete_unavailable_free,
       service_account_update,
       service_account_import,
+      service_account_export_by_account_files,
       local_account_delete,
       service_usage_read,
       service_usage_list,

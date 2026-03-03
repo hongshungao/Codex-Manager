@@ -1,5 +1,6 @@
-use super::{resolve_logical_account_id, ExistingAccountIndex, ImportTokenPayload};
+use super::{extract_token_payload, resolve_logical_account_id, ExistingAccountIndex, ImportTokenPayload};
 use codexmanager_core::storage::{now_ts, Account, Storage};
+use serde_json::json;
 
 fn payload() -> ImportTokenPayload {
     ImportTokenPayload {
@@ -92,4 +93,40 @@ fn existing_account_index_next_sort_uses_step_five() {
 
     let idx = ExistingAccountIndex::build(&storage).expect("build index");
     assert_eq!(idx.next_sort, 14);
+}
+
+#[test]
+fn extract_token_payload_supports_flat_codex_format() {
+    let value = json!({
+        "type": "codex",
+        "email": "u@example.com",
+        "id_token": "id.flat",
+        "account_id": "acc-flat",
+        "access_token": "access.flat",
+        "refresh_token": "refresh.flat"
+    });
+
+    let payload = extract_token_payload(&value).expect("parse flat payload");
+    assert_eq!(payload.access_token, "access.flat");
+    assert_eq!(payload.id_token, "id.flat");
+    assert_eq!(payload.refresh_token, "refresh.flat");
+    assert_eq!(payload.account_id_hint.as_deref(), Some("acc-flat"));
+}
+
+#[test]
+fn extract_token_payload_supports_camel_case_fields() {
+    let value = json!({
+        "tokens": {
+            "idToken": "id.camel",
+            "accessToken": "access.camel",
+            "refreshToken": "refresh.camel",
+            "accountId": "acc-camel"
+        }
+    });
+
+    let payload = extract_token_payload(&value).expect("parse camel payload");
+    assert_eq!(payload.access_token, "access.camel");
+    assert_eq!(payload.id_token, "id.camel");
+    assert_eq!(payload.refresh_token, "refresh.camel");
+    assert_eq!(payload.account_id_hint.as_deref(), Some("acc-camel"));
 }

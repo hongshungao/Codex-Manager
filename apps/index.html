@@ -162,12 +162,56 @@
                             </div>
                         </div>
                         <div class="actions">
-                            <button id="addAccount" class="ghost">
-                                添加账号
-                            </button>
-                            <button id="importAccounts" class="secondary">
-                                导入账号
-                            </button>
+                            <div id="accountOps" class="account-ops">
+                                <button
+                                    id="accountOpsToggle"
+                                    class="secondary account-ops-toggle"
+                                    type="button"
+                                    aria-haspopup="true"
+                                    aria-expanded="false"
+                                    aria-controls="accountOpsMenu"
+                                >
+                                    账号操作
+                                </button>
+                                <div
+                                    id="accountOpsMenu"
+                                    class="account-ops-menu"
+                                    hidden
+                                >
+                                    <button
+                                        id="addAccount"
+                                        class="ghost"
+                                        type="button"
+                                    >
+                                        添加账号
+                                    </button>
+                                    <button
+                                        id="importAccounts"
+                                        class="secondary"
+                                        type="button"
+                                    >
+                                        导入账号
+                                    </button>
+
+                                    <button id="refreshAll" type="button">
+                                        刷新所有
+                                    </button>
+                                    <button
+                                        id="removeUnavailableFree"
+                                        class="danger"
+                                        type="button"
+                                    >
+                                        一键移除不可用Free
+                                    </button>
+                                    <button
+                                        id="exportAccounts"
+                                        class="secondary"
+                                        type="button"
+                                    >
+                                        导出用户
+                                    </button>
+                                </div>
+                            </div>
                             <input
                                 id="importAccountsInput"
                                 type="file"
@@ -175,7 +219,6 @@
                                 multiple
                                 hidden
                             />
-                            <button id="refreshAll">刷新所有</button>
                         </div>
                     </div>
 

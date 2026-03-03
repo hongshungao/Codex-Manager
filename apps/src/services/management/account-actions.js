@@ -166,6 +166,57 @@ export function createAccountActions({
     });
   }
 
+  async function deleteUnavailableFreeAccounts() {
+    const confirmed = await showConfirmDialog({
+      title: "一键移除不可用 Free 账号",
+      message: "将删除当前不可用且识别为 Free 计划的账号，此操作不可恢复。是否继续？",
+      confirmText: "立即移除",
+      cancelText: "取消",
+    });
+    if (!confirmed) return;
+
+    await enqueueAccountOp(async () => {
+      const ok = await ensureConnected();
+      if (!ok) return;
+      const result = await api.serviceAccountDeleteUnavailableFree();
+      const scanned = Number(result?.scanned || 0);
+      const deleted = Number(result?.deleted || 0);
+      const skippedAvailable = Number(result?.skippedAvailable || 0);
+      const skippedNonFree = Number(result?.skippedNonFree || 0);
+      const skippedMissingUsage = Number(result?.skippedMissingUsage || 0);
+      const skippedMissingToken = Number(result?.skippedMissingToken || 0);
+
+      await refreshAccountsSection();
+
+      if (deleted > 0) {
+        showToast(
+          `已移除 ${deleted} 个不可用 Free 账号（扫描${scanned}，可用跳过${skippedAvailable}，非Free跳过${skippedNonFree}）`,
+        );
+        return;
+      }
+      showToast(
+        `未移除账号（扫描${scanned}，可用${skippedAvailable}，非Free${skippedNonFree}，缺用量${skippedMissingUsage}，缺Token${skippedMissingToken}）`,
+      );
+    });
+  }
+
+  async function exportAccountsByFile() {
+    await enqueueAccountOp(async () => {
+      const ok = await ensureConnected();
+      if (!ok) return;
+      const result = await api.serviceAccountExportByAccountFiles();
+      if (result?.canceled) {
+        showToast("已取消导出");
+        return;
+      }
+      const exported = Number(result?.exported || 0);
+      const skippedMissingToken = Number(result?.skippedMissingToken || 0);
+      const outputDir = String(result?.outputDir || "").trim();
+      const outputHint = outputDir ? `，目录：${outputDir}` : "";
+      showToast(`导出完成：${exported} 个账号${skippedMissingToken > 0 ? `，跳过${skippedMissingToken}个` : ""}${outputHint}`);
+    });
+  }
+
   async function importAccountsFromFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
@@ -233,5 +284,12 @@ export function createAccountActions({
     });
   }
 
-  return { updateAccountSort, deleteAccount, importAccountsFromFiles, setManualPreferredAccount };
+  return {
+    updateAccountSort,
+    deleteAccount,
+    importAccountsFromFiles,
+    setManualPreferredAccount,
+    deleteUnavailableFreeAccounts,
+    exportAccountsByFile,
+  };
 }

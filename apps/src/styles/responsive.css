@@ -137,6 +137,14 @@
 
   #pageAccounts .actions {
     flex-wrap: wrap;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .account-ops-menu {
+    left: 0;
+    right: auto;
+    width: min(280px, calc(100vw - 56px));
   }
 
   .toolbar-left {
