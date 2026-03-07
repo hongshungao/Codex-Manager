@@ -5,6 +5,8 @@ import "./styles/responsive.css";
 import "./styles/performance.css";
 
 import {
+  appLightweightModeOnCloseToTrayGet,
+  appLightweightModeOnCloseToTraySet,
   appSettingsGet,
   appSettingsSet,
   serviceGatewayBackgroundTasksSet,
@@ -165,6 +167,7 @@ const BACKGROUND_TASKS_RESTART_KEY_LABELS = {
 const API_MODELS_REMOTE_REFRESH_STORAGE_KEY = "codexmanager.apikey.models.last_remote_refresh_at";
 const API_MODELS_REMOTE_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_DELAY_MS = 1200;
+const LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_STORAGE_KEY = "codexmanager.app.lightweight_mode_on_close_to_tray";
 let refreshAllInFlight = null;
 let refreshAllProgressClearTimer = null;
 let updateCheckInFlight = null;
@@ -327,6 +330,12 @@ function applyBrowserModeUi() {
   if (closeToTrayCard) {
     closeToTrayCard.style.display = "none";
   }
+  const lightweightCard = dom.lightweightModeOnCloseToTray
+    ? dom.lightweightModeOnCloseToTray.closest(".settings-top-item, .settings-card")
+    : null;
+  if (lightweightCard) {
+    lightweightCard.style.display = "none";
+  }
 
   return true;
 }
@@ -395,6 +404,82 @@ function initCloseToTrayOnCloseSetting() {
   if (dom.closeToTrayOnClose) {
     dom.closeToTrayOnClose.disabled = !Boolean(appSettingsSnapshot.closeToTraySupported);
   }
+}
+
+function readLightweightModeOnCloseToTraySetting() {
+  if (typeof localStorage === "undefined") {
+    return false;
+  }
+  const raw = localStorage.getItem(LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_STORAGE_KEY);
+  if (raw == null) {
+    return false;
+  }
+  const normalized = String(raw).trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function saveLightweightModeOnCloseToTraySetting(enabled) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  localStorage.setItem(LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_STORAGE_KEY, enabled ? "1" : "0");
+}
+
+function setLightweightModeOnCloseToTrayToggle(enabled) {
+  if (dom.lightweightModeOnCloseToTray) {
+    dom.lightweightModeOnCloseToTray.checked = Boolean(enabled);
+  }
+}
+
+async function applyLightweightModeOnCloseToTraySetting(enabled, { silent = true } = {}) {
+  const normalized = Boolean(enabled);
+  if (!isTauriRuntime()) {
+    return normalized;
+  }
+  try {
+    const applied = await appLightweightModeOnCloseToTraySet(normalized);
+    if (!silent) {
+      showToast(
+        applied
+          ? "已开启：关闭到托盘时会释放 WebView 内存（再次打开可能更慢）"
+          : "已关闭：托盘隐藏时保留 WebView（再次打开更快）",
+      );
+    }
+    return Boolean(applied);
+  } catch (err) {
+    if (!silent) {
+      showToast(`设置失败：${normalizeErrorMessage(err)}`, "error");
+    }
+    throw err;
+  }
+}
+
+async function initLightweightModeOnCloseToTraySetting() {
+  const hasLocalSetting = typeof localStorage !== "undefined"
+    && localStorage.getItem(LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_STORAGE_KEY) != null;
+  let enabled = readLightweightModeOnCloseToTraySetting();
+  if (!hasLocalSetting) {
+    saveLightweightModeOnCloseToTraySetting(enabled);
+  }
+  if (isTauriRuntime()) {
+    try {
+      const serviceValue = await appLightweightModeOnCloseToTrayGet();
+      if (!hasLocalSetting) {
+        enabled = serviceValue === true;
+      }
+    } catch {
+      // ignore and fallback to local value
+    }
+  }
+  setLightweightModeOnCloseToTrayToggle(enabled);
+  let applied = enabled;
+  try {
+    applied = await applyLightweightModeOnCloseToTraySetting(enabled, { silent: true });
+  } catch {
+    applied = enabled;
+  }
+  saveLightweightModeOnCloseToTraySetting(applied);
+  setLightweightModeOnCloseToTrayToggle(applied);
 }
 
 function readLowTransparencySetting() {
@@ -2254,6 +2339,20 @@ function bindEvents() {
       });
     });
   }
+  if (dom.lightweightModeOnCloseToTray && dom.lightweightModeOnCloseToTray.dataset.bound !== "1") {
+    dom.lightweightModeOnCloseToTray.dataset.bound = "1";
+    dom.lightweightModeOnCloseToTray.addEventListener("change", () => {
+      const previousEnabled = readLightweightModeOnCloseToTraySetting();
+      const enabled = Boolean(dom.lightweightModeOnCloseToTray.checked);
+      void applyLightweightModeOnCloseToTraySetting(enabled, { silent: false }).then((applied) => {
+        saveLightweightModeOnCloseToTraySetting(applied);
+        setLightweightModeOnCloseToTrayToggle(applied);
+      }).catch(() => {
+        saveLightweightModeOnCloseToTraySetting(previousEnabled);
+        setLightweightModeOnCloseToTrayToggle(previousEnabled);
+      });
+    });
+  }
   if (dom.routeStrategySelect && dom.routeStrategySelect.dataset.bound !== "1") {
     dom.routeStrategySelect.dataset.bound = "1";
     dom.routeStrategySelect.addEventListener("change", () => {
@@ -2543,6 +2642,7 @@ async function bootstrap() {
   initLowTransparencySetting();
   initUpdateAutoCheckSetting();
   initCloseToTrayOnCloseSetting();
+  void initLightweightModeOnCloseToTraySetting();
   initServiceListenModeSetting();
   initRouteStrategySetting();
   initCpaNoCookieHeaderModeSetting();

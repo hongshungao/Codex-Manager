@@ -13,6 +13,7 @@ export const dom = {
   autoCheckUpdate: byId("autoCheckUpdate"),
   checkUpdate: byId("checkUpdate"),
   closeToTrayOnClose: byId("closeToTrayOnClose"),
+  lightweightModeOnCloseToTray: byId("lightweightModeOnCloseToTray"),
   updateCurrentVersion: byId("updateCurrentVersion"),
   updateStatusText: byId("updateStatusText"),
   routeStrategySelect: byId("routeStrategySelect"),

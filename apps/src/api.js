@@ -668,6 +668,22 @@ export async function appCloseToTrayOnCloseSet(enabled) {
   return value === true;
 }
 
+export async function appLightweightModeOnCloseToTrayGet() {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  const value = await invoke("app_lightweight_mode_on_close_to_tray_get", {});
+  return value === true;
+}
+
+export async function appLightweightModeOnCloseToTraySet(enabled) {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  const value = await invoke("app_lightweight_mode_on_close_to_tray_set", { enabled: Boolean(enabled) });
+  return value === true;
+}
+
 export async function appSettingsGet() {
   if (!isTauriRuntime()) {
     return rpcInvoke("appSettings/get");
