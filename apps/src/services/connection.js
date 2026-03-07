@@ -11,6 +11,15 @@ export function normalizeAddr(raw) {
     throw new Error("请输入端口或地址");
   }
   let value = trimmed;
+  if (value.startsWith("socks5://")) {
+    return value.replace("socks5://", "socks5h://");
+  }
+  if (value.startsWith("socks://")) {
+    return value.replace("socks://", "socks5h://");
+  }
+  if (value.startsWith("socks5h://")) {
+    return value;
+  }
   if (value.startsWith("http://")) {
     value = value.slice("http://".length);
   }

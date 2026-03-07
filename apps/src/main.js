@@ -766,7 +766,21 @@ function normalizeUpstreamProxyUrl(value) {
   if (value == null) {
     return "";
   }
-  return String(value).trim();
+  let trimmed = String(value).trim();
+  // 清理前端可能引入的双重协议前缀
+  if (trimmed.startsWith("http://socks")) {
+    trimmed = trimmed.slice("http://".length);
+  } else if (trimmed.startsWith("https://socks")) {
+    trimmed = trimmed.slice("https://".length);
+  }
+  // socks5:// / socks:// → socks5h:// 防止 DNS 污染
+  if (trimmed.startsWith("socks5://")) {
+    return trimmed.replace("socks5://", "socks5h://");
+  }
+  if (trimmed.startsWith("socks://")) {
+    return trimmed.replace("socks://", "socks5h://");
+  }
+  return trimmed;
 }
 
 function readUpstreamProxyUrlSetting() {
@@ -1783,13 +1797,13 @@ async function handleRefreshAllClick() {
       return;
     }
     let accounts = Array.isArray(state.accountList) ? state.accountList.filter((item) => item && item.id) : [];
-  if (accounts.length === 0) {
-    try {
-      await refreshAccounts();
-      await refreshAccountsPage({ latestOnly: true }).catch(() => false);
-    } catch (err) {
-      console.error("[refreshUsageOnly] load accounts failed", err);
-    }
+    if (accounts.length === 0) {
+      try {
+        await refreshAccounts();
+        await refreshAccountsPage({ latestOnly: true }).catch(() => false);
+      } catch (err) {
+        console.error("[refreshUsageOnly] load accounts failed", err);
+      }
       accounts = Array.isArray(state.accountList) ? state.accountList.filter((item) => item && item.id) : [];
     }
     const total = accounts.length;

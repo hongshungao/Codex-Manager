@@ -316,7 +316,9 @@ pub(super) fn reload_from_env() {
     let proxy_url = env_non_empty(ENV_UPSTREAM_PROXY_URL);
     let mut cached_proxy_url =
         crate::lock_utils::write_recover(upstream_proxy_url_cell(), "upstream_proxy_url");
-    *cached_proxy_url = proxy_url;
+    let converted_proxy = normalize_upstream_proxy_url(proxy_url.as_deref()).unwrap_or_default();
+
+    *cached_proxy_url = converted_proxy;
     drop(cached_proxy_url);
 
     refresh_upstream_clients_from_runtime_config();
@@ -434,12 +436,23 @@ fn env_bool_or(name: &str, default: bool) -> bool {
 }
 
 fn normalize_upstream_proxy_url(proxy_url: Option<&str>) -> Result<Option<String>, String> {
-    let normalized = proxy_url
+    let mut normalized = proxy_url
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    if let Some(value) = normalized.as_deref() {
-        Proxy::all(value).map_err(|err| format!("invalid proxy url: {err}"))?;
+    if let Some(value) = normalized.as_mut() {
+        // 清理前端可能引入的双重协议前缀
+        if let Some(rest) = value.strip_prefix("http://socks") {
+            *value = format!("socks{rest}");
+        } else if let Some(rest) = value.strip_prefix("https://socks") {
+            *value = format!("socks{rest}");
+        }
+        if value.starts_with("socks5://") {
+            *value = value.replacen("socks5://", "socks5h://", 1);
+        } else if value.starts_with("socks://") {
+            *value = value.replacen("socks://", "socks5h://", 1);
+        }
+        Proxy::all(value.as_str()).map_err(|err| format!("invalid proxy url: {err}"))?;
     }
     Ok(normalized)
 }
@@ -453,6 +466,14 @@ fn parse_proxy_list_env() -> Vec<String> {
         .filter(|part| !part.is_empty())
         .take(MAX_UPSTREAM_PROXY_POOL_SIZE)
         .map(str::to_string)
+        .map(|mut proxy| {
+            if proxy.starts_with("socks5://") {
+                proxy = proxy.replacen("socks5://", "socks5h://", 1);
+            } else if proxy.starts_with("socks://") {
+                proxy = proxy.replacen("socks://", "socks5h://", 1);
+            }
+            proxy
+        })
         .collect()
 }
 
