@@ -86,19 +86,19 @@ pub(crate) fn setup_tray(app: &tauri::AppHandle) -> Result<(), tauri::Error> {
 fn build_tray_menu(app: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let show_main = MenuItem::with_id(app, TRAY_MENU_SHOW_MAIN, "显示主窗口", true, None::<&str>)?;
     let summary = codexmanager_service::read_tray_usage_reset_summary();
-    let (primary_label, secondary_label) =
-        tray_usage_reset_labels(summary.primary_resets_at, summary.secondary_resets_at);
+    let (five_hour_label, seven_day_label) =
+        tray_usage_reset_labels(summary.five_hour_resets_at, summary.seven_day_resets_at);
     let primary = MenuItem::with_id(
         app,
         TRAY_MENU_PRIMARY_RESET,
-        primary_label,
+        five_hour_label,
         false,
         None::<&str>,
     )?;
     let secondary = MenuItem::with_id(
         app,
         TRAY_MENU_SECONDARY_RESET,
-        secondary_label,
+        seven_day_label,
         false,
         None::<&str>,
     )?;
@@ -151,12 +151,12 @@ pub(crate) fn refresh_tray_menu_after_usage_update(app: &tauri::AppHandle) {
 }
 
 fn tray_usage_reset_labels(
-    primary_resets_at: Option<i64>,
-    secondary_resets_at: Option<i64>,
+    five_hour_resets_at: Option<i64>,
+    seven_day_resets_at: Option<i64>,
 ) -> (String, String) {
     (
-        format!("5小时重置：{}", format_tray_reset_time(secondary_resets_at)),
-        format!("7天重置：{}", format_tray_reset_time(primary_resets_at)),
+        format!("5小时重置：{}", format_tray_reset_time(five_hour_resets_at)),
+        format!("7天重置：{}", format_tray_reset_time(seven_day_resets_at)),
     )
 }
 
@@ -241,23 +241,23 @@ mod tests {
         assert_eq!(stale_labels.0, "5小时重置：暂无");
         assert_eq!(stale_labels.1, "7天重置：暂无");
 
-        let primary_resets_at = 1_700_000_000;
-        let secondary_resets_at = 1_700_604_800;
+        let five_hour_resets_at = 1_700_000_000;
+        let seven_day_resets_at = 1_700_604_800;
         let updated_labels =
-            tray_usage_reset_labels(Some(primary_resets_at), Some(secondary_resets_at));
+            tray_usage_reset_labels(Some(five_hour_resets_at), Some(seven_day_resets_at));
         assert_ne!(updated_labels, stale_labels);
         assert_eq!(
             updated_labels.0,
             format!(
                 "5小时重置：{}",
-                format_tray_reset_time(Some(primary_resets_at))
+                format_tray_reset_time(Some(five_hour_resets_at))
             )
         );
         assert_eq!(
             updated_labels.1,
             format!(
                 "7天重置：{}",
-                format_tray_reset_time(Some(secondary_resets_at))
+                format_tray_reset_time(Some(seven_day_resets_at))
             )
         );
     }
