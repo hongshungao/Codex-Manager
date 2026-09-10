@@ -325,7 +325,7 @@ export function AccountResetCreditControl({
             ) : null}
           </div>
 
-          <DialogFooter className="border-t border-border/60 bg-background/35 px-6 py-4 sm:justify-between">
+          <DialogFooter className="mx-0 mb-0 border-t border-border/60 bg-background/35 px-6 py-4 sm:justify-between">
             <Button
               type="button"
               variant="ghost"
