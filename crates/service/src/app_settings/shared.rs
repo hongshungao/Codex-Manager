@@ -11,6 +11,8 @@ pub const APP_SETTING_UI_CODEX_CLI_GUIDE_DISMISSED_KEY: &str = "ui.codex_cli_gui
 pub const APP_SETTING_UI_THEME_KEY: &str = "ui.theme";
 pub const APP_SETTING_UI_APPEARANCE_PRESET_KEY: &str = "ui.appearance_preset";
 pub const APP_SETTING_UI_LOCALE_KEY: &str = "ui.locale";
+pub const APP_SETTING_CODEX_PROFILE_REMOVE_REQUIRES_OPENAI_AUTH_KEY: &str =
+    "codex_profile.remove_requires_openai_auth";
 pub const APP_SETTING_SERVICE_ADDR_KEY: &str = "app.service_addr";
 pub const APP_SETTING_AUTHOR_SPONSORS_KEY: &str = "author.sponsors";
 pub const APP_SETTING_AUTHOR_SERVER_RECOMMENDATIONS_KEY: &str = "author.server_recommendations";

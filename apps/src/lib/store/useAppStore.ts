@@ -65,6 +65,7 @@ export const useAppStore = create<AppState>((set) => ({
   },
   appSettings: {
     updateAutoCheck: true,
+    removeRequiresOpenaiAuth: false,
     autoStartEnabled: false,
     autoStartSupported: false,
     showMainWindowOnStartup: true,

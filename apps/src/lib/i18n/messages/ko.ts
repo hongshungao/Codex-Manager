@@ -198,6 +198,9 @@ export const KO_MESSAGES: MessageCatalog = {
     "CodexManager는 Codex CLI 계정, 로컬 게이트웨이, 플랫폼 키, 요청 로그, 사용량 통계를 통합 관리하여 Codex 연결과 운영을 더 집중적이고 제어 가능하게 합니다.",
   基础设置: "기본 설정",
   自动检查更新: "자동 업데이트 확인",
+  "移除 requires_openai_auth": "requires_openai_auth 제거",
+  "开启后，在切换到 CodexManager 网关或同步配置时移除 requires_openai_auth；关闭时保留现有配置，默认关闭":
+    "켜면 CodexManager 게이트웨이로 전환하거나 프로필을 동기화할 때 requires_openai_auth를 제거하고, 끄면 기존 설정을 유지합니다. 기본값은 꺼짐입니다.",
   "启动完成后在后台检查更新，并每 7 小时检查一次":
     "시작이 완료되면 백그라운드에서 업데이트를 확인하고 이후 7시간마다 확인합니다.",
   "检测到新版本，是否现在更新？":

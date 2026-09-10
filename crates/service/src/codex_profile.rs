@@ -425,6 +425,7 @@ pub(crate) fn apply_gateway(
         &paths.gateway_model_catalog_path,
         supports_websockets,
         &secret,
+        remove_requires_openai_auth_enabled(),
     )?;
     write_profile_files(
         &profile_dir,
@@ -1931,6 +1932,14 @@ fn expand_home_prefix(input: &str) -> PathBuf {
     PathBuf::from(input)
 }
 
+fn remove_requires_openai_auth_enabled() -> bool {
+    crate::app_settings::get_persisted_app_setting(
+        crate::app_settings::APP_SETTING_CODEX_PROFILE_REMOVE_REQUIRES_OPENAI_AUTH_KEY,
+    )
+    .map(|value| crate::app_settings::parse_bool_with_default(&value, false))
+    .unwrap_or(false)
+}
+
 fn profile_key(profile_dir: &Path) -> String {
     profile_dir.to_string_lossy().to_string()
 }
@@ -2041,6 +2050,7 @@ fn patch_config_for_gateway(
     managed_catalog_path: &Path,
     supports_websockets: bool,
     bearer_token: &str,
+    remove_requires_openai_auth: bool,
 ) -> Result<String, String> {
     let mut doc = parse_config(content.as_deref().unwrap_or(""))?;
     doc.as_table_mut()
@@ -2076,8 +2086,11 @@ fn patch_config_for_gateway(
     // Codex only treats actor authorization as an extension capability for custom providers
     // that do not use ambient OpenAI auth. A provider-scoped bearer token works for local and
     // remote CodexManager gateways without coupling the profile to a movable desktop executable.
-    // It is mutually exclusive with command/env/ambient auth, so remove stale values first.
-    provider.remove("requires_openai_auth");
+    // Keep the user's existing requires_openai_auth value unless the opt-in setting asks us to
+    // remove it.
+    if remove_requires_openai_auth {
+        provider.remove("requires_openai_auth");
+    }
     set_provider_bearer_auth(provider, bearer_token)?;
     provider.insert("base_url", toml_value(base_url));
     provider.insert("wire_api", toml_value("responses"));
@@ -2162,6 +2175,7 @@ pub(crate) fn sync_active_gateway_profile_from_storage(storage: &Storage) -> Res
         &paths.gateway_model_catalog_path,
         supports_websockets,
         secret,
+        remove_requires_openai_auth_enabled(),
     )?;
     write_atomic(&profile_dir.join(CONFIG_FILE), &config_toml)?;
     if state.supports_websockets != Some(supports_websockets) {

@@ -179,6 +179,7 @@ name = "Other"
         &managed_catalog,
         true,
         "cm-managed-key",
+        true,
     )
     .expect("patch gateway");
 
@@ -220,9 +221,43 @@ name = "Other"
         &managed_catalog,
         false,
         "cm-managed-key",
+        true,
     )
     .expect("disable gateway websocket");
     assert!(without_websocket.contains("supports_websockets = false"));
+}
+
+#[test]
+fn gateway_config_preserves_requires_openai_auth_when_removal_is_disabled() {
+    let input = r#"
+model_provider = "cm"
+
+[model_providers.cm]
+name = "Custom Gateway"
+requires_openai_auth = true
+"#;
+
+    let output = patch_config_for_gateway(
+        Some(input.to_string()),
+        "http://127.0.0.1:48770/v1",
+        Path::new("/tmp/gateway-models.json"),
+        false,
+        "cm-managed-key",
+        false,
+    )
+    .expect("patch gateway without removing auth requirement");
+    let doc = parse_config(&output).expect("parse patched gateway config");
+    let provider = doc
+        .get("model_providers")
+        .and_then(Item::as_table)
+        .and_then(|providers| providers.get(PROVIDER_ID))
+        .and_then(Item::as_table)
+        .expect("managed provider");
+
+    assert_eq!(
+        provider.get("requires_openai_auth").and_then(Item::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
@@ -248,6 +283,7 @@ http_headers = { "x-existing-header" = "keep", "x-openai-actor-authorization" = 
         &managed_catalog,
         true,
         "cm-managed-key",
+        true,
     )
     .expect("patch gateway");
     let doc = parse_config(&output).expect("parse patched gateway config");
@@ -336,6 +372,7 @@ fn invalid_toml_is_rejected() {
         Path::new("/tmp/gateway-models.json"),
         false,
         "cm-managed-key",
+        false,
     )
     .is_err());
 }

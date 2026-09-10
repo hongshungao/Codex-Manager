@@ -15,6 +15,7 @@ import type { AppSettings } from "@/types";
 type GeneralBasicsSnapshot = Pick<
   AppSettings,
   | "updateAutoCheck"
+  | "removeRequiresOpenaiAuth"
   | "autoStartEnabled"
   | "autoStartSupported"
   | "showMainWindowOnStartup"
@@ -140,6 +141,22 @@ export function GeneralBasicsCard({
             disabled={!canSelfUpdate}
             onCheckedChange={(value) =>
               updateSettings.mutate({ updateAutoCheck: value })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label>{t("移除 requires_openai_auth")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "开启后，在切换到 CodexManager 网关或同步配置时移除 requires_openai_auth；关闭时保留现有配置，默认关闭",
+              )}
+            </p>
+          </div>
+          <Switch
+            checked={snapshot.removeRequiresOpenaiAuth}
+            onCheckedChange={(value) =>
+              updateSettings.mutate({ removeRequiresOpenaiAuth: value })
             }
           />
         </div>

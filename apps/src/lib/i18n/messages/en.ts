@@ -184,6 +184,9 @@ export const EN_MESSAGES: MessageCatalog = {
   基础设置: "Basic settings",
   控制应用启动和窗口行为: "Control startup and window behavior.",
   自动检查更新: "Check updates automatically",
+  "移除 requires_openai_auth": "Remove requires_openai_auth",
+  "开启后，在切换到 CodexManager 网关或同步配置时移除 requires_openai_auth；关闭时保留现有配置，默认关闭":
+    "When enabled, remove requires_openai_auth while switching to the CodexManager gateway or syncing the profile; when disabled, keep the existing configuration. Disabled by default.",
   "启动完成后在后台检查更新，并每 7 小时检查一次":
     "Check for updates in the background after startup, then every 7 hours.",
   "检测到新版本，是否现在更新？":

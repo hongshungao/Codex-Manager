@@ -27,8 +27,9 @@ use super::{
     save_persisted_bool_setting, sync_runtime_settings_from_storage,
     APP_SETTING_AUTHOR_SERVER_RECOMMENDATIONS_KEY, APP_SETTING_AUTHOR_SPONSORS_KEY,
     APP_SETTING_AUTO_START_ENABLED_KEY, APP_SETTING_CLOSE_TO_TRAY_ON_CLOSE_KEY,
-    APP_SETTING_ENV_OVERRIDES_KEY, APP_SETTING_GATEWAY_ACCOUNT_MAX_INFLIGHT_KEY,
-    APP_SETTING_GATEWAY_BACKGROUND_TASKS_KEY, APP_SETTING_GATEWAY_COMPACT_MODEL_FORWARD_RULES_KEY,
+    APP_SETTING_CODEX_PROFILE_REMOVE_REQUIRES_OPENAI_AUTH_KEY, APP_SETTING_ENV_OVERRIDES_KEY,
+    APP_SETTING_GATEWAY_ACCOUNT_MAX_INFLIGHT_KEY, APP_SETTING_GATEWAY_BACKGROUND_TASKS_KEY,
+    APP_SETTING_GATEWAY_COMPACT_MODEL_FORWARD_RULES_KEY,
     APP_SETTING_GATEWAY_FREE_ACCOUNT_MAX_MODEL_KEY, APP_SETTING_GATEWAY_MODEL_FORWARD_RULES_KEY,
     APP_SETTING_GATEWAY_ORIGINATOR_KEY, APP_SETTING_GATEWAY_QUOTA_GUARD_KEY,
     APP_SETTING_GATEWAY_RESIDENCY_REQUIREMENT_KEY, APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY,
@@ -163,6 +164,11 @@ fn current_app_settings_value_inner(
     let runtime_time_zone = current_runtime_time_zone_value();
     let update_auto_check = setting_bool(&settings, APP_SETTING_UPDATE_AUTO_CHECK_KEY, true);
     let auto_start_enabled = setting_bool(&settings, APP_SETTING_AUTO_START_ENABLED_KEY, false);
+    let remove_requires_openai_auth = setting_bool(
+        &settings,
+        APP_SETTING_CODEX_PROFILE_REMOVE_REQUIRES_OPENAI_AUTH_KEY,
+        false,
+    );
     let show_main_window_on_startup =
         setting_bool(&settings, APP_SETTING_SHOW_MAIN_WINDOW_ON_STARTUP_KEY, true);
     let persisted_close_to_tray =
@@ -391,6 +397,10 @@ fn current_app_settings_value_inner(
         "webAccessPasswordConfigured": web_access_password_configured(),
     });
     if let Some(object) = result.as_object_mut() {
+        object.insert(
+            "removeRequiresOpenaiAuth".to_string(),
+            remove_requires_openai_auth.into(),
+        );
         object.insert("zoomFactor".to_string(), zoom_factor.into());
         object.insert("gatewayUserAgent".to_string(), gateway_user_agent.into());
         object.insert(

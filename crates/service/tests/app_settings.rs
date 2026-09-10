@@ -397,6 +397,48 @@ fn app_settings_roundtrip_gateway_user_agent_and_validates_header_value() {
 }
 
 #[test]
+fn app_settings_remove_requires_openai_auth_defaults_off_and_persists_updates() {
+    with_temp_db(|db_path| {
+        let defaults = codexmanager_service::app_settings_get().expect("read default settings");
+        assert_eq!(defaults["removeRequiresOpenaiAuth"], false);
+        let storage = Storage::open(db_path).expect("open storage");
+        assert_eq!(
+            storage
+                .get_app_setting(
+                    codexmanager_service::APP_SETTING_CODEX_PROFILE_REMOVE_REQUIRES_OPENAI_AUTH_KEY
+                )
+                .expect("read default persisted setting"),
+            None
+        );
+        drop(storage);
+
+        let enabled = codexmanager_service::app_settings_set(Some(&json!({
+            "removeRequiresOpenaiAuth": true
+        })))
+        .expect("enable requires_openai_auth removal");
+        assert_eq!(enabled["removeRequiresOpenaiAuth"], true);
+
+        let storage = Storage::open(db_path).expect("open storage");
+        assert_eq!(
+            storage
+                .get_app_setting(
+                    codexmanager_service::APP_SETTING_CODEX_PROFILE_REMOVE_REQUIRES_OPENAI_AUTH_KEY
+                )
+                .expect("read persisted setting")
+                .as_deref(),
+            Some("1")
+        );
+        drop(storage);
+
+        let disabled = codexmanager_service::app_settings_set(Some(&json!({
+            "removeRequiresOpenaiAuth": false
+        })))
+        .expect("disable requires_openai_auth removal");
+        assert_eq!(disabled["removeRequiresOpenaiAuth"], false);
+    });
+}
+
+#[test]
 fn app_settings_rejects_password_mode_without_password() {
     with_temp_db(|_| {
         let result = codexmanager_service::app_settings_set(Some(&json!({
